@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 mmd-sync = "mmd_engine.cli.sync:main"
 mmd-auth = "mmd_engine.cli.auth:main"
+mmd-import-csv = "mmd_engine.cli.import_csv:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

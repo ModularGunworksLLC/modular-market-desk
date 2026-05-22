@@ -75,11 +75,147 @@ h1 {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) 1fr;
+  grid-template-columns: minmax(300px, 360px) 1fr;
   gap: 1.25rem;
   padding: 1.25rem 2rem 2rem;
-  max-width: 1400px;
+  max-width: 1500px;
   margin: 0 auto;
+}
+
+.search-panel h2 {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+input[type="text"],
+select {
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.radio {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.preview {
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin: 0.5rem 0 1rem;
+  min-height: 1.2em;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.summary-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat-line {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.insight-card .insight-line {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--good);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem 2rem;
+}
+
+.tabs {
+  padding: 0;
+  overflow: hidden;
+}
+
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding: 0 0.5rem;
+}
+
+.tab {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  border-bottom: 2px solid transparent;
+}
+
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab-panel {
+  display: none;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+.stats-table {
+  margin-top: 1rem;
+}
+
+.trends {
+  margin-bottom: 1rem;
+}
+
+.trend-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 120px;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.trend-bar-wrap {
+  background: var(--bg);
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.trend-bar {
+  background: var(--accent);
+  height: 100%;
+  border-radius: 4px;
+}
+
+.source-status {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+}
+
+.results-panel .meta {
+  margin-top: 0.75rem;
+  padding-left: 0.25rem;
 }
 
 .panel {

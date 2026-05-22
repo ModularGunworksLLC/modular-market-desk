@@ -1,6 +1,6 @@
 {
   "companySiteUrl": "",
   "ledgerUrl": "",
-  "apiUrl": "",
+  "apiUrl": "http://localhost:8000",
   "apiKey": ""
 }

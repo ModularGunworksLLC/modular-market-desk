@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Modular Market Desk · Modular Gunworks LLC</title>
+    <title>Modular Market Desk · Valuation</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <header class="site-header">
       <div class="brand">
         <p class="eyebrow">Modular Gunworks LLC</p>
-        <h1>Modular Market Desk</h1>
-        <p class="tagline">Dealer cost vs market comps for buy / resale research</p>
+        <h1>Single-Item Valuation Desk</h1>
+        <p class="tagline">One firearm · many sources · actionable price intelligence</p>
       </div>
       <nav class="site-nav">
         <a href="#" id="link-company" class="muted">Company site</a>
@@ -20,70 +20,153 @@
     </header>
 
     <main class="layout">
-      <aside class="filters panel">
-        <h2>Search</h2>
+      <aside class="search-panel panel">
+        <h2>Firearm</h2>
+
         <label class="field">
-          <span>Firearm / UPC / keywords</span>
-          <input id="query" type="search" placeholder="e.g. Glock 19, 764503001317" autocomplete="off" />
+          <span>Category</span>
+          <select id="category">
+            <option value="handgun">Handgun</option>
+            <option value="rifle">Rifle</option>
+            <option value="shotgun">Shotgun</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Manufacturer</span>
+          <input id="manufacturer" type="text" placeholder="Sig Sauer" required />
+        </label>
+
+        <label class="field">
+          <span>Model</span>
+          <input id="model" type="text" placeholder="P226" required />
+        </label>
+
+        <label class="field">
+          <span>Variant / sub-model</span>
+          <input id="variant" type="text" placeholder="Legion, Gen5 MOS, X-Five…" />
+        </label>
+
+        <label class="field">
+          <span>Caliber</span>
+          <input id="caliber" type="text" placeholder="9mm" required />
+        </label>
+
+        <label class="field">
+          <span>Condition</span>
+          <select id="condition">
+            <option value="any">Any</option>
+            <option value="new">New</option>
+            <option value="used">Used</option>
+            <option value="lnib">Like new in box</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>UPC (optional)</span>
+          <input id="upc" type="text" placeholder="798681662722" />
         </label>
 
         <fieldset>
-          <legend>Filters</legend>
-          <label class="check">
-            <input id="filter-semi" type="checkbox" />
-            Semi-auto only
+          <legend>What is this search for?</legend>
+          <label class="radio">
+            <input type="radio" name="context" value="auction_sniper" checked />
+            Auction sniper — max bid from sold comps
           </label>
-          <label class="check">
-            <input id="filter-stock" type="checkbox" />
-            In stock only
+          <label class="radio">
+            <input type="radio" name="context" value="vendor_deal" />
+            Vendor deal — is this promo real?
           </label>
-          <label class="check">
-            <input id="filter-sale" type="checkbox" />
-            On sale only
-          </label>
-          <label class="field">
-            <span>Min margin %</span>
-            <input id="filter-margin" type="number" min="0" max="100" step="1" placeholder="0" />
+          <label class="radio">
+            <input type="radio" name="context" value="margin_spotter" />
+            Margin spotter — street vs your cost
           </label>
         </fieldset>
 
-        <label class="check live-toggle live-disabled">
-          <input id="live-lookup" type="checkbox" disabled />
-          Live lookup (runs engine API — set <code>apiUrl</code> in config.json)
+        <label class="field">
+          <span>My cost / offer ($)</span>
+          <input id="my-cost" type="number" min="0" step="0.01" placeholder="Auto from wholesale CSV" />
         </label>
 
-        <button id="search-btn" type="button" class="primary">Search</button>
+        <label class="check">
+          <input id="sample-only" type="checkbox" />
+          Sample data only (offline demo)
+        </label>
+
+        <p id="preview" class="preview"></p>
+        <button id="valuate-btn" type="button" class="primary">Valuate</button>
         <p id="status" class="status" role="status"></p>
       </aside>
 
-      <section class="results panel">
-        <div class="results-header">
-          <h2>Results</h2>
+      <section class="results-panel">
+        <div id="empty-state" class="empty-state panel">
+          <p>Enter a firearm and click <strong>Valuate</strong> to see market spread across sources.</p>
+          <p class="muted">Set <code>apiUrl</code> in <code>public/config.json</code> (e.g. http://localhost:8000).</p>
+        </div>
+
+        <div id="results" class="hidden">
+          <div class="summary-grid">
+            <div class="summary-card panel">
+              <h3>Sold (90d)</h3>
+              <p id="sold-summary" class="stat-line"></p>
+            </div>
+            <div class="summary-card panel">
+              <h3>For sale (asking)</h3>
+              <p id="asking-summary" class="stat-line"></p>
+            </div>
+            <div class="summary-card panel">
+              <h3>Wholesale (CSV)</h3>
+              <p id="wholesale-summary" class="stat-line"></p>
+            </div>
+            <div class="summary-card panel insight-card">
+              <h3>Insight</h3>
+              <p id="insight-headline" class="insight-line"></p>
+              <p id="insight-detail" class="muted"></p>
+            </div>
+          </div>
+
+          <div class="tabs panel">
+            <div class="tab-bar" role="tablist">
+              <button class="tab active" data-tab="summary" type="button">Summary</button>
+              <button class="tab" data-tab="sold" type="button">Sold</button>
+              <button class="tab" data-tab="asking" type="button">For sale</button>
+              <button class="tab" data-tab="wholesale" type="button">Wholesale</button>
+              <button class="tab" data-tab="all" type="button">All sources</button>
+            </div>
+
+            <div id="tab-summary" class="tab-panel active">
+              <div id="trends" class="trends"></div>
+              <table class="stats-table">
+                <thead>
+                  <tr><th>Type</th><th>Count</th><th>Low</th><th>P25</th><th>Median</th><th>P75</th><th>High</th></tr>
+                </thead>
+                <tbody id="stats-body"></tbody>
+              </table>
+              <p id="source-status" class="muted source-status"></p>
+            </div>
+
+            <div id="tab-sold" class="tab-panel">
+              <div class="table-wrap"><table><thead><tr><th>Title</th><th>Price</th><th>Cond</th><th>Source</th><th>Match</th></tr></thead><tbody id="sold-body"></tbody></table></div>
+            </div>
+            <div id="tab-asking" class="tab-panel">
+              <div class="table-wrap"><table><thead><tr><th>Title</th><th>Price</th><th>Cond</th><th>Source</th><th>Link</th></tr></thead><tbody id="asking-body"></tbody></table></div>
+            </div>
+            <div id="tab-wholesale" class="tab-panel">
+              <div class="table-wrap"><table><thead><tr><th>Title</th><th>Cost</th><th>Source</th><th>Match</th></tr></thead><tbody id="wholesale-body"></tbody></table></div>
+              <p class="muted">Import CSV: <code>python -m mmd_engine.cli.import_csv -s lipseys -f your.csv</code></p>
+            </div>
+            <div id="tab-all" class="tab-panel">
+              <div class="table-wrap"><table><thead><tr><th>Title</th><th>Price</th><th>Type</th><th>Source</th><th>Match</th><th>In stats</th></tr></thead><tbody id="all-body"></tbody></table></div>
+            </div>
+          </div>
+
           <p id="meta" class="meta"></p>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th>Caliber</th>
-                <th>Dealer</th>
-                <th>Market</th>
-                <th>Spread</th>
-                <th>Margin</th>
-                <th>Stock</th>
-                <th>Sale</th>
-              </tr>
-            </thead>
-            <tbody id="results-body"></tbody>
-          </table>
-        </div>
-        <p id="empty" class="empty hidden">No matches. Try a broader query or refresh data.</p>
       </section>
     </main>
 
     <footer class="site-footer">
-      <p>Data is for research only — verify stock and pricing before purchasing.</p>
+      <p>Research only — verify stock and pricing before buying. Comps filtered by match score.</p>
     </footer>
 
     <script type="module" src="/src/main.ts"></script>

@@ -1,0 +1,17 @@
+{
+  "source": "wholesaler",
+  "columns": {
+    "sku": ["SKU", "Item", "Item Number", "Item#", "Product ID", "Stock #"],
+    "upc": ["UPC", "Upc", "Barcode", "EAN"],
+    "manufacturer": ["Manufacturer", "Mfg", "Brand", "Make", "Vendor"],
+    "model": ["Model", "Model Name", "Product Name"],
+    "description": ["Description", "Product Description", "Name", "Title"],
+    "caliber": ["Caliber", "Cal", "Gauge", "Cartridge"],
+    "category": ["Category", "Type", "Product Type", "Class"],
+    "action": ["Action", "Action Type"],
+    "dealer_price": ["Price", "Cost", "Dealer Price", "Wholesale", "Net Price", "Unit Price"],
+    "msrp": ["MSRP", "Retail", "List Price", "MAP"],
+    "qty": ["Qty", "Quantity", "In Stock", "Available", "On Hand", "Stock"],
+    "on_sale": ["On Sale", "Sale", "Promo", "Discount"]
+  }
+}

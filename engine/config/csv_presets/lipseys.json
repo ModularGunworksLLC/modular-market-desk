@@ -1,0 +1,17 @@
+{
+  "source": "lipseys",
+  "columns": {
+    "sku": ["Item #", "Item#", "SKU", "Item Number", "Item No", "Item"],
+    "upc": ["UPC", "Upc", "Barcode"],
+    "manufacturer": ["Manufacturer", "Mfg", "Brand", "MFG"],
+    "model": ["Model", "Model Series", "Series"],
+    "description": ["Description", "Item Description", "Product Description", "Title"],
+    "caliber": ["Caliber", "Cal", "Gauge"],
+    "category": ["Item Type", "Gun Type", "Type", "Category"],
+    "action": ["Action"],
+    "dealer_price": ["Price", "Dealer Price", "Wholesale", "Cost", "Dealer Cost", "Net Price"],
+    "msrp": ["MSRP", "Retail", "Retail Price", "List Price"],
+    "qty": ["In Stock", "Qty", "Quantity", "On Hand", "Available", "Inventory"],
+    "on_sale": ["On Sale", "Sale", "Promo", "Promotion", "Special"]
+  }
+}

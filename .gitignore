@@ -17,6 +17,11 @@ engine/*.egg-info/
 !.env.example
 engine/data/sessions/
 engine/data/raw/
+engine/data/valuation_cache/
+engine/data/imports/*.csv
+!engine/data/imports/examples/
+engine/data/inventory/*.json
+!engine/data/inventory/.gitkeep
 
 # OS / IDE
 .DS_Store

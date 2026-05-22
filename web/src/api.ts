@@ -1,26 +1,23 @@
-import type { DataBundle } from "./types";
-import type { SearchFilters } from "./search";
+import type { ValuatePayload, ValuationResult } from "./types";
 
-export async function liveSearch(
+export async function valuate(
   apiUrl: string,
   apiKey: string,
-  filters: SearchFilters
-): Promise<DataBundle> {
+  payload: ValuatePayload
+): Promise<ValuationResult> {
   const base = apiUrl.replace(/\/$/, "");
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (apiKey) headers["X-API-Key"] = apiKey;
 
-  const res = await fetch(`${base}/api/search`, {
+  const res = await fetch(`${base}/api/valuate`, {
     method: "POST",
     headers,
     body: JSON.stringify({
-      q: filters.query,
-      semi_auto_only: filters.semiAutoOnly,
-      in_stock_only: filters.inStockOnly,
-      on_sale_only: filters.onSaleOnly,
-      min_margin_pct: filters.minMarginPct,
+      ...payload,
+      use_cache: payload.use_cache ?? true,
+      sample_only: payload.sample_only ?? false,
     }),
   });
 
@@ -29,5 +26,5 @@ export async function liveSearch(
     throw new Error(detail || `HTTP ${res.status}`);
   }
 
-  return (await res.json()) as DataBundle;
+  return (await res.json()) as ValuationResult;
 }
