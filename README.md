@@ -76,9 +76,13 @@ MMD_TARGET_PROFIT=75
 MMD_API_KEY=optional-for-production
 ```
 
-## GitHub Pages
+## GitHub
 
-Push to `main`, enable Pages via GitHub Actions. For live valuation from the deployed site, host the API and set `apiUrl` / `VITE_API_URL` to your API host.
+**Repository:** https://github.com/ModularGunworksLLC/modular-market-desk
+
+**Live dashboard (GitHub Pages):** https://modulargunworksllc.github.io/modular-market-desk/
+
+Push to `main` triggers the Pages deploy workflow. For live valuation from the deployed site, host the API and set `apiUrl` in `web/public/config.json` to your API host.
 
 ## Security
 
