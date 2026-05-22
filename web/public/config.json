@@ -1,6 +1,6 @@
 {
   "companySiteUrl": "",
   "ledgerUrl": "",
-  "apiUrl": "http://localhost:8000",
+  "apiUrl": "https://equation-flow-tion-damages.trycloudflare.com",
   "apiKey": ""
 }

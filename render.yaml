@@ -1,0 +1,16 @@
+# Deploy engine API on Render: https://dashboard.render.com/select-repo?type=blueprint
+services:
+  - type: web
+    name: modular-market-desk-api
+    runtime: docker
+    dockerfilePath: ./engine/Dockerfile
+    dockerContext: ./engine
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: MMD_AUCTION_FEES_PCT
+        value: "13"
+      - key: MMD_TARGET_PROFIT
+        value: "75"
+      - key: PYTHONUNBUFFERED
+        value: "1"

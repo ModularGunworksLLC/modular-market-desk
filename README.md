@@ -13,6 +13,8 @@ Enter one firearm, pick your business context (auction / vendor promo / margin),
 
 ## Quick start
 
+See **[START_HERE.md](START_HERE.md)** for the full checklist.
+
 ### API
 
 ```powershell
