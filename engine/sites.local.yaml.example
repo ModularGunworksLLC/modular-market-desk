@@ -1,20 +1,17 @@
-# Copy this file to sites.local.yaml and fill in your logins.
-# NEVER commit sites.local.yaml — it is gitignored.
+# Your wholesale sites — copy to sites.local.yaml and add logins.
+# NEVER commit sites.local.yaml
 #
 #   copy sites.local.yaml.example sites.local.yaml
 #
-# For sites with MFA/CAPTCHA: after saving credentials, run:
-#   python -m mmd_engine.cli.auth lipseys
-#
-# You can also use engine/.env instead (see .env.example).
+# MFA sites: python -m mmd_engine.cli.auth <site_id>
+# Status:    python -m mmd_engine.cli.credentials_cmd
 
 sites:
+  # --- Primary firearms wholesalers (enable + fill credentials) ---
   lipseys:
     enabled: true
-    username: "your-dealer-email@example.com"
-    password: "your-password"
-    # username_env: LIPSEYS_USER   # optional: read from .env instead
-    # password_env: LIPSEYS_PASS
+    username: ""
+    password: ""
 
   zanders:
     enabled: true
@@ -31,13 +28,78 @@ sites:
     username: ""
     password: ""
 
-  rsr:
+  second_amendment:
     enabled: false
     username: ""
     password: ""
 
+  orion:
+    enabled: false
+    username: ""
+    password: ""
+
+  chattanooga:
+    enabled: false
+    username: ""
+    password: ""
+
+  primary_arms:
+    enabled: false
+    username: ""
+    password: ""
+
+  zro_delta:
+    enabled: false
+    username: ""
+    password: ""
+
+  lakeline:
+    enabled: false
+    username: ""
+    password: ""
+
+  # --- Gear / parts only (RSR = no firearms per your note) ---
+  rsr:
+    enabled: false
+    username: ""
+    password: ""
+    # includes_firearms: false  # set in registry — gear only
+
+  righttobear:
+    enabled: false
+    username: ""
+    password: ""
+
+  shootersgate:
+    enabled: false
+    username: ""
+    password: ""
+
+  bear_creek:
+    enabled: false
+    username: ""
+    password: ""
+
+  # --- Tools (optional) ---
+  fflsafe:
+    enabled: false
+    username: ""
+    password: ""
+
+  guidefitter:
+    enabled: false
+    username: ""
+    password: ""
+
+  # --- Excluded — leave disabled (Kroll & Hicks = no go) ---
+  kroll:
+    enabled: false
+
+  hicks:
+    enabled: false
+
+  # --- Public market (optional) ---
   gunbroker:
     enabled: false
     username: ""
     password: ""
-    # Public comps work without login; enable only if you need account features.

@@ -69,7 +69,9 @@ python -m mmd_engine.cli.auth zanders
 
 Sessions are saved in `engine/data/sessions/` (gitignored). Never commit `sites.local.yaml` or `.env`.
 
-Supported today: **Lipsey's**, **Zanders** (live search). More distributors can be added; slots exist for Davidson's, Sports South, RSR, GunBroker.
+Your wholesale list is pre-loaded in `sites.local.yaml.example` (Lipsey's, Zanders, Davidson's, Sports South, 2nd Amendment, Orion, Chattanooga, Primary Arms, ZRO Delta, Lakeline, etc.). **Kroll** and **Hicks** are marked excluded. **RSR** is gear-only (no firearms).
+
+Live adapters today: **Lipsey's**, **Zanders**. Others store credentials until adapters are built.
 
 ## Import your wholesale CSV
 

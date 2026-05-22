@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from mmd_engine.config import SESSIONS_DIR, session_path
 from mmd_engine.credentials import EXAMPLE_FILE, SITES_FILE, list_sites, sites_with_adapters
@@ -17,6 +16,16 @@ def main() -> None:
         action="store_true",
         help="Copy sites.local.yaml.example to sites.local.yaml if missing",
     )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Include excluded sites (Kroll, Hicks)",
+    )
+    parser.add_argument(
+        "--firearms-only",
+        action="store_true",
+        help="Only firearms wholesalers (hide gear/parts/tools)",
+    )
     args = parser.parse_args()
 
     if args.init:
@@ -24,35 +33,36 @@ def main() -> None:
             print(f"Already exists: {SITES_FILE}")
         elif EXAMPLE_FILE.exists():
             SITES_FILE.write_text(EXAMPLE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
-            print(f"Created {SITES_FILE} — edit your logins, then run auth for MFA sites.")
+            print(f"Created {SITES_FILE} — add your logins, then run auth for MFA sites.")
         else:
             print(f"Missing template: {EXAMPLE_FILE}", file=sys.stderr)
             sys.exit(1)
         return
 
-    if not SITES_FILE.exists() and not Path(EXAMPLE_FILE.parent / ".env").exists():
-        print("No credentials file yet.")
-        print(f"  Option A: copy {EXAMPLE_FILE.name} -> sites.local.yaml")
-        print("  Option B: copy .env.example -> .env")
-        print("  Then: python -m mmd_engine.cli.credentials_cmd --init")
-        print()
-
     adapters = set(sites_with_adapters())
-    print(f"{'Site':<16} {'Enabled':<8} {'Login':<8} {'Session':<8} {'Live adapter':<14} Notes")
-    print("-" * 72)
+    sites = list_sites(firearms_only=args.firearms_only, include_excluded=args.all)
 
-    for site in list_sites():
+    print(
+        f"{'Site':<18} {'On':<5} {'Login':<6} {'Sess':<5} {'Guns':<5} {'API':<6} Notes"
+    )
+    print("-" * 78)
+
+    for site in sites:
         session = session_path(site.id)
         has_session = session.exists()
         has_login = site.is_configured()
-        live = "yes" if site.id in adapters else "planned"
+        live = "yes" if site.id in adapters else "—"
+        guns = "yes" if site.includes_firearms else "gear"
+        flag = "OFF" if site.excluded else ("on" if site.enabled else "off")
         print(
-            f"{site.id:<16} {str(site.enabled):<8} {str(has_login):<8} "
-            f"{str(has_session):<8} {live:<14} {site.notes[:30]}"
+            f"{site.id:<18} {flag:<5} {str(has_login):<6} {str(has_session):<5} "
+            f"{guns:<5} {live:<6} {site.notes[:32]}"
         )
 
-    print()
-    print(f"Sessions folder: {SESSIONS_DIR}")
+    if not args.all:
+        print("\nExcluded (hidden): kroll, hicks — use --all to show")
+
+    print(f"\nSessions: {SESSIONS_DIR}")
     print("MFA login: python -m mmd_engine.cli.auth <site_id>")
 
 

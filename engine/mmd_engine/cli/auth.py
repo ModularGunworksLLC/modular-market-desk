@@ -11,7 +11,7 @@ from mmd_engine.credentials import get_site, list_sites
 
 
 def main() -> None:
-    site_ids = [s.id for s in list_sites()]
+    site_ids = [s.id for s in list_sites(include_excluded=False) if not s.excluded]
     parser = argparse.ArgumentParser(
         description="Save dealer login session (for MFA / CAPTCHA sites)"
     )
