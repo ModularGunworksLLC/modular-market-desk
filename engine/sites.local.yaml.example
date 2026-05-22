@@ -1,0 +1,43 @@
+# Copy this file to sites.local.yaml and fill in your logins.
+# NEVER commit sites.local.yaml — it is gitignored.
+#
+#   copy sites.local.yaml.example sites.local.yaml
+#
+# For sites with MFA/CAPTCHA: after saving credentials, run:
+#   python -m mmd_engine.cli.auth lipseys
+#
+# You can also use engine/.env instead (see .env.example).
+
+sites:
+  lipseys:
+    enabled: true
+    username: "your-dealer-email@example.com"
+    password: "your-password"
+    # username_env: LIPSEYS_USER   # optional: read from .env instead
+    # password_env: LIPSEYS_PASS
+
+  zanders:
+    enabled: true
+    username: ""
+    password: ""
+
+  davidsons:
+    enabled: false
+    username: ""
+    password: ""
+
+  sports_south:
+    enabled: false
+    username: ""
+    password: ""
+
+  rsr:
+    enabled: false
+    username: ""
+    password: ""
+
+  gunbroker:
+    enabled: false
+    username: ""
+    password: ""
+    # Public comps work without login; enable only if you need account features.

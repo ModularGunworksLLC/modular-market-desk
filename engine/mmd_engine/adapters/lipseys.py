@@ -8,7 +8,8 @@ from urllib.parse import quote_plus
 
 from mmd_engine.adapters.base import DealerAdapter
 from mmd_engine.browser import browser_page
-from mmd_engine.config import env, session_path
+from mmd_engine.config import session_path
+from mmd_engine.credentials import get_site
 from mmd_engine.models import CatalogItem, utc_now_iso
 from mmd_engine.util import matches_query, parse_price, slug_id
 
@@ -22,9 +23,14 @@ class LipseysAdapter(DealerAdapter):
     name = "lipseys"
 
     def search(self, query: str) -> list[CatalogItem]:
+        site = get_site(self.name)
+        if not site.enabled:
+            return []
         session = session_path(self.name)
-        if not session.exists() and not (env("LIPSEYS_USER") and env("LIPSEYS_PASS")):
-            logger.info("Lipseys: skip (no session — run: python -m mmd_engine.cli.auth lipseys)")
+        if not session.exists() and not site.is_configured():
+            logger.info(
+                "Lipseys: skip — add credentials in sites.local.yaml or .env, then: python -m mmd_engine.cli.auth lipseys"
+            )
             return []
 
         try:
@@ -48,10 +54,11 @@ class LipseysAdapter(DealerAdapter):
 
 
 def _login(page) -> None:
-    user = env("LIPSEYS_USER")
-    password = env("LIPSEYS_PASS")
+    site = get_site("lipseys")
+    user = site.resolved_username()
+    password = site.resolved_password()
     if not user or not password:
-        raise RuntimeError("Set LIPSEYS_USER and LIPSEYS_PASS in engine/.env")
+        raise RuntimeError("Set lipseys credentials in sites.local.yaml or .env")
 
     page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
     page.fill('input[type="email"], input[name="email"], input[name="username"]', user)

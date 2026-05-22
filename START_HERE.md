@@ -42,6 +42,35 @@ The public Pages site needs a **public API**. Two options:
 4. Copy your Render URL (e.g. `https://modular-market-desk-api.onrender.com`)
 5. Set `apiUrl` in `web/public/config.json`, rebuild web, push to GitHub
 
+## Store your dealer logins (one place)
+
+**Option A — YAML file (good for many sites):**
+
+```powershell
+cd engine
+copy sites.local.yaml.example sites.local.yaml
+# Edit sites.local.yaml — set enabled: true and your username/password per site
+python -m mmd_engine.cli.credentials_cmd
+```
+
+**Option B — `.env` file:**
+
+```powershell
+copy .env.example .env
+# Edit .env — LIPSEYS_USER, LIPSEYS_PASS, ZANDERS_USER, etc.
+```
+
+**Sites with MFA (text code, CAPTCHA):** after saving passwords, run once per site:
+
+```powershell
+python -m mmd_engine.cli.auth lipseys
+python -m mmd_engine.cli.auth zanders
+```
+
+Sessions are saved in `engine/data/sessions/` (gitignored). Never commit `sites.local.yaml` or `.env`.
+
+Supported today: **Lipsey's**, **Zanders** (live search). More distributors can be added; slots exist for Davidson's, Sports South, RSR, GunBroker.
+
 ## Import your wholesale CSV
 
 ```powershell

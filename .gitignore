@@ -15,6 +15,7 @@ engine/*.egg-info/
 .env
 .env.*
 !.env.example
+engine/sites.local.yaml
 engine/data/sessions/
 engine/data/raw/
 engine/data/valuation_cache/

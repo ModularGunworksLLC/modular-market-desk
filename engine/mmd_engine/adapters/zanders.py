@@ -7,7 +7,8 @@ from urllib.parse import quote_plus
 
 from mmd_engine.adapters.base import DealerAdapter
 from mmd_engine.browser import browser_page
-from mmd_engine.config import env, session_path
+from mmd_engine.config import session_path
+from mmd_engine.credentials import get_site
 from mmd_engine.models import CatalogItem, utc_now_iso
 from mmd_engine.util import matches_query, parse_price, slug_id
 
@@ -21,9 +22,14 @@ class ZandersAdapter(DealerAdapter):
     name = "zanders"
 
     def search(self, query: str) -> list[CatalogItem]:
+        site = get_site(self.name)
+        if not site.enabled:
+            return []
         session = session_path(self.name)
-        if not session.exists() and not (env("ZANDERS_USER") and env("ZANDERS_PASS")):
-            logger.info("Zanders: skip (no session — run: python -m mmd_engine.cli.auth zanders)")
+        if not session.exists() and not site.is_configured():
+            logger.info(
+                "Zanders: skip — add credentials in sites.local.yaml or .env, then: python -m mmd_engine.cli.auth zanders"
+            )
             return []
 
         try:
@@ -47,10 +53,11 @@ class ZandersAdapter(DealerAdapter):
 
 
 def _login(page) -> None:
-    user = env("ZANDERS_USER")
-    password = env("ZANDERS_PASS")
+    site = get_site("zanders")
+    user = site.resolved_username()
+    password = site.resolved_password()
     if not user or not password:
-        raise RuntimeError("Set ZANDERS_USER and ZANDERS_PASS in engine/.env")
+        raise RuntimeError("Set zanders credentials in sites.local.yaml or .env")
 
     page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
     page.fill('input[name="username"], input[name="email"], input[type="text"]', user)

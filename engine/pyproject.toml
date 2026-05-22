@@ -10,12 +10,14 @@ dependencies = [
   "beautifulsoup4>=4.12.0",
   "python-dotenv>=1.0.0",
   "playwright>=1.49.0",
+  "pyyaml>=6.0.0",
 ]
 
 [project.scripts]
 mmd-sync = "mmd_engine.cli.sync:main"
 mmd-auth = "mmd_engine.cli.auth:main"
 mmd-import-csv = "mmd_engine.cli.import_csv:main"
+mmd-credentials = "mmd_engine.cli.credentials_cmd:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
