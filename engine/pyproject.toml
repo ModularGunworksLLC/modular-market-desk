@@ -1,0 +1,21 @@
+[project]
+name = "mmd-engine"
+version = "0.1.0"
+description = "Modular Market Desk research engine"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "httpx>=0.28.0",
+  "beautifulsoup4>=4.12.0",
+  "python-dotenv>=1.0.0",
+  "playwright>=1.49.0",
+]
+
+[project.scripts]
+mmd-sync = "mmd_engine.cli.sync:main"
+mmd-auth = "mmd_engine.cli.auth:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mmd_engine*"]

@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+web/dist/
+
+# Python
+engine/.venv/
+engine/__pycache__/
+engine/**/__pycache__/
+engine/*.egg-info/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Secrets & sessions
+.env
+.env.*
+!.env.example
+engine/data/sessions/
+engine/data/raw/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log

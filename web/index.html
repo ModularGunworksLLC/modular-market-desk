@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Modular Market Desk · Modular Gunworks LLC</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <p class="eyebrow">Modular Gunworks LLC</p>
+        <h1>Modular Market Desk</h1>
+        <p class="tagline">Dealer cost vs market comps for buy / resale research</p>
+      </div>
+      <nav class="site-nav">
+        <a href="#" id="link-company" class="muted">Company site</a>
+        <a href="#" id="link-ledger" class="muted">Ledger</a>
+      </nav>
+    </header>
+
+    <main class="layout">
+      <aside class="filters panel">
+        <h2>Search</h2>
+        <label class="field">
+          <span>Firearm / UPC / keywords</span>
+          <input id="query" type="search" placeholder="e.g. Glock 19, 764503001317" autocomplete="off" />
+        </label>
+
+        <fieldset>
+          <legend>Filters</legend>
+          <label class="check">
+            <input id="filter-semi" type="checkbox" />
+            Semi-auto only
+          </label>
+          <label class="check">
+            <input id="filter-stock" type="checkbox" />
+            In stock only
+          </label>
+          <label class="check">
+            <input id="filter-sale" type="checkbox" />
+            On sale only
+          </label>
+          <label class="field">
+            <span>Min margin %</span>
+            <input id="filter-margin" type="number" min="0" max="100" step="1" placeholder="0" />
+          </label>
+        </fieldset>
+
+        <label class="check live-toggle live-disabled">
+          <input id="live-lookup" type="checkbox" disabled />
+          Live lookup (runs engine API — set <code>apiUrl</code> in config.json)
+        </label>
+
+        <button id="search-btn" type="button" class="primary">Search</button>
+        <p id="status" class="status" role="status"></p>
+      </aside>
+
+      <section class="results panel">
+        <div class="results-header">
+          <h2>Results</h2>
+          <p id="meta" class="meta"></p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Caliber</th>
+                <th>Dealer</th>
+                <th>Market</th>
+                <th>Spread</th>
+                <th>Margin</th>
+                <th>Stock</th>
+                <th>Sale</th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+        <p id="empty" class="empty hidden">No matches. Try a broader query or refresh data.</p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Data is for research only — verify stock and pricing before purchasing.</p>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
