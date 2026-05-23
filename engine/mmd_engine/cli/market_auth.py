@@ -79,20 +79,20 @@ def main() -> None:
             page.wait_for_timeout(5_000)
             page.context.storage_state(path=str(out))
     else:
+        if not args.wait_seconds:
+            print(
+                f"No credentials for {meta['label']}; use sites.local.yaml or --auto-login.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         print(f"Opening {meta['label']} in a browser window.")
-        if args.wait_seconds > 0:
-            print(f"Log in or pass any captcha/age gate. Saving in {args.wait_seconds}s…")
-        else:
-            print("Log in or pass any captcha/age gate, then press Enter here to save the session.")
+        print(f"Log in or pass any captcha/age gate. Saving in {args.wait_seconds}s…")
         print(f"Session file: {out}")
 
         with browser_page(headless=False) as page:
             page.goto(meta["url"], wait_until="domcontentloaded", timeout=90_000)
             dismiss_age_gate(page)
-            if args.wait_seconds > 0:
-                time.sleep(args.wait_seconds)
-            else:
-                input("Press Enter when finished… ")
+            time.sleep(args.wait_seconds)
             page.context.storage_state(path=str(out))
 
     print(f"Saved session to {out}")

@@ -108,9 +108,16 @@ def main() -> None:
                 fail += 1
 
     if not args.dealers_only:
+        from mmd_engine.credentials import get_site
+
         market_ids = ["gunbroker", "gundeals"]
         if args.sites:
             market_ids = [s for s in args.sites if s in _MARKET_SITES]
+        market_ids = [
+            sid
+            for sid in market_ids
+            if (lambda s: s.is_configured() and s.login_url)(get_site(sid))
+        ]
         print(f"Market ({len(market_ids)}):")
         for sid in market_ids:
             if _refresh_market(sid):
