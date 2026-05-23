@@ -41,7 +41,11 @@ if (-not (Test-Path $chromePath)) {
 
 Push-Location $Engine
 try {
-    & $VenvPython -m mmd_engine.cli.market_auth gunbroker --wait-seconds $WaitSeconds
+    & $VenvPython -m mmd_engine.cli.market_auth gunbroker --auto-login
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Auto-login failed; trying headed window ($WaitSeconds s)..." -ForegroundColor Yellow
+        & $VenvPython -m mmd_engine.cli.market_auth gunbroker --wait-seconds $WaitSeconds
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {
