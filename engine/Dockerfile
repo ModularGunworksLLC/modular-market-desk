@@ -1,4 +1,5 @@
-FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
+# jammy image ships Python 3.10; project needs 3.12+
+FROM mcr.microsoft.com/playwright/python:v1.49.1-noble
 
 WORKDIR /app
 
