@@ -66,6 +66,8 @@ export interface ValuationResult {
   canonical_key: string;
   generated_at: string;
   sold_stats: PriceStats;
+  sold_stats_sku: PriceStats;
+  sold_stats_all: PriceStats;
   asking_stats: PriceStats;
   wholesale_stats: PriceStats;
   estimate_stats: PriceStats;
@@ -78,6 +80,11 @@ export interface ValuationResult {
 export interface ValuatePayload extends FirearmQuery {
   context: ContextMode;
   my_cost?: number | null;
+  street_retail?: number | null;
+  reference_msrp?: number | null;
+  buyer_premium_pct?: number | null;
+  listing_addons?: number | null;
   use_cache?: boolean;
+  force_refresh?: boolean;
   sample_only?: boolean;
 }

@@ -40,6 +40,8 @@ def load_cached(canonical_key: str) -> ValuationResult | None:
             canonical_key=data.get("canonical_key", canonical_key),
             generated_at=data.get("generated_at", ""),
             sold_stats=PriceStats(**data.get("sold_stats", {})),
+            sold_stats_sku=PriceStats(**data.get("sold_stats_sku", {})),
+            sold_stats_all=PriceStats(**data.get("sold_stats_all", data.get("sold_stats", {}))),
             asking_stats=PriceStats(**data.get("asking_stats", {})),
             wholesale_stats=PriceStats(**data.get("wholesale_stats", {})),
             estimate_stats=PriceStats(**data.get("estimate_stats", {})),

@@ -5,15 +5,17 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from mmd_engine.adapters.gunbroker import GunBrokerAdapter
-from mmd_engine.adapters.sample_valuation import SampleValuationAdapter
-from mmd_engine.adapters.truegunvalue import TrueGunValueAdapter
 from mmd_engine.adapters.valuation_base import ValuationAdapter
-from mmd_engine.adapters.wholesale_csv import wholesale_adapters
 from mmd_engine.cache import load_cached, save_cached
 from mmd_engine.insights import compute_insights
+from mmd_engine.market_sources import all_valuation_adapters
 from mmd_engine.matching import apply_matching, canonical_key
-from mmd_engine.stats import compute_stats, compute_trends
+from mmd_engine.stats import (
+    compute_stats,
+    compute_sku_stats,
+    compute_trends,
+    primary_sold_stats,
+)
 from mmd_engine.valuation_models import (
     ContextMode,
     FirearmQuery,
@@ -22,28 +24,87 @@ from mmd_engine.valuation_models import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ADAPTERS: list[ValuationAdapter] = [
-    SampleValuationAdapter(),
-    GunBrokerAdapter(),
-    TrueGunValueAdapter(),
-]
-
-
-def _all_adapters(*, include_live: bool) -> list[ValuationAdapter]:
-    adapters: list[ValuationAdapter] = [SampleValuationAdapter()]
-    if include_live:
-        adapters.extend([GunBrokerAdapter(), TrueGunValueAdapter()])
-    adapters.extend(wholesale_adapters())
-    return adapters
-
 
 def _fetch_adapter(adapter: ValuationAdapter, query: FirearmQuery) -> tuple[str, list, str]:
     try:
         rows = adapter.fetch(query)
-        return adapter.name, rows, "ok"
+        if not rows:
+            hint = ""
+            if adapter.name in {"gunbroker", "gundeals"}:
+                hint = " — try: python -m mmd_engine.cli.market_auth " + adapter.name
+            return adapter.name, [], f"blocked or empty (0 listings){hint}"
+        sold = sum(1 for r in rows if r.price_type == "sold")
+        asking = sum(1 for r in rows if r.price_type == "asking")
+        est = sum(1 for r in rows if r.price_type == "estimate")
+        parts = [f"{len(rows)} raw"]
+        if sold:
+            parts.append(f"{sold} sold")
+        if asking:
+            parts.append(f"{asking} asking")
+        if est:
+            parts.append(f"{est} est")
+        return adapter.name, rows, "ok (" + ", ".join(parts) + ")"
     except Exception as exc:
         logger.warning("%s failed: %s", adapter.name, exc)
         return adapter.name, [], str(exc)
+
+
+def _finalize_result(
+    *,
+    query: FirearmQuery,
+    context: ContextMode,
+    key: str,
+    matched: list,
+    source_status: dict[str, str],
+    my_cost: float | None,
+    street_retail: float | None,
+    reference_msrp: float | None,
+    buyer_premium_pct: float | None,
+    listing_addons: float | None,
+) -> ValuationResult:
+    primary, family, sold_label = primary_sold_stats(matched, query, days=90)
+    sold_stats_sku = compute_sku_stats(matched, query, "sold", days=90)
+    sold_stats = primary if primary.count else family
+    asking_stats = compute_stats(matched, "asking", days=None)
+    wholesale_stats = compute_stats(matched, "wholesale", days=None)
+    estimate_stats = compute_stats(matched, "estimate", days=None)
+
+    insights = compute_insights(
+        context=context,
+        query=query,
+        sold_stats=family,
+        sold_stats_sku=sold_stats_sku,
+        sold_label=sold_label,
+        asking_stats=asking_stats,
+        wholesale_stats=wholesale_stats,
+        estimate_stats=estimate_stats,
+        my_cost=my_cost,
+        street_retail=street_retail,
+        reference_msrp=reference_msrp,
+        buyer_premium_pct=buyer_premium_pct,
+        listing_addons=listing_addons,
+    )
+    insights.assumptions["sources_queried"] = list(source_status.keys())
+    insights.assumptions["sources_status"] = dict(source_status)
+
+    if my_cost is None and wholesale_stats.low > 0:
+        insights.my_cost = wholesale_stats.low
+
+    return ValuationResult(
+        query=query,
+        context=context,
+        canonical_key=key,
+        sold_stats=sold_stats,
+        sold_stats_sku=sold_stats_sku,
+        sold_stats_all=family,
+        asking_stats=asking_stats,
+        wholesale_stats=wholesale_stats,
+        estimate_stats=estimate_stats,
+        listings=matched,
+        insights=insights,
+        trends=compute_trends(matched),
+        source_status=source_status,
+    )
 
 
 def run_valuation(
@@ -51,28 +112,40 @@ def run_valuation(
     *,
     context: ContextMode = "auction_sniper",
     my_cost: float | None = None,
-    use_cache: bool = True,
+    street_retail: float | None = None,
+    reference_msrp: float | None = None,
+    buyer_premium_pct: float | None = None,
+    listing_addons: float | None = None,
+    use_cache: bool = False,
+    force_refresh: bool = False,
     include_live: bool = True,
     sample_only: bool = False,
 ) -> ValuationResult:
     key = canonical_key(query)
 
-    if use_cache and not sample_only:
+    if use_cache and not sample_only and not force_refresh:
         cached = load_cached(key)
-        if cached:
-            cached.context = context
-            cached.insights = compute_insights(
-                context=context,
-                query=query,
-                sold_stats=cached.sold_stats,
-                asking_stats=cached.asking_stats,
-                wholesale_stats=cached.wholesale_stats,
-                my_cost=my_cost,
-            )
-            return cached
+        if cached and len(cached.listings) > 0:
+            rematched = apply_matching(cached.listings, query)
+            primary, _, _ = primary_sold_stats(rematched, query, days=90)
+            asking = compute_stats(rematched, "asking", days=None)
+            est = compute_stats(rematched, "estimate", days=None)
+            if primary.count > 0 or asking.count > 0 or est.count > 0:
+                return _finalize_result(
+                    query=query,
+                    context=context,
+                    key=key,
+                    matched=rematched,
+                    source_status=cached.source_status,
+                    my_cost=my_cost,
+                    street_retail=street_retail,
+                    reference_msrp=reference_msrp,
+                    buyer_premium_pct=buyer_premium_pct,
+                    listing_addons=listing_addons,
+                )
 
-    adapters = [SampleValuationAdapter()] if sample_only else _all_adapters(include_live=include_live)
-    all_listings = []
+    adapters = all_valuation_adapters(sample_only=sample_only)
+    all_listings: list = []
     source_status: dict[str, str] = {}
 
     with ThreadPoolExecutor(max_workers=min(6, len(adapters) or 1)) as pool:
@@ -83,36 +156,17 @@ def run_valuation(
             all_listings.extend(rows)
 
     matched = apply_matching(all_listings, query)
-
-    sold_stats = compute_stats(matched, "sold", days=90)
-    asking_stats = compute_stats(matched, "asking", days=None)
-    wholesale_stats = compute_stats(matched, "wholesale", days=None)
-    estimate_stats = compute_stats(matched, "estimate", days=None)
-
-    insights = compute_insights(
-        context=context,
-        query=query,
-        sold_stats=sold_stats,
-        asking_stats=asking_stats,
-        wholesale_stats=wholesale_stats,
-        my_cost=my_cost,
-    )
-
-    if my_cost is None and wholesale_stats.low > 0:
-        insights.my_cost = wholesale_stats.low
-
-    result = ValuationResult(
+    result = _finalize_result(
         query=query,
         context=context,
-        canonical_key=key,
-        sold_stats=sold_stats,
-        asking_stats=asking_stats,
-        wholesale_stats=wholesale_stats,
-        estimate_stats=estimate_stats,
-        listings=matched,
-        insights=insights,
-        trends=compute_trends(matched),
+        key=key,
+        matched=matched,
         source_status=source_status,
+        my_cost=my_cost,
+        street_retail=street_retail,
+        reference_msrp=reference_msrp,
+        buyer_premium_pct=buyer_premium_pct,
+        listing_addons=listing_addons,
     )
 
     if not sample_only:

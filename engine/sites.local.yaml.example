@@ -5,19 +5,23 @@
 #
 # MFA sites: python -m mmd_engine.cli.auth <site_id>
 # Status:    python -m mmd_engine.cli.credentials_cmd
+# Age gates: auto-clicked; optional per site: age_gate_yes: "button#enter"
 
 sites:
   # --- Primary firearms wholesalers (enable + fill credentials) ---
+  # https://www.lipseys.com/login
   lipseys:
     enabled: true
     username: ""
     password: ""
 
+  # https://shop2.gzanders.com/customer/account/login/... (not zanders.com)
   zanders:
     enabled: true
     username: ""
     password: ""
 
+  # https://www.davidsonsinc.com/customer/account/login/...
   davidsons:
     enabled: false
     username: ""
@@ -38,6 +42,7 @@ sites:
     username: ""
     password: ""
 
+  # https://chattanoogashooting.com/login
   chattanooga:
     enabled: false
     username: ""

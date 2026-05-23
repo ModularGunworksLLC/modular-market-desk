@@ -1,0 +1,28 @@
+# Desk UI — desk.modulargunworks.com (Bitnami Apache)
+# Static files: /var/www/desk (build web/ with VITE_BASE_PATH=/)
+#
+#   sudo cp deploy/apache-mmd-desk.conf.example /opt/bitnami/apache/conf/vhosts/mmd-desk.conf
+#   sudo /opt/bitnami/ctlscript.sh restart apache
+
+<VirtualHost 127.0.0.1:80 _default_:80>
+  ServerName desk.modulargunworks.com
+  DocumentRoot /opt/bitnami/apps/letsencrypt
+  RewriteEngine On
+  RewriteCond %{REQUEST_URI} !^/\.well-known
+  RewriteRule ^ https://desk.modulargunworks.com%{REQUEST_URI} [R=301,L]
+</VirtualHost>
+
+<VirtualHost 127.0.0.1:443 _default_:443>
+  ServerName desk.modulargunworks.com
+  SSLEngine on
+  SSLCertificateFile "/opt/bitnami/letsencrypt/certificates/desk.modulargunworks.com.crt"
+  SSLCertificateKeyFile "/opt/bitnami/letsencrypt/certificates/desk.modulargunworks.com.key"
+  Include "/opt/bitnami/apps/letsencrypt/conf/httpd-prefix.conf"
+  DocumentRoot /var/www/desk
+  <Directory /var/www/desk>
+    Options -Indexes +FollowSymLinks
+    AllowOverride None
+    Require all granted
+    FallbackResource /index.html
+  </Directory>
+</VirtualHost>

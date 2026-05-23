@@ -9,7 +9,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: MMD_AUCTION_FEES_PCT
-        value: "13"
+        value: "18"
       - key: MMD_TARGET_PROFIT
         value: "75"
       - key: PYTHONUNBUFFERED

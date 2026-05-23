@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Modular Market Desk · Valuation</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -14,6 +15,7 @@
         <p class="tagline">One firearm · many sources · actionable price intelligence</p>
       </div>
       <nav class="site-nav">
+        <p id="api-endpoint" class="api-endpoint muted">API: loading…</p>
         <a href="#" id="link-company" class="muted">Company site</a>
         <a href="#" id="link-ledger" class="muted">Ledger</a>
       </nav>
@@ -39,7 +41,7 @@
 
         <label class="field">
           <span>Model</span>
-          <input id="model" type="text" placeholder="P226" required />
+          <input id="model" type="text" placeholder="1911, BC-10, P226…" required />
         </label>
 
         <label class="field">
@@ -64,30 +66,89 @@
 
         <label class="field">
           <span>UPC (optional)</span>
-          <input id="upc" type="text" placeholder="798681662722" />
+          <input id="upc" type="text" placeholder="011356672025" />
+        </label>
+
+        <label class="field">
+          <span>MFG model # (optional)</span>
+          <input id="mpn" type="text" placeholder="67202, SV1911GSS" />
         </label>
 
         <fieldset>
           <legend>What is this search for?</legend>
           <label class="radio">
-            <input type="radio" name="context" value="auction_sniper" checked />
-            Auction sniper — max bid from sold comps
+            <input type="radio" name="context" value="margin_spotter" checked />
+            Margin spotter — is there enough profit? (recommended)
           </label>
           <label class="radio">
             <input type="radio" name="context" value="vendor_deal" />
             Vendor deal — is this promo real?
           </label>
           <label class="radio">
-            <input type="radio" name="context" value="margin_spotter" />
-            Margin spotter — street vs your cost
+            <input type="radio" name="context" value="auction_sniper" />
+            Auction sniper — max bid from sold comps
           </label>
         </fieldset>
 
-        <label class="field">
-          <span>My cost / offer ($)</span>
-          <input id="my-cost" type="number" min="0" step="0.01" placeholder="Auto from wholesale CSV" />
-        </label>
+        <div id="auction-fees" class="fee-panel">
+          <h3 class="fee-panel-title">Auction buy &amp; GunBroker sell</h3>
+          <p class="muted fee-hint">
+            Max bid assumes you sell on GunBroker (tiered FVF: 6% on first $400, 4% above; $5 master FFL included).
+          </p>
+          <label class="field">
+            <span>Buyer premium (%)</span>
+            <input
+              id="buyer-premium-pct"
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              value="18"
+              inputmode="decimal"
+            />
+          </label>
+          <label class="field">
+            <span>Listing add-ons ($)</span>
+            <input
+              id="listing-addons"
+              type="number"
+              min="0"
+              step="1"
+              value="10"
+              inputmode="decimal"
+            />
+          </label>
+          <p class="muted fee-hint">
+            Optional upgrades for a faster sale (default $10). Listing is free until the item sells.
+          </p>
+        </div>
 
+        <label class="field" id="my-cost-field">
+          <span>Dealer / my cost ($)</span>
+          <input id="my-cost" type="number" min="0" step="0.01" placeholder="Your invoice / dealer quote" />
+        </label>
+        <label class="field hidden" id="street-retail-field">
+          <span>Vendor sale price ($)</span>
+          <input
+            id="street-retail"
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="Their cart/sale price — not MSRP"
+          />
+        </label>
+        <label class="field hidden" id="msrp-field">
+          <span>MSRP (reference only)</span>
+          <input id="reference-msrp" type="number" min="0" step="0.01" placeholder="Optional — not used for verdict" />
+        </label>
+        <p class="muted fee-hint" id="dealer-hint">
+          Enter <strong>your cost</strong>, then Valuate. Live search: TrueGunValue, GunBroker, Gun.deals (30–120s).
+        </p>
+
+        <label class="check">
+          <input id="force-refresh" type="checkbox" checked />
+          Search the web now (skip cached prices)
+        </label>
         <label class="check">
           <input id="sample-only" type="checkbox" />
           Sample data only (offline demo)
@@ -107,7 +168,7 @@
         <div id="results" class="hidden">
           <div class="summary-grid">
             <div class="summary-card panel">
-              <h3>Sold (90d)</h3>
+              <h3 id="sold-summary-label">Sold (90d)</h3>
               <p id="sold-summary" class="stat-line"></p>
             </div>
             <div class="summary-card panel">
@@ -121,7 +182,8 @@
             <div class="summary-card panel insight-card">
               <h3>Insight</h3>
               <p id="insight-headline" class="insight-line"></p>
-              <p id="insight-detail" class="muted"></p>
+              <div id="insight-blocks" class="insight-blocks"></div>
+              <p id="insight-detail" class="muted insight-detail"></p>
             </div>
           </div>
 
@@ -146,7 +208,7 @@
             </div>
 
             <div id="tab-sold" class="tab-panel">
-              <div class="table-wrap"><table><thead><tr><th>Title</th><th>Price</th><th>Cond</th><th>Source</th><th>Match</th></tr></thead><tbody id="sold-body"></tbody></table></div>
+              <div class="table-wrap"><table><thead><tr><th>Title</th><th>Price</th><th>Cond</th><th>Source</th><th>Tier</th></tr></thead><tbody id="sold-body"></tbody></table></div>
             </div>
             <div id="tab-asking" class="tab-panel">
               <div class="table-wrap"><table><thead><tr><th>Title</th><th>Price</th><th>Cond</th><th>Source</th><th>Link</th></tr></thead><tbody id="asking-body"></tbody></table></div>

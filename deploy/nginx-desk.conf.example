@@ -1,0 +1,24 @@
+# Desk UI — desk.modulargunworks.com
+# Build web first: cd web && npm ci && npm run build
+# Deploy:  sudo mkdir -p /var/www/desk && sudo cp -r web/dist/* /var/www/desk/
+# Install: sudo cp deploy/nginx-desk.conf.example /etc/nginx/sites-available/mmd-desk
+#          sudo ln -sf /etc/nginx/sites-available/mmd-desk /etc/nginx/sites-enabled/
+#          sudo nginx -t && sudo systemctl reload nginx
+# TLS:     sudo certbot --nginx -d desk.modulargunworks.com
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name desk.modulargunworks.com;
+    root /var/www/desk;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ~* \.(js|css|svg|json|woff2?)$ {
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+}

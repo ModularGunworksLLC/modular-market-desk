@@ -16,7 +16,8 @@ export async function valuate(
     headers,
     body: JSON.stringify({
       ...payload,
-      use_cache: payload.use_cache ?? true,
+      use_cache: payload.use_cache ?? false,
+      force_refresh: payload.force_refresh ?? true,
       sample_only: payload.sample_only ?? false,
     }),
   });

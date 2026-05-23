@@ -10,6 +10,20 @@ Everything is set up. Use this checklist.
 - Sample Lipsey's CSV imported (3 items)
 - API running locally on port 8000
 
+## Live comps show “no sold data in 90 days”?
+
+Usually **not** the 90-day filter — live scrapers returned **zero listings**:
+
+1. Install Playwright browsers (once):
+   ```powershell
+   cd engine
+   .\.venv\Scripts\Activate.ps1
+   playwright install chromium
+   ```
+2. Restart the API (`.\scripts\start-api.ps1`).
+3. Uncheck **Sample data only** in the UI.
+4. Check **Sources** after Valuate: `gunbroker` / `truegunvalue` should say `ok (N listings)`. If you see `no listings` or Cloudflare, TrueGunValue/GunBroker blocked the headless browser.
+
 ## Use the app (easiest — local)
 
 Double-click or run:
@@ -44,6 +58,8 @@ The public Pages site needs a **public API**. Two options:
 
 ## Store your dealer logins (one place)
 
+**Production deploy:** [deploy/README-LIGHTSAIL.md](deploy/README-LIGHTSAIL.md) · SSH brief: [deploy/SSH-AGENT-BRIEF.md](deploy/SSH-AGENT-BRIEF.md)
+
 **Option A — YAML file (good for many sites):**
 
 ```powershell
@@ -59,6 +75,8 @@ python -m mmd_engine.cli.credentials_cmd
 copy .env.example .env
 # Edit .env — LIPSEYS_USER, LIPSEYS_PASS, ZANDERS_USER, etc.
 ```
+
+**Age gates (21+ / Enter):** the engine auto-clicks common “Yes / Enter / I am 21” buttons on every dealer page load. The choice is stored in your Playwright session file after the first headed login — you usually only fight the gate once per site. If a site uses a weird layout, click through manually during `cli.auth`, then press Enter.
 
 **Sites with MFA (text code, CAPTCHA):** after saving passwords, run once per site:
 

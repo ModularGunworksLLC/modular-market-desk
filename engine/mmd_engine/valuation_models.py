@@ -26,7 +26,14 @@ class FirearmQuery:
     exclude_tokens: list[str] = field(default_factory=list)
 
     def search_text(self) -> str:
-        parts = [self.manufacturer, self.model, self.variant, self.caliber, self.upc]
+        parts = [
+            self.manufacturer,
+            self.model,
+            self.variant,
+            self.caliber,
+            self.mpn,
+            self.upc,
+        ]
         return " ".join(p for p in parts if p).strip()
 
     def to_dict(self) -> dict[str, Any]:
@@ -102,6 +109,8 @@ class ValuationResult:
     canonical_key: str = ""
     generated_at: str = field(default_factory=utc_now_iso)
     sold_stats: PriceStats = field(default_factory=PriceStats)
+    sold_stats_sku: PriceStats = field(default_factory=PriceStats)
+    sold_stats_all: PriceStats = field(default_factory=PriceStats)
     asking_stats: PriceStats = field(default_factory=PriceStats)
     wholesale_stats: PriceStats = field(default_factory=PriceStats)
     estimate_stats: PriceStats = field(default_factory=PriceStats)
@@ -117,6 +126,8 @@ class ValuationResult:
             "canonical_key": self.canonical_key,
             "generated_at": self.generated_at,
             "sold_stats": self.sold_stats.to_dict(),
+            "sold_stats_sku": self.sold_stats_sku.to_dict(),
+            "sold_stats_all": self.sold_stats_all.to_dict(),
             "asking_stats": self.asking_stats.to_dict(),
             "wholesale_stats": self.wholesale_stats.to_dict(),
             "estimate_stats": self.estimate_stats.to_dict(),

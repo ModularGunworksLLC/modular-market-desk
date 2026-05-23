@@ -16,11 +16,17 @@ engine/*.egg-info/
 .env.*
 !.env.example
 engine/sites.local.yaml
-engine/data/sessions/
+engine/data/sessions/*
+!engine/data/sessions/.gitkeep
 engine/data/raw/
-engine/data/valuation_cache/
-engine/data/imports/*.csv
+engine/data/valuation_cache/*
+!engine/data/valuation_cache/.gitkeep
+engine/data/imports/*
+!engine/data/imports/.gitkeep
 !engine/data/imports/examples/
+engine/data/auction_*.txt
+engine/data/auction_*.tsv
+engine/data/auction_lots.txt
 engine/data/inventory/*.json
 !engine/data/inventory/.gitkeep
 

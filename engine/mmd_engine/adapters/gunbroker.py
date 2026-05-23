@@ -9,7 +9,8 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from mmd_engine.adapters.valuation_base import ValuationAdapter
-from mmd_engine.browser import browser_page
+from mmd_engine.browser import dismiss_age_gate
+from mmd_engine.market_browser import market_page
 from mmd_engine.models import utc_now_iso
 from mmd_engine.util import parse_price, slug_id
 from mmd_engine.valuation_models import FirearmQuery, MarketListing
@@ -51,16 +52,21 @@ class GunBrokerAdapter(ValuationAdapter):
         self, url: str, q: str, *, price_type: str
     ) -> list[MarketListing]:
         try:
-            with browser_page(headless=True) as page:
+            with market_page("gunbroker") as page:
                 page.goto(url, wait_until="domcontentloaded", timeout=90_000)
-                page.wait_for_timeout(3_000)
+                dismiss_age_gate(page)
+                page.wait_for_timeout(5_000)
                 html = page.content()
         except Exception as exc:
             logger.warning("GunBroker Playwright: %s", exc)
             return []
 
-        if "captcha" in html.lower() or "access denied" in html.lower():
-            logger.warning("GunBroker blocked or captcha")
+        low = html.lower()
+        if "captcha" in low or "access denied" in low or "challenge-platform" in low:
+            logger.warning(
+                "GunBroker blocked (captcha/Cloudflare). "
+                "Run: python -m mmd_engine.cli.market_auth gunbroker"
+            )
             return []
 
         return _parse_listings_html(html, self.name, price_type)
@@ -92,6 +98,7 @@ def _parse_listings_html(html: str, source: str, price_type: str) -> list[Market
         if re.search(r"\bnew\b", title, re.I):
             cond = "new"
 
+        sold_date = now if price_type == "sold" else ""
         rows.append(
             MarketListing(
                 id=slug_id(source, price_type, title, str(price)),
@@ -100,6 +107,7 @@ def _parse_listings_html(html: str, source: str, price_type: str) -> list[Market
                 price=price,
                 price_type=price_type,  # type: ignore[arg-type]
                 condition=cond,
+                date=sold_date,
                 url=href,
                 scraped_at=now,
             )
@@ -120,6 +128,7 @@ def _parse_listings_html(html: str, source: str, price_type: str) -> list[Market
         if price is None:
             continue
         full_url = href if href.startswith("http") else f"https://www.gunbroker.com{href}"
+        sold_date = now if price_type == "sold" else ""
         rows.append(
             MarketListing(
                 id=slug_id(source, price_type, title, str(price)),
@@ -128,6 +137,7 @@ def _parse_listings_html(html: str, source: str, price_type: str) -> list[Market
                 price=price,
                 price_type=price_type,  # type: ignore[arg-type]
                 condition="used",
+                date=sold_date,
                 url=full_url,
                 scraped_at=now,
             )

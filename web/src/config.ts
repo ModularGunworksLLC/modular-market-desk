@@ -14,10 +14,16 @@ const defaults: AppConfig = {
 
 let cached: AppConfig | null = null;
 
+export function resetConfigCache(): void {
+  cached = null;
+}
+
 export async function loadConfig(): Promise<AppConfig> {
   if (cached) return cached;
   try {
-    const res = await fetch(`${import.meta.env.BASE_URL}config.json`);
+    const res = await fetch(`${import.meta.env.BASE_URL}config.json?t=${Date.now()}`, {
+      cache: "no-store",
+    });
     if (res.ok) {
       const json = (await res.json()) as Partial<AppConfig>;
       cached = {

@@ -31,6 +31,7 @@ class SiteCredential:
     password_env: str = ""
     excluded: bool = False
     includes_firearms: bool = True
+    age_gate_yes: str = ""
 
     def has_password_login(self) -> bool:
         return bool(self.username and self.password)
@@ -73,15 +74,15 @@ SITE_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "zanders": {
         "label": "Zanders Sporting Goods",
-        "login_url": "https://www.zanders.com/login.asp",
+        "login_url": "https://shop2.gzanders.com/customer/account/login/referer/aHR0cHM6Ly9zaG9wMi5nemFuZGVycy5jb20vY3VzdG9tZXIvYWNjb3VudC9pbmRleC8~/",
         "username_env": "ZANDERS_USER",
         "password_env": "ZANDERS_PASS",
         "includes_firearms": True,
-        "notes": "Live adapter + CSV import.",
+        "notes": "Live adapter + CSV import. Cloudflare — run cli.auth zanders once.",
     },
     "davidsons": {
         "label": "Davidson's",
-        "login_url": "https://www.davidsonsinc.com/dealer-login",
+        "login_url": "https://www.davidsonsinc.com/customer/account/login/referer/aHR0cHM6Ly93d3cuZGF2aWRzb25zaW5jLmNvbS9jdXN0b21lci9hY2NvdW50L2xvZ291dFN1Y2Nlc3Mv/",
         "username_env": "DAVIDSONS_USER",
         "password_env": "DAVIDSONS_PASS",
         "includes_firearms": True,
@@ -113,7 +114,7 @@ SITE_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "chattanooga": {
         "label": "Chattanooga Shooting (dealers)",
-        "login_url": "https://www.chattanoogashooting.com/login",
+        "login_url": "https://chattanoogashooting.com/login",
         "username_env": "CHATTANOOGA_USER",
         "password_env": "CHATTANOOGA_PASS",
         "includes_firearms": True,
@@ -268,6 +269,7 @@ def get_site(site_id: str) -> SiteCredential:
         includes_firearms=bool(
             overrides.get("includes_firearms", base.get("includes_firearms", True))
         ),
+        age_gate_yes=str(overrides.get("age_gate_yes") or base.get("age_gate_yes") or "").strip(),
     )
 
 

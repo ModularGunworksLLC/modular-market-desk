@@ -6,7 +6,7 @@ import logging
 from urllib.parse import quote_plus
 
 from mmd_engine.adapters.base import DealerAdapter
-from mmd_engine.browser import browser_page
+from mmd_engine.browser import browser_page, dismiss_age_gate, goto_dealer_page
 from mmd_engine.config import session_path
 from mmd_engine.credentials import get_site
 from mmd_engine.models import CatalogItem, utc_now_iso
@@ -14,8 +14,11 @@ from mmd_engine.util import matches_query, parse_price, slug_id
 
 logger = logging.getLogger(__name__)
 
-LOGIN_URL = "https://www.zanders.com/login.asp"
-SEARCH_URL = "https://www.zanders.com/search.asp?search={query}"
+LOGIN_URL = (
+    "https://shop2.gzanders.com/customer/account/login/referer/"
+    "aHR0cHM6Ly9zaG9wMi5nemFuZGVycy5jb20vY3VzdG9tZXIvYWNjb3VudC9pbmRleC8~/"
+)
+SEARCH_URL = "https://shop2.gzanders.com/catalogsearch/result/?q={query}"
 
 
 class ZandersAdapter(DealerAdapter):
@@ -38,11 +41,10 @@ class ZandersAdapter(DealerAdapter):
                     _login(page)
                     page.context.storage_state(path=str(session))
 
-                page.goto(
-                    SEARCH_URL.format(query=quote_plus(query or "")),
-                    wait_until="domcontentloaded",
-                    timeout=90_000,
-                )
+                search_url = SEARCH_URL.format(query=quote_plus(query or ""))
+                page.goto(search_url, wait_until="domcontentloaded", timeout=90_000)
+                extra = (site.age_gate_yes,) if site.age_gate_yes else ()
+                dismiss_age_gate(page, extra_css=extra)
                 page.wait_for_timeout(3_000)
                 text = page.inner_text("body")
         except Exception as exc:
@@ -59,11 +61,33 @@ def _login(page) -> None:
     if not user or not password:
         raise RuntimeError("Set zanders credentials in sites.local.yaml or .env")
 
-    page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
-    page.fill('input[name="username"], input[name="email"], input[type="text"]', user)
-    page.fill('input[type="password"]', password)
-    page.click('input[type="submit"], button[type="submit"]')
-    page.wait_for_timeout(4_000)
+    extra = (site.age_gate_yes,) if site.age_gate_yes else ()
+    goto_dealer_page(page, LOGIN_URL, timeout=90_000, extra_css=extra)
+    page.wait_for_timeout(2_000)
+
+    if page.locator('input[name="cf-turnstile-response"]').count() and not page.locator(
+        "#email, input[name='login[username]']"
+    ).count():
+        raise RuntimeError(
+            "Zanders login blocked by Cloudflare — run once: "
+            "python -m mmd_engine.cli.auth zanders"
+        )
+
+    page.wait_for_selector(
+        "#email, input[name='login[username]']",
+        timeout=30_000,
+    )
+    page.fill(
+        '#email, input[name="login[username]"], input[name="email"], input[type="email"]',
+        user,
+    )
+    page.fill(
+        '#pass, input[name="login[password]"], input[type="password"]',
+        password,
+    )
+    page.click("#send2, button.action.login, button[type='submit'], input[type='submit']")
+    page.wait_for_load_state("domcontentloaded", timeout=30_000)
+    page.wait_for_timeout(2_000)
 
 
 def _parse_search_text(text: str, query: str) -> list[CatalogItem]:

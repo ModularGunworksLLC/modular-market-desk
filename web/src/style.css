@@ -57,6 +57,17 @@ h1 {
   font-size: 0.95rem;
 }
 
+.api-endpoint {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  max-width: 22rem;
+  word-break: break-all;
+}
+
+.api-endpoint--warn {
+  color: var(--bad);
+}
+
 .site-nav {
   display: flex;
   gap: 1rem;
@@ -368,8 +379,86 @@ th {
   padding: 2rem;
 }
 
+.fee-panel {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(201, 162, 39, 0.06);
+}
+
+.fee-panel-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.fee-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+}
+
 .hidden {
   display: none;
+}
+
+.insight-blocks {
+  margin: 0.65rem 0 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.insight-block {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.insight-block h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.insight-block ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.insight-block li {
+  margin: 0.15rem 0;
+}
+
+.insight-detail {
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.tier-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.tier-a {
+  color: #0d3b2e;
+  background: rgba(46, 204, 113, 0.25);
+}
+
+.tier-b {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .site-footer {

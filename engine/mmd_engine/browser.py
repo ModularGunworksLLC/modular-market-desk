@@ -6,7 +6,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from mmd_engine.age_gate import dismiss_age_gate, goto_dealer_page
 from mmd_engine.config import SESSIONS_DIR
+
+__all__ = ["browser_page", "dismiss_age_gate", "goto_dealer_page"]
 
 
 @contextmanager
@@ -29,6 +32,15 @@ def browser_page(
         context_kwargs: dict = {}
         if storage_state and storage_state.exists():
             context_kwargs["storage_state"] = str(storage_state)
+        context_kwargs.setdefault(
+            "user_agent",
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+        )
+        context_kwargs.setdefault("viewport", {"width": 1280, "height": 720})
         context = browser.new_context(**context_kwargs)
         page = context.new_page()
         try:

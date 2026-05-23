@@ -1,9 +1,15 @@
+# Modular Market Desk — production API (Lightsail / local)
+# UI is built separately and served by nginx from /var/www/desk (see deploy/)
+
 services:
   api:
     build: ./engine
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - ./engine/.env
     volumes:
       - ./engine/data/sessions:/app/data/sessions
+      - ./engine/data/valuation_cache:/app/data/valuation_cache
+      - ./engine/data/imports:/app/data/imports

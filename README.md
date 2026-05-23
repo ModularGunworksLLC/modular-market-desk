@@ -37,6 +37,8 @@ npm run dev
 
 Open http://localhost:5173/modular-market-desk/ — set `apiUrl` in [`web/public/config.json`](web/public/config.json) (default `http://localhost:8000`).
 
+Production template: [`web/public/config.production.example.json`](web/public/config.production.example.json). Build for desk subdomain: `VITE_BASE_PATH=/ npm run build`.
+
 ### Import wholesale CSV (Lipsey's, Zanders, …)
 
 ```powershell
@@ -73,7 +75,7 @@ Presets: [`engine/config/csv_presets/`](engine/config/csv_presets/) (`lipseys`, 
 ## Environment (`engine/.env`)
 
 ```
-MMD_AUCTION_FEES_PCT=13
+MMD_AUCTION_FEES_PCT=18
 MMD_TARGET_PROFIT=75
 MMD_API_KEY=optional-for-production
 ```
@@ -83,6 +85,8 @@ MMD_API_KEY=optional-for-production
 **Repository:** https://github.com/ModularGunworksLLC/modular-market-desk
 
 **Live dashboard (GitHub Pages):** https://modulargunworksllc.github.io/modular-market-desk/
+
+**Production (Lightsail):** see [deploy/README-LIGHTSAIL.md](deploy/README-LIGHTSAIL.md) — `desk.modulargunworks.com` + `api.modulargunworks.com`
 
 Push to `main` triggers the Pages deploy workflow. For live valuation from the deployed site, host the API and set `apiUrl` in `web/public/config.json` to your API host.
 

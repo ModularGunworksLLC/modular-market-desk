@@ -7,7 +7,7 @@ import re
 from urllib.parse import quote_plus
 
 from mmd_engine.adapters.base import DealerAdapter
-from mmd_engine.browser import browser_page
+from mmd_engine.browser import browser_page, dismiss_age_gate, goto_dealer_page
 from mmd_engine.config import session_path
 from mmd_engine.credentials import get_site
 from mmd_engine.models import CatalogItem, utc_now_iso
@@ -39,11 +39,10 @@ class LipseysAdapter(DealerAdapter):
                     _login(page)
                     page.context.storage_state(path=str(session))
 
-                page.goto(
-                    SEARCH_URL.format(query=quote_plus(query or "")),
-                    wait_until="networkidle",
-                    timeout=90_000,
-                )
+                search_url = SEARCH_URL.format(query=quote_plus(query or ""))
+                page.goto(search_url, wait_until="domcontentloaded", timeout=90_000)
+                extra = (site.age_gate_yes,) if site.age_gate_yes else ()
+                dismiss_age_gate(page, extra_css=extra)
                 page.wait_for_timeout(3_000)
                 text = page.inner_text("body")
         except Exception as exc:
@@ -60,7 +59,8 @@ def _login(page) -> None:
     if not user or not password:
         raise RuntimeError("Set lipseys credentials in sites.local.yaml or .env")
 
-    page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
+    extra = (site.age_gate_yes,) if site.age_gate_yes else ()
+    goto_dealer_page(page, LOGIN_URL, timeout=60_000, extra_css=extra)
     page.fill('input[type="email"], input[name="email"], input[name="username"]', user)
     page.fill('input[type="password"]', password)
     page.click('button[type="submit"], input[type="submit"]')
