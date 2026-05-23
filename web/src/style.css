@@ -148,9 +148,45 @@ select {
   color: var(--good);
 }
 
-.empty-state {
+.empty-state,
+.loading-state,
+.error-state {
   text-align: center;
   padding: 3rem 2rem;
+}
+
+.loading-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+  color: var(--accent);
+}
+
+.loading-detail {
+  max-width: 32rem;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.error-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+  color: var(--bad);
+}
+
+.error-detail {
+  max-width: 36rem;
+  margin: 0 auto;
+  color: #ffb4b4;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.search-panel-actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  background: linear-gradient(180deg, transparent 0%, var(--panel) 12%);
 }
 
 .tabs {

@@ -155,14 +155,26 @@
         </label>
 
         <p id="preview" class="preview"></p>
-        <button id="valuate-btn" type="button" class="primary">Valuate</button>
-        <p id="status" class="status" role="status"></p>
+        <div class="search-panel-actions">
+          <button id="valuate-btn" type="button" class="primary">Valuate</button>
+          <p id="status" class="status" role="status"></p>
+        </div>
       </aside>
 
       <section class="results-panel">
         <div id="empty-state" class="empty-state panel">
           <p>Enter a firearm and click <strong>Valuate</strong> to see market spread across sources.</p>
-          <p class="muted">Set <code>apiUrl</code> in <code>public/config.json</code> (e.g. http://localhost:8000).</p>
+          <p class="muted">Live search can take <strong>5–15 minutes</strong> — the right panel updates when done.</p>
+        </div>
+
+        <div id="loading-state" class="loading-state panel hidden" role="status" aria-live="polite">
+          <p class="loading-title">Searching market sources…</p>
+          <p id="loading-detail" class="muted loading-detail"></p>
+        </div>
+
+        <div id="error-state" class="error-state panel hidden" role="alert">
+          <p class="error-title">Search failed</p>
+          <p id="error-detail" class="error-detail"></p>
         </div>
 
         <div id="results" class="hidden">

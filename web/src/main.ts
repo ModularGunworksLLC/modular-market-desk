@@ -35,6 +35,10 @@ const els = {
   valuateBtn: document.getElementById("valuate-btn") as HTMLButtonElement,
   status: document.getElementById("status") as HTMLParagraphElement,
   emptyState: document.getElementById("empty-state") as HTMLDivElement,
+  loadingState: document.getElementById("loading-state") as HTMLDivElement,
+  loadingDetail: document.getElementById("loading-detail") as HTMLParagraphElement,
+  errorState: document.getElementById("error-state") as HTMLDivElement,
+  errorDetail: document.getElementById("error-detail") as HTMLParagraphElement,
   results: document.getElementById("results") as HTMLDivElement,
   soldSummaryLabel: document.getElementById("sold-summary-label") as HTMLHeadingElement,
   soldSummary: document.getElementById("sold-summary") as HTMLParagraphElement,
@@ -255,9 +259,28 @@ function renderInsight(result: ValuationResult): void {
   els.insightDetail.textContent = details.join(" · ");
 }
 
+function hideResultPanels(): void {
+  els.emptyState.classList.add("hidden");
+  els.loadingState.classList.add("hidden");
+  els.errorState.classList.add("hidden");
+  els.results.classList.add("hidden");
+}
+
+function showResultsLoading(detail: string): void {
+  hideResultPanels();
+  els.loadingDetail.textContent = detail;
+  els.loadingState.classList.remove("hidden");
+}
+
+function showResultsError(message: string): void {
+  hideResultPanels();
+  els.errorDetail.textContent = message;
+  els.errorState.classList.remove("hidden");
+}
+
 function renderResult(result: ValuationResult): void {
   lastResult = result;
-  els.emptyState.classList.add("hidden");
+  hideResultPanels();
   els.results.classList.remove("hidden");
 
   const soldLabel =
@@ -326,13 +349,16 @@ async function runValuation(): Promise<void> {
   els.valuateBtn.textContent = "Searching…";
   const live = !els.sampleOnly.checked;
   const needsCost = (ctx === "margin_spotter" || ctx === "vendor_deal") && (!my_cost || my_cost <= 0);
-  setStatus(
-    needsCost
-      ? "No dealer cost entered — showing market comps only (add cost for profit lines)."
-      : live
-        ? "Searching TrueGunValue, GunBroker, Gun.deals… (30–120 seconds). Please wait."
-        : "Loading sample data…",
-    needsCost ? "warn" : "loading"
+  const statusMsg = needsCost
+    ? "No dealer cost entered — showing market comps only (add cost for profit lines)."
+    : live
+      ? "Live search in progress — TrueGunValue, GunBroker, Gun.deals (often 5–15 min). Do not close this tab."
+      : "Loading sample data…";
+  setStatus(statusMsg, needsCost ? "warn" : "loading");
+  showResultsLoading(
+    live
+      ? "Querying TrueGunValue, GunBroker, and Gun.deals from the server. This usually takes several minutes. Results appear here when finished."
+      : "Loading sample valuation data…"
   );
 
   try {
@@ -356,7 +382,15 @@ async function runValuation(): Promise<void> {
       "ok"
     );
   } catch (err) {
-    setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, "error");
+    const msg = err instanceof Error ? err.message : String(err);
+    const friendly =
+      msg.includes("502") || msg.includes("Proxy Error")
+        ? "The server stopped waiting before the search finished (timeout). Try “Sample data only” to verify the desk, or uncheck “Search the web now” if you have cached prices."
+        : msg.length > 400
+          ? `${msg.slice(0, 400)}…`
+          : msg;
+    setStatus(`Error: ${friendly}`, "error");
+    showResultsError(friendly);
   } finally {
     els.valuateBtn.disabled = false;
     els.valuateBtn.textContent = "Valuate";
