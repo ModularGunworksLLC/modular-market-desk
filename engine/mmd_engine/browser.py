@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Iterator
 
 from mmd_engine.age_gate import dismiss_age_gate, goto_dealer_page
-from mmd_engine.config import SESSIONS_DIR
+from mmd_engine.config import SESSIONS_DIR, nav_timeout_ms, nav_wait_until
 
-__all__ = ["browser_page", "dismiss_age_gate", "goto_dealer_page"]
+__all__ = ["browser_page", "dismiss_age_gate", "goto_dealer_page", "goto_market_url"]
 
 
 @contextmanager
@@ -48,3 +48,11 @@ def browser_page(
         finally:
             context.close()
             browser.close()
+
+
+def goto_market_url(page, url: str, *, extra_wait_ms: int = 0) -> None:
+    """Navigate to a public market URL (TGV, GunBroker, Gun.deals)."""
+    page.goto(url, wait_until=nav_wait_until(), timeout=nav_timeout_ms())
+    dismiss_age_gate(page)
+    if extra_wait_ms > 0:
+        page.wait_for_timeout(extra_wait_ms)

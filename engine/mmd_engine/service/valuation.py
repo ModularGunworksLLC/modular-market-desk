@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from mmd_engine.adapters.valuation_base import ValuationAdapter
 from mmd_engine.cache import load_cached, save_cached
 from mmd_engine.insights import compute_insights
-from mmd_engine.market_sources import all_valuation_adapters
+from mmd_engine.config import scrape_serial
+from mmd_engine.market_sources import all_valuation_adapters, live_market_adapters
 from mmd_engine.matching import apply_matching, canonical_key
 from mmd_engine.stats import (
     compute_stats,
@@ -147,6 +148,16 @@ def run_valuation(
     adapters = all_valuation_adapters(sample_only=sample_only)
     all_listings: list = []
     source_status: dict[str, str] = {}
+
+    live_names = {a.name for a in live_market_adapters()}
+    if scrape_serial() and not sample_only:
+        wholesale = [a for a in adapters if a.name not in live_names]
+        live = [a for a in adapters if a.name in live_names]
+        for adapter in live:
+            name, rows, status = _fetch_adapter(adapter, query)
+            source_status[name] = status
+            all_listings.extend(rows)
+        adapters = wholesale
 
     with ThreadPoolExecutor(max_workers=min(6, len(adapters) or 1)) as pool:
         futures = {pool.submit(_fetch_adapter, a, query): a for a in adapters}

@@ -9,7 +9,7 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from mmd_engine.adapters.valuation_base import ValuationAdapter
-from mmd_engine.browser import dismiss_age_gate
+from mmd_engine.browser import goto_market_url
 from mmd_engine.market_browser import market_page
 from mmd_engine.models import utc_now_iso
 from mmd_engine.util import parse_price, slug_id
@@ -53,9 +53,7 @@ class GunBrokerAdapter(ValuationAdapter):
     ) -> list[MarketListing]:
         try:
             with market_page("gunbroker") as page:
-                page.goto(url, wait_until="domcontentloaded", timeout=90_000)
-                dismiss_age_gate(page)
-                page.wait_for_timeout(5_000)
+                goto_market_url(page, url, extra_wait_ms=5_000)
                 html = page.content()
         except Exception as exc:
             logger.warning("GunBroker Playwright: %s", exc)

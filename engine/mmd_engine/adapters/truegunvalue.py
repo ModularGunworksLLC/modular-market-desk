@@ -7,7 +7,7 @@ import re
 from bs4 import BeautifulSoup
 
 from mmd_engine.adapters.valuation_base import ValuationAdapter
-from mmd_engine.browser import browser_page, dismiss_age_gate
+from mmd_engine.browser import browser_page, goto_market_url
 from mmd_engine.dates import sold_date_iso
 from mmd_engine.matching import tgv_canonical_page_slug, tgv_model_slugs, tgv_slug
 from mmd_engine.models import utc_now_iso
@@ -55,9 +55,7 @@ class TrueGunValueAdapter(ValuationAdapter):
                             url = f"https://truegunvalue.com/{cat}/{slug}/{suffix}"
                         else:
                             url = f"https://truegunvalue.com/{cat}/{mfr}/{slug}/{suffix}"
-                        page.goto(url, wait_until="domcontentloaded", timeout=90_000)
-                        dismiss_age_gate(page)
-                        page.wait_for_timeout(2_500)
+                        goto_market_url(page, url, extra_wait_ms=2_500)
                         if _is_cloudflare_challenge(page):
                             page.wait_for_timeout(12_000)
                         html = page.content()
