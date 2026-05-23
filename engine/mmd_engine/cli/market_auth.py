@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 
 from mmd_engine.browser import browser_page, dismiss_age_gate
 from mmd_engine.config import session_path
@@ -31,6 +32,13 @@ def main() -> None:
         help="gunbroker or gundeals",
     )
     parser.add_argument("--list", action="store_true", help="List market site ids")
+    parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Wait N seconds in the browser, then save (no Enter needed)",
+    )
     args = parser.parse_args()
 
     if args.list or not args.site:
@@ -43,13 +51,19 @@ def main() -> None:
     meta = MARKET_SITES[args.site]
     out = session_path(args.site)
     print(f"Opening {meta['label']} in a browser window.")
-    print("Log in or pass any captcha/age gate, then press Enter here to save the session.")
+    if args.wait_seconds > 0:
+        print(f"Log in or pass any captcha/age gate. Saving in {args.wait_seconds}s…")
+    else:
+        print("Log in or pass any captcha/age gate, then press Enter here to save the session.")
     print(f"Session file: {out}")
 
     with browser_page(headless=False) as page:
         page.goto(meta["url"], wait_until="domcontentloaded", timeout=90_000)
         dismiss_age_gate(page)
-        input("Press Enter when finished… ")
+        if args.wait_seconds > 0:
+            time.sleep(args.wait_seconds)
+        else:
+            input("Press Enter when finished… ")
         page.context.storage_state(path=str(out))
 
     print(f"Saved session to {out}")
