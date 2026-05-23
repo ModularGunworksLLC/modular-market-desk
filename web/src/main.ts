@@ -304,13 +304,13 @@ function setupTabs(): void {
 async function runValuation(): Promise<void> {
   const apiUrl = appConfig ? apiBaseUrl(appConfig) : "";
   if (!apiUrl) {
-    els.status.textContent = "Set apiUrl in public/config.json (e.g. http://localhost:8000)";
+    setStatus("Set apiUrl in public/config.json (e.g. https://api.modulargunworks.com)", "error");
     return;
   }
 
   const query = getQuery();
   if (!query.manufacturer || !query.model) {
-    els.status.textContent = "Manufacturer and model are required.";
+    setStatus("Enter manufacturer and model, then click Valuate again.", "error");
     return;
   }
 
@@ -322,16 +322,18 @@ async function runValuation(): Promise<void> {
   const msrpRaw = els.referenceMsrp.value.trim();
   const reference_msrp = msrpRaw ? Number(msrpRaw) : null;
 
-  if ((ctx === "margin_spotter" || ctx === "vendor_deal") && (!my_cost || my_cost <= 0)) {
-    els.status.textContent = "Enter your dealer cost in “Dealer / my cost” first.";
-    return;
-  }
-
   els.valuateBtn.disabled = true;
+  els.valuateBtn.textContent = "Searching…";
   const live = !els.sampleOnly.checked;
-  els.status.textContent = live
-    ? "Searching TrueGunValue, GunBroker, Gun.deals… (30–120 seconds)"
-    : "Loading sample data…";
+  const needsCost = (ctx === "margin_spotter" || ctx === "vendor_deal") && (!my_cost || my_cost <= 0);
+  setStatus(
+    needsCost
+      ? "No dealer cost entered — showing market comps only (add cost for profit lines)."
+      : live
+        ? "Searching TrueGunValue, GunBroker, Gun.deals… (30–120 seconds). Please wait."
+        : "Loading sample data…",
+    needsCost ? "warn" : "loading"
+  );
 
   try {
     const result = await valuate(apiUrl, appConfig?.apiKey ?? "", {
@@ -349,12 +351,26 @@ async function runValuation(): Promise<void> {
     renderResult(result);
     const sold = result.sold_stats.count;
     const asking = result.asking_stats.count;
-    els.status.textContent = `Done — ${sold} sold · ${asking} asking · ${result.listings.length} raw listings.`;
+    setStatus(
+      `Done — ${sold} sold · ${asking} asking · ${result.listings.length} raw listings.`,
+      "ok"
+    );
   } catch (err) {
-    els.status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`, "error");
   } finally {
     els.valuateBtn.disabled = false;
+    els.valuateBtn.textContent = "Valuate";
   }
+}
+
+function setStatus(message: string, kind: "ok" | "error" | "warn" | "loading" = "ok"): void {
+  els.status.textContent = message;
+  els.status.classList.remove("status--error", "status--warn", "status--loading", "status--ok");
+  if (kind === "error") els.status.classList.add("status--error");
+  else if (kind === "warn") els.status.classList.add("status--warn");
+  else if (kind === "loading") els.status.classList.add("status--loading");
+  else els.status.classList.add("status--ok");
+  els.status.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function applyNavLinks(config: AppConfig): void {

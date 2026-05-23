@@ -312,9 +312,34 @@ fieldset {
 
 .status {
   margin: 0.75rem 0 0;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: var(--muted);
   min-height: 1.2em;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.status--error {
+  color: #ffb4b4;
+  background: rgba(220, 60, 60, 0.15);
+  border: 1px solid rgba(220, 60, 60, 0.35);
+}
+
+.status--warn {
+  color: #ffd88a;
+  background: rgba(219, 180, 46, 0.12);
+  border: 1px solid rgba(219, 180, 46, 0.3);
+}
+
+.status--loading {
+  color: #b8d4ff;
+  background: rgba(80, 140, 255, 0.12);
+  border: 1px solid rgba(80, 140, 255, 0.25);
+}
+
+.status--ok {
+  color: #a8e6a3;
 }
 
 .results-header {
