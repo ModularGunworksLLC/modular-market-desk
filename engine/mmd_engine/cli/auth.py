@@ -28,10 +28,16 @@ def main() -> None:
         help="List available site ids",
     )
     parser.add_argument(
-        "--headed",
+        "--headless",
         action="store_true",
-        default=True,
-        help="Show browser window (default: on)",
+        help="No browser window (Lightsail / auto-login only)",
+    )
+    parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Headless: wait N seconds after login before saving",
     )
     args = parser.parse_args()
 
@@ -61,14 +67,23 @@ def main() -> None:
     print(f"Opening {site.login_url} …")
 
     extra = (site.age_gate_yes,) if site.age_gate_yes else ()
+    wait_ms = ((args.wait_seconds if args.wait_seconds > 0 else 5) * 1000) if args.headless else 0
     try:
-        with browser_page(headless=not args.headed, storage_state=dest if dest.exists() else None) as page:
-            if site.is_configured() and not dest.exists():
+        with browser_page(
+            headless=args.headless,
+            storage_state=dest if dest.exists() else None,
+        ) as page:
+            if args.headless and site.is_configured():
                 _try_auto_login(page, site)
+                dismiss_age_gate(page, extra_css=extra)
+                page.wait_for_timeout(wait_ms)
             else:
-                goto_dealer_page(page, site.login_url, timeout=60_000, extra_css=extra)
-            dismiss_age_gate(page, extra_css=extra)
-            input("Press Enter after you are fully logged in… ")
+                if site.is_configured() and not dest.exists():
+                    _try_auto_login(page, site)
+                else:
+                    goto_dealer_page(page, site.login_url, timeout=60_000, extra_css=extra)
+                dismiss_age_gate(page, extra_css=extra)
+                input("Press Enter after you are fully logged in… ")
             page.context.storage_state(path=str(dest))
     except Exception as exc:
         print(f"Auth failed: {exc}", file=sys.stderr)
