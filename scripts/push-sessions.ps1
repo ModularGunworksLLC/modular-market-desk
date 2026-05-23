@@ -14,8 +14,7 @@ $Root = Split-Path $PSScriptRoot -Parent
 $LocalSessions = Join-Path $Root "engine\data\sessions"
 
 if (-not $env:MMD_SSH_HOST) {
-    Write-Host "Set MMD_SSH_HOST (e.g. ubuntu@1.2.3.4)" -ForegroundColor Red
-    exit 1
+    $env:MMD_SSH_HOST = "modulargunworks"
 }
 
 $RemotePath = if ($env:MMD_REMOTE_PATH) { $env:MMD_REMOTE_PATH } else { "/opt/modular-market-desk/engine/data/sessions" }
@@ -44,5 +43,6 @@ if ($Uploaded -eq 0) {
     exit 1
 }
 
-Write-Host "`nRestart API on server:" -ForegroundColor Green
-Write-Host "  ssh $env:MMD_SSH_HOST 'cd /opt/modular-market-desk && docker compose restart api'"
+Write-Host "Restarting API on server..." -ForegroundColor Cyan
+ssh $env:MMD_SSH_HOST "cd /opt/modular-market-desk && sudo docker compose restart api && sleep 3 && curl -s https://api.modulargunworks.com/health"
+Write-Host "`nDone." -ForegroundColor Green
