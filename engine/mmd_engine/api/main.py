@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import time
 
+from typing import Any
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from mmd_engine.config import SESSIONS_DIR, api_key
+from mmd_engine.service.connections import (
+    list_dealer_connections,
+    list_valuation_connections,
+    refresh_connection,
+    upload_connection_session,
+)
 from mmd_engine.filters import SearchFilters
 from mmd_engine.service.search import run_search
 from mmd_engine.service.valuation import run_valuation
@@ -19,7 +27,7 @@ app = FastAPI(title="Modular Market Desk API", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -80,6 +88,7 @@ def root() -> dict[str, str]:
         "message": "API is running. Use the web UI (Vite dev server), not this URL in the browser.",
         "health": "/health",
         "valuate": "POST /api/valuate",
+        "connections": "GET /api/connections",
     }
 
 
@@ -109,6 +118,47 @@ def search(body: SearchRequest) -> dict:
     )
     bundle = run_search(body.q, filters=filters)
     return bundle.to_dict()
+
+
+@app.get("/api/connections", dependencies=[Depends(require_api_key)])
+def connections_list() -> dict:
+    valuation = list_valuation_connections()
+    dealers = list_dealer_connections()
+    return {
+        "valuation": valuation,
+        "dealers": dealers,
+        "hint": (
+            "Use Auto-login on server when credentials are set, or connect-site.ps1 on your PC "
+            "for MFA/CAPTCHA sites."
+        ),
+    }
+
+
+class RefreshConnectionRequest(BaseModel):
+    mode: str = "auto"
+
+
+@app.post(
+    "/api/connections/{site_id}/refresh",
+    dependencies=[Depends(require_api_key)],
+)
+def connections_refresh(site_id: str, body: RefreshConnectionRequest | None = None) -> dict:
+    mode = body.mode if body else "auto"
+    result = refresh_connection(site_id, mode=mode)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("message", "refresh failed"))
+    return result
+
+
+@app.put(
+    "/api/connections/{site_id}/session",
+    dependencies=[Depends(require_api_key)],
+)
+def connections_upload_session(site_id: str, payload: dict[str, Any]) -> dict:
+    try:
+        return upload_connection_session(site_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/valuate", dependencies=[Depends(require_api_key)])

@@ -74,12 +74,16 @@ def main() -> None:
             storage_state=dest if dest.exists() else None,
         ) as page:
             if args.headless and site.is_configured():
-                _try_auto_login(page, site)
+                from mmd_engine.service.session_auth import try_auto_login
+
+                try_auto_login(page, site)
                 dismiss_age_gate(page, extra_css=extra)
                 page.wait_for_timeout(wait_ms)
             else:
                 if site.is_configured() and not dest.exists():
-                    _try_auto_login(page, site)
+                    from mmd_engine.service.session_auth import try_auto_login
+
+                    try_auto_login(page, site)
                 else:
                     goto_dealer_page(page, site.login_url, timeout=60_000, extra_css=extra)
                 dismiss_age_gate(page, extra_css=extra)
@@ -90,53 +94,6 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Saved session to {dest}")
-
-
-def _try_auto_login(page, site) -> None:
-    user = site.resolved_username()
-    password = site.resolved_password()
-    extra = (site.age_gate_yes,) if site.age_gate_yes else ()
-    if not user or not password:
-        goto_dealer_page(page, site.login_url, timeout=60_000, extra_css=extra)
-        return
-    goto_dealer_page(page, site.login_url, timeout=90_000, extra_css=extra)
-    page.wait_for_timeout(2_000)
-    if site.id == "zanders":
-        print(
-            "Zanders uses Cloudflare — complete the checkbox/captcha if shown, "
-            "then sign in (auto-fill may work after the challenge)."
-        )
-    try:
-        if site.id == "zanders":
-            page.wait_for_selector(
-                "#email, input[name='login[username]']",
-                timeout=120_000,
-            )
-            page.fill(
-                "#email, input[name='login[username]'], input[type='email']",
-                user,
-                timeout=10_000,
-            )
-            page.fill(
-                "#pass, input[name='login[password]'], input[type='password']",
-                password,
-                timeout=10_000,
-            )
-            page.click(
-                "#send2, button.action.login, button[type='submit'], input[type='submit']",
-                timeout=10_000,
-            )
-        else:
-            page.fill(
-                'input[type="email"], input[name="email"], input[name="username"]',
-                user,
-                timeout=10_000,
-            )
-            page.fill('input[type="password"]', password, timeout=10_000)
-            page.click('button[type="submit"], input[type="submit"]', timeout=10_000)
-        page.wait_for_timeout(4_000)
-    except Exception:
-        print("Auto-login did not complete — finish login manually in the browser.")
 
 
 if __name__ == "__main__":

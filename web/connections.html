@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Modular Market Desk · Connections</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <p class="eyebrow">Modular Gunworks LLC</p>
+        <h1>Site connections</h1>
+        <p class="tagline">Log in once per site — Valuate reuses saved browser sessions</p>
+      </div>
+      <nav class="site-nav">
+        <p id="api-endpoint" class="api-endpoint muted">API: loading…</p>
+        <a href="index.html">Valuation desk</a>
+        <a href="#" id="link-company" class="muted">Company site</a>
+        <a href="#" id="link-ledger" class="muted">Ledger</a>
+      </nav>
+    </header>
+
+    <main class="connections-layout">
+      <div class="connections-toolbar panel">
+        <p class="muted">
+          Like 3drop: connect each vendor you use. <strong>Auto-login</strong> uses passwords in
+          <code>sites.local.yaml</code> on the server. For MFA/CAPTCHA, run
+          <code>scripts\connect-site.ps1</code> on your PC, then sessions upload automatically.
+        </p>
+        <button id="refresh-all-btn" type="button" class="primary">Auto-login all (with credentials)</button>
+        <p id="connections-status" class="status" role="status"></p>
+      </div>
+
+      <div id="connections-list" class="connections-grid"></div>
+    </main>
+
+    <script type="module" src="/src/connections.ts"></script>
+  </body>
+</html>

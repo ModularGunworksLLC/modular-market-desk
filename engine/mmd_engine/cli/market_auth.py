@@ -4,23 +4,16 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 
-from mmd_engine.age_gate import goto_dealer_page
-from mmd_engine.browser import browser_page, dismiss_age_gate
 from mmd_engine.config import session_path
 from mmd_engine.credentials import get_site
+from mmd_engine.service.session_auth import (
+    MARKET_SITE_URLS,
+    refresh_market_session_auto,
+    refresh_market_session_headed,
+)
 
-MARKET_SITES = {
-    "gunbroker": {
-        "label": "GunBroker",
-        "url": "https://www.gunbroker.com/",
-    },
-    "gundeals": {
-        "label": "Gun.deals",
-        "url": "https://www.gun.deals/",
-    },
-}
+MARKET_SITES = MARKET_SITE_URLS
 
 
 def main() -> None:
@@ -68,32 +61,20 @@ def main() -> None:
     )
 
     if use_auto and site_cfg and site_cfg.login_url:
-        from mmd_engine.cli.auth import _try_auto_login
-
         print(f"Auto-login to {meta['label']} using saved credentials…")
         print(f"Session file: {out}")
-        extra = (site_cfg.age_gate_yes,) if site_cfg.age_gate_yes else ()
-        with browser_page(headless=True) as page:
-            _try_auto_login(page, site_cfg)
-            dismiss_age_gate(page, extra_css=extra)
-            page.wait_for_timeout(5_000)
-            page.context.storage_state(path=str(out))
-    else:
-        if not args.wait_seconds:
-            print(
-                f"No credentials for {meta['label']}; use sites.local.yaml or --auto-login.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        refresh_market_session_auto(args.site, wait_seconds=5)
+    elif args.wait_seconds:
         print(f"Opening {meta['label']} in a browser window.")
         print(f"Log in or pass any captcha/age gate. Saving in {args.wait_seconds}s…")
         print(f"Session file: {out}")
-
-        with browser_page(headless=False) as page:
-            page.goto(meta["url"], wait_until="domcontentloaded", timeout=90_000)
-            dismiss_age_gate(page)
-            time.sleep(args.wait_seconds)
-            page.context.storage_state(path=str(out))
+        refresh_market_session_headed(args.site, wait_seconds=args.wait_seconds)
+    else:
+        print(
+            f"No credentials for {meta['label']}; use sites.local.yaml, --auto-login, or --wait-seconds.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     print(f"Saved session to {out}")
 

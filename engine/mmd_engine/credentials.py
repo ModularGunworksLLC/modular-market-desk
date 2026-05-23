@@ -233,6 +233,15 @@ SITE_REGISTRY: dict[str, dict[str, Any]] = {
         "includes_firearms": True,
         "notes": "Public comps — login optional.",
     },
+    "gundeals": {
+        "label": "Gun.deals",
+        "login_url": "https://www.gun.deals/",
+        "username_env": "GUNDEALS_USER",
+        "password_env": "GUNDEALS_PASS",
+        "requires_session": False,
+        "includes_firearms": True,
+        "notes": "Retail promos — login optional.",
+    },
 }
 
 
