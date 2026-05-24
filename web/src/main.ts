@@ -371,7 +371,7 @@ async function runValuation(): Promise<void> {
       buyer_premium_pct: getBuyerPremiumPct(),
       listing_addons: getListingAddons(),
       sample_only: els.sampleOnly.checked,
-      use_cache: els.sampleOnly.checked && !els.forceRefresh.checked,
+      use_cache: !els.sampleOnly.checked && !els.forceRefresh.checked,
       force_refresh: els.forceRefresh.checked && !els.sampleOnly.checked,
     });
     renderResult(result);
