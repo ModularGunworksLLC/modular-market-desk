@@ -39,5 +39,13 @@ def scrape_serial() -> bool:
     return env("MMD_SERIALIZE_MARKET_SCRAPERS", "").lower() in {"1", "true", "yes"}
 
 
+def skip_market_sources() -> frozenset[str]:
+    """Comma-separated adapter names to skip (e.g. truegunvalue on Lightsail)."""
+    raw = env("MMD_SKIP_MARKET_SOURCES", "")
+    if not raw:
+        return frozenset()
+    return frozenset(s.strip().lower() for s in raw.split(",") if s.strip())
+
+
 def session_path(dealer: str) -> Path:
     return SESSIONS_DIR / f"{dealer}.json"

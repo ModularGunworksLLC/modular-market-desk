@@ -131,8 +131,16 @@ def refresh_market_session_headed(site_id: str, *, wait_seconds: int = 120) -> P
     dest = session_path(site_id)
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
+    login_url = meta["url"]
+    try:
+        site_cfg = get_site(site_id)
+        if site_cfg.login_url:
+            login_url = site_cfg.login_url
+    except KeyError:
+        pass
+
     with browser_page(headless=False) as page:
-        page.goto(meta["url"], wait_until="domcontentloaded", timeout=90_000)
+        page.goto(login_url, wait_until="domcontentloaded", timeout=90_000)
         dismiss_age_gate(page)
         time.sleep(max(10, wait_seconds))
         page.context.storage_state(path=str(dest))

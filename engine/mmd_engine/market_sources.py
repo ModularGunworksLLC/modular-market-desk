@@ -42,11 +42,15 @@ MARKET_SOURCES: tuple[MarketSourceMeta, ...] = (
 
 def live_market_adapters() -> list[ValuationAdapter]:
     """All public internet price sources for /api/valuate (run in parallel)."""
-    return [
+    from mmd_engine.config import skip_market_sources
+
+    skip = skip_market_sources()
+    adapters: list[ValuationAdapter] = [
         TrueGunValueAdapter(),
         GunBrokerAdapter(),
         GunDealsValuationAdapter(),
     ]
+    return [a for a in adapters if a.name not in skip]
 
 
 def all_valuation_adapters(*, sample_only: bool) -> list[ValuationAdapter]:
