@@ -23,7 +23,10 @@ export const evaluateSchema = z.object({
   targetProfit: z.number().nonnegative().default(DEAL_DEFAULTS.targetProfit),
   minMarginPct: z.number().min(0).default(DEAL_DEFAULTS.minMarginPct),
 
-  // market source: live GBA (resolved ids) OR manual sold prices for now
+  // market source precedence:
+  //   1. explicit `gba` ids (manual override of the resolver)
+  //   2. auto comps: resolve catalog ids from identity text + saved token (default)
+  //   3. manual sold/asking price arrays
   gba: z
     .object({
       modelId: z.number().int().positive(),
@@ -31,6 +34,9 @@ export const evaluateSchema = z.object({
       condition: z.enum(["New", "Used"]),
     })
     .optional(),
+  // When true (default), the server resolves GBA model/caliber ids from the
+  // manufacturer/model/caliber text and pulls live comps automatically.
+  autoComps: z.boolean().optional().default(true),
   soldPrices: z.array(z.number().positive()).optional(),
   askingPrices: z.array(z.number().positive()).optional(),
 });

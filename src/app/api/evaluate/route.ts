@@ -43,9 +43,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   const sourceStatus: Record<string, string> = {};
 
   // --- Avenue 1: market comps ---
-  let sold: PriceStats;
-  let asking: PriceStats;
+  // Precedence: explicit ids > auto-resolved live comps > manual price arrays.
+  let sold: PriceStats = summarize([]);
+  let asking: PriceStats = summarize([]);
+
   if (body.gba) {
+    // Explicit ids: the caller is deliberately driving the live API, so a missing
+    // token is a hard error.
     const token = await getMarketToken();
     if (!token) {
       return NextResponse.json(
@@ -63,9 +67,44 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ error: (err as Error).message }, { status });
     }
   } else {
-    sold = summarize(body.soldPrices ?? []);
-    asking = summarize(body.askingPrices ?? []);
-    sourceStatus.manual = `manual (${sold.count} sold, ${asking.count} asking)`;
+    // Auto comps: resolve catalog ids from identity text, then pull live comps.
+    // This path degrades gracefully - any miss falls back to manual prices.
+    let resolved = false;
+    if (body.autoComps) {
+      const token = await getMarketToken();
+      if (!token) {
+        sourceStatus.gba = "skipped (no Outdoor Analytics token in vault)";
+      } else {
+        try {
+          const market = await new GbaApiClient(token).resolveMarket({
+            manufacturer: body.manufacturer,
+            model: body.model,
+            caliber: body.caliber || undefined,
+            mpn: body.mpn || undefined,
+            condition: body.condition,
+          });
+          if (market) {
+            sold = market.sold;
+            asking = market.asking;
+            resolved = true;
+            const s = market.selection;
+            sourceStatus.gba = `auto: ${s.manufacturer} ${s.model}${s.caliber ? ` ${s.caliber}` : ""} (${s.conditionParam}, score ${s.score.toFixed(0)}) - ${sold.count} sold, ${asking.count} asking`;
+          } else {
+            sourceStatus.gba = "no catalog match for this manufacturer/model";
+          }
+        } catch (err) {
+          const reason = err instanceof GbaApiError ? err.message : (err as Error).message;
+          sourceStatus.gba = `error: ${reason}`;
+        }
+      }
+    }
+
+    // Manual prices supplement or replace when the live pull didn't produce comps.
+    if (!resolved && (body.soldPrices?.length || body.askingPrices?.length)) {
+      sold = summarize(body.soldPrices ?? []);
+      asking = summarize(body.askingPrices ?? []);
+      sourceStatus.manual = `manual (${sold.count} sold, ${asking.count} asking)`;
+    }
   }
 
   // --- Avenue 2: wholesale cross-reference ---
@@ -88,7 +127,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     caliber: body.caliber,
     condition: body.condition,
   });
-  const money = (n: number) => n.toFixed(2);
+  // SQLite real columns store numbers; round to cents for clean persistence.
+  const money = (n: number) => Math.round(n * 100) / 100;
 
   await db.insert(valuations).values({
     canonicalKey: key,

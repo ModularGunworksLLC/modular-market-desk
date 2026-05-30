@@ -1,16 +1,16 @@
 import { defineConfig } from "drizzle-kit";
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is required for drizzle-kit (set it in .env).");
-}
+// Local SQLite file (libsql). e.g. file:./data/desk.db on the Lightsail disk.
+const url = process.env.DATABASE_URL ?? "file:./data/desk.db";
 
 export default defineConfig({
   schema: "./src/lib/db/schema.ts",
   out: "./drizzle",
-  dialect: "postgresql",
+  dialect: "turso",
   dbCredentials: {
-    url: databaseUrl,
+    url,
+    // Empty for a local file; set for a remote Turso/libsql endpoint.
+    authToken: process.env.DATABASE_AUTH_TOKEN,
   },
   strict: true,
   verbose: true,

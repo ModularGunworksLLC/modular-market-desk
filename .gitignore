@@ -16,6 +16,12 @@ next-env.d.ts
 .env.*
 !.env.example
 
+# local sqlite database (libsql) + drizzle journal artifacts
+/data/
+*.db
+*.db-shm
+*.db-wal
+
 # misc
 .DS_Store
 *.pem

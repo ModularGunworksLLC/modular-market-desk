@@ -21,16 +21,21 @@ export async function getCatalogSummaries(): Promise<CatalogSummary[]> {
   const rows = await db
     .select({
       vendorName: catalogItems.vendorName,
-      items: sql<number>`count(*)::int`,
-      inStock: sql<number>`sum(case when ${catalogItems.inStock} then 1 else 0 end)::int`,
-      onSale: sql<number>`sum(case when ${catalogItems.onSale} then 1 else 0 end)::int`,
-      lastImport: sql<string | null>`max(${catalogItems.importedAt})`,
-      cheapest: sql<number | null>`min(${catalogItems.dealerPrice})::float8`,
+      items: sql<number>`count(*)`,
+      inStock: sql<number>`sum(case when ${catalogItems.inStock} = 1 then 1 else 0 end)`,
+      onSale: sql<number>`sum(case when ${catalogItems.onSale} = 1 then 1 else 0 end)`,
+      // imported_at is stored as unix seconds (integer timestamp mode).
+      lastImport: sql<number | null>`max(${catalogItems.importedAt})`,
+      cheapest: sql<number | null>`min(${catalogItems.dealerPrice})`,
     })
     .from(catalogItems)
     .groupBy(catalogItems.vendorName)
     .orderBy(catalogItems.vendorName);
-  return rows;
+
+  return rows.map((r) => ({
+    ...r,
+    lastImport: r.lastImport != null ? new Date(r.lastImport * 1000).toISOString() : null,
+  }));
 }
 
 export async function listPresets(): Promise<CsvPreset[]> {

@@ -1,56 +1,70 @@
 /**
- * Drizzle schema - Modular Market Desk (Neon Postgres).
+ * Drizzle schema - Modular Market Desk (local SQLite via @libsql/client).
  *
  * Four tables:
  *   - connections   : Session Vault for pasted bearer tokens / cookie strings (encrypted).
  *   - csv_presets   : data-driven header maps so the importer is vendor-agnostic.
  *   - catalog_items : imported distributor catalogs, indexed for fast UPC/model cross-reference.
  *   - valuations    : persisted deal evaluations (query + market metrics + profit verdict).
+ *
+ * SQLite type conventions used here:
+ *   - ids        : text PK seeded with crypto.randomUUID()
+ *   - money      : real (double) - aggregations (min/avg) work natively
+ *   - booleans   : integer { mode: "boolean" } (0 / 1)
+ *   - timestamps : integer { mode: "timestamp" } (unix seconds), default unixepoch()
+ *   - json blobs : text { mode: "json" } - drizzle (de)serializes objects transparently
+ *   - enums      : text { enum: [...] } - SQLite has no native enum type
  */
 
+import { randomUUID } from "node:crypto";
+
 import { sql } from "drizzle-orm";
-import {
-  boolean,
-  index,
-  integer,
-  jsonb,
-  numeric,
-  pgEnum,
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /* ------------------------------------------------------------------ enums */
+/* SQLite has no enum type; these are the allowed text values for each column. */
 
-export const connectionKindEnum = pgEnum("connection_kind", [
-  "market_api", // GunBroker Analytics bearer token
-  "vendor_session", // pasted cookie/session string for a distributor site
-]);
+export const CONNECTION_KINDS = ["market_api", "vendor_session"] as const;
+export const VERDICTS = ["GO", "NO-GO"] as const;
+export const SELL_ROUTES = ["gunbroker", "local_al"] as const;
 
-export const verdictEnum = pgEnum("verdict", ["GO", "NO-GO"]);
+export type ConnectionKind = (typeof CONNECTION_KINDS)[number];
+export type VerdictValue = (typeof VERDICTS)[number];
+export type SellRouteValue = (typeof SELL_ROUTES)[number];
 
-export const sellRouteEnum = pgEnum("sell_route", ["gunbroker", "local_al"]);
+/** Shared helpers so every table seeds ids/timestamps identically. */
+const id = () =>
+  text("id")
+    .primaryKey()
+    .$defaultFn(() => randomUUID());
+
+const createdAt = () =>
+  integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`);
+
+const updatedAt = () =>
+  integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`);
 
 /* ----------------------------------------------------------- connections */
 /* Session Vault. `secret` holds AES-256-GCM ciphertext - never plaintext. */
 
-export const connections = pgTable(
+export const connections = sqliteTable(
   "connections",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
-    kind: connectionKindEnum("kind").notNull(),
+    id: id(),
+    kind: text("kind", { enum: CONNECTION_KINDS }).notNull(),
     vendor: text("vendor").notNull(), // e.g. "outdoor_analytics", "lipseys"
     label: text("label").notNull(),
     secret: text("secret").notNull(), // encrypted token / cookie string
-    meta: jsonb("meta").$type<Record<string, unknown>>().default({}).notNull(),
+    meta: text("meta", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
     status: text("status").notNull().default("active"), // active | error | revoked
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-    expiresAt: timestamp("expires_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => ({
     vendorKindUx: uniqueIndex("connections_vendor_kind_ux").on(t.vendor, t.kind),
@@ -77,18 +91,21 @@ export type CsvColumnMap = {
   salePrice?: string[];
 };
 
-export const csvPresets = pgTable(
+export const csvPresets = sqliteTable(
   "csv_presets",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: id(),
     vendorName: text("vendor_name").notNull(),
     label: text("label").notNull(),
     delimiter: text("delimiter").notNull().default(","),
     encoding: text("encoding").notNull().default("utf-8"),
-    columnMap: jsonb("column_map").$type<CsvColumnMap>().notNull(),
-    categoryRules: jsonb("category_rules").$type<Record<string, string[]>>().default({}).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    columnMap: text("column_map", { mode: "json" }).$type<CsvColumnMap>().notNull(),
+    categoryRules: text("category_rules", { mode: "json" })
+      .$type<Record<string, string[]>>()
+      .notNull()
+      .default({}),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => ({
     vendorUx: uniqueIndex("csv_presets_vendor_ux").on(t.vendorName),
@@ -101,10 +118,10 @@ export const csvPresets = pgTable(
  * dedupe_key = upc ?? sku ?? slug(manufacturer|model|description), set by the importer.
  */
 
-export const catalogItems = pgTable(
+export const catalogItems = sqliteTable(
   "catalog_items",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: id(),
     vendorName: text("vendor_name").notNull(),
     dedupeKey: text("dedupe_key").notNull(),
     sku: text("sku"),
@@ -114,17 +131,17 @@ export const catalogItems = pgTable(
     caliber: text("caliber"),
     category: text("category"),
     description: text("description"),
-    dealerPrice: numeric("dealer_price", { precision: 12, scale: 2 }).notNull(),
-    msrp: numeric("msrp", { precision: 12, scale: 2 }),
-    mapPrice: numeric("map_price", { precision: 12, scale: 2 }),
-    salePrice: numeric("sale_price", { precision: 12, scale: 2 }),
-    onSale: boolean("on_sale").notNull().default(false),
+    dealerPrice: real("dealer_price").notNull(),
+    msrp: real("msrp"),
+    mapPrice: real("map_price"),
+    salePrice: real("sale_price"),
+    onSale: integer("on_sale", { mode: "boolean" }).notNull().default(false),
     qty: integer("qty"),
-    inStock: boolean("in_stock").notNull().default(true),
+    inStock: integer("in_stock", { mode: "boolean" }).notNull().default(true),
     currency: text("currency").notNull().default("USD"),
     sourceFile: text("source_file"),
-    importedAt: timestamp("imported_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    importedAt: integer("imported_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+    updatedAt: updatedAt(),
   },
   (t) => ({
     // UPSERT key + the primary cross-reference lookups.
@@ -160,11 +177,11 @@ export type RouteBreakdown = {
   net: number;
 };
 
-export const valuations = pgTable(
+export const valuations = sqliteTable(
   "valuations",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    id: id(),
+    createdAt: createdAt(),
 
     // --- query / identity ---
     canonicalKey: text("canonical_key").notNull(),
@@ -178,32 +195,35 @@ export const valuations = pgTable(
     condition: text("condition").notNull().default("any"),
 
     // --- buy-side inputs ---
-    targetAcquisitionCost: numeric("target_acquisition_cost", { precision: 12, scale: 2 }).notNull(),
-    inboundShip: numeric("inbound_ship", { precision: 12, scale: 2 }).notNull().default("0"),
-    buyerPremiumPct: numeric("buyer_premium_pct", { precision: 6, scale: 3 }).notNull().default("0"),
-    outboundShip: numeric("outbound_ship", { precision: 12, scale: 2 }).notNull().default("0"),
-    listingUpgrades: numeric("listing_upgrades", { precision: 12, scale: 2 }).notNull().default("0"),
-    targetProfit: numeric("target_profit", { precision: 12, scale: 2 }).notNull(),
-    minMarginPct: numeric("min_margin_pct", { precision: 6, scale: 3 }).notNull(),
-    allInCost: numeric("all_in_cost", { precision: 12, scale: 2 }).notNull(),
+    targetAcquisitionCost: real("target_acquisition_cost").notNull(),
+    inboundShip: real("inbound_ship").notNull().default(0),
+    buyerPremiumPct: real("buyer_premium_pct").notNull().default(0),
+    outboundShip: real("outbound_ship").notNull().default(0),
+    listingUpgrades: real("listing_upgrades").notNull().default(0),
+    targetProfit: real("target_profit").notNull(),
+    minMarginPct: real("min_margin_pct").notNull(),
+    allInCost: real("all_in_cost").notNull(),
 
     // --- market metrics ---
-    soldStats: jsonb("sold_stats").$type<PriceStats>(),
-    askingStats: jsonb("asking_stats").$type<PriceStats>(),
+    soldStats: text("sold_stats", { mode: "json" }).$type<PriceStats>(),
+    askingStats: text("asking_stats", { mode: "json" }).$type<PriceStats>(),
 
     // --- outputs ---
-    verdict: verdictEnum("verdict").notNull(),
-    bestRoute: sellRouteEnum("best_route"),
-    maxBid: numeric("max_bid", { precision: 12, scale: 2 }),
-    netProfit: numeric("net_profit", { precision: 12, scale: 2 }),
-    marginPct: numeric("margin_pct", { precision: 8, scale: 3 }),
+    verdict: text("verdict", { enum: VERDICTS }).notNull(),
+    bestRoute: text("best_route", { enum: SELL_ROUTES }),
+    maxBid: real("max_bid"),
+    netProfit: real("net_profit"),
+    marginPct: real("margin_pct"),
 
     // --- structured payloads for the UI ---
-    routeA: jsonb("route_a").$type<RouteBreakdown>(),
-    routeB: jsonb("route_b").$type<RouteBreakdown>(),
-    wholesaleGrid: jsonb("wholesale_grid").$type<unknown>(),
-    sourceStatus: jsonb("source_status").$type<Record<string, string>>().default({}).notNull(),
-    raw: jsonb("raw").$type<unknown>(),
+    routeA: text("route_a", { mode: "json" }).$type<RouteBreakdown>(),
+    routeB: text("route_b", { mode: "json" }).$type<RouteBreakdown>(),
+    wholesaleGrid: text("wholesale_grid", { mode: "json" }).$type<unknown>(),
+    sourceStatus: text("source_status", { mode: "json" })
+      .$type<Record<string, string>>()
+      .notNull()
+      .default({}),
+    raw: text("raw", { mode: "json" }).$type<unknown>(),
   },
   (t) => ({
     canonicalIdx: index("valuations_canonical_idx").on(t.canonicalKey),

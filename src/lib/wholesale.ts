@@ -2,7 +2,7 @@
 
 import "server-only";
 
-import { and, eq, ilike, sql } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { catalogItems } from "@/lib/db/schema";
@@ -45,8 +45,9 @@ export async function crossReferenceWholesale(params: {
       upc
         ? eq(catalogItems.upc, upc)
         : and(
-            ilike(catalogItems.manufacturer, `%${params.manufacturer}%`),
-            ilike(catalogItems.model, `%${params.model}%`),
+            // SQLite LIKE is case-insensitive for ASCII by default.
+            like(catalogItems.manufacturer, `%${params.manufacturer}%`),
+            like(catalogItems.model, `%${params.model}%`),
           ),
     )
     .orderBy(sql`${catalogItems.dealerPrice} ASC`)

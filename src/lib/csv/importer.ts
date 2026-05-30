@@ -3,8 +3,11 @@
  *
  * Streams a (potentially multi-megabyte) distributor CSV with `csv-parse`, never buffering the
  * whole file. Rows are mapped onto unified catalog columns via a `csv_presets` column map, then
- * flushed to Postgres in batches of 500 using a Drizzle UPSERT keyed on (vendor_name, dedupe_key).
+ * flushed to SQLite in batches of 500 using a Drizzle UPSERT keyed on (vendor_name, dedupe_key).
  * Re-importing the same file is idempotent.
+ *
+ * 500 rows x ~18 columns = ~9k bound params per statement, comfortably under libsql's
+ * SQLITE_MAX_VARIABLE_NUMBER (32766).
  */
 
 import { parse } from "csv-parse";
@@ -99,7 +102,12 @@ function rowToItem(
     (salePrice != null && salePrice > 0 && salePrice < dealerPrice) ||
     (msrp != null && msrp > dealerPrice);
 
-  const money = (n: number | null | undefined): string | null => (n == null ? null : n.toFixed(2));
+  // SQLite real columns expect numbers; round to cents for clean storage.
+  const money = (n: number | null | undefined): number | null =>
+    n == null ? null : Math.round(n * 100) / 100;
+
+  const effectiveDealer =
+    salePrice != null && salePrice > 0 && salePrice < dealerPrice ? salePrice : dealerPrice;
 
   return {
     vendorName: ctx.vendorName,
@@ -111,10 +119,7 @@ function rowToItem(
     caliber: cell("caliber") || null,
     category: cell("category") || null,
     description: description || null,
-    dealerPrice: (salePrice != null && salePrice > 0 && salePrice < dealerPrice
-      ? salePrice
-      : dealerPrice
-    ).toFixed(2),
+    dealerPrice: money(effectiveDealer)!,
     msrp: money(msrp),
     mapPrice: money(parseMoney(cell("mapPrice"))),
     salePrice: money(salePrice),
