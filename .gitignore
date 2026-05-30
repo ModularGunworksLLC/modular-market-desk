@@ -1,0 +1,30 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# env / secrets (Session Vault tokens live in the DB, never on disk)
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.pem
+*.log
+npm-debug.log*
+
+# typescript
+*.tsbuildinfo
+
+# legacy v0.4 leftovers (recoverable on the `legacy-v0.4` branch)
+/engine/
+/web/

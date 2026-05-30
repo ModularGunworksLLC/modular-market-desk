@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: theme("colors.desk.bg");
+  color: theme("colors.desk.text");
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-desk-border bg-desk-panel p-4;
+  }
+  .field-label {
+    @apply mb-1 block text-xs font-medium uppercase tracking-wide text-desk-muted;
+  }
+  .field-input {
+    @apply w-full rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-sm
+      text-desk-text outline-none focus:border-desk-accent;
+  }
+  .num {
+    @apply font-mono tabular-nums;
+  }
+}
