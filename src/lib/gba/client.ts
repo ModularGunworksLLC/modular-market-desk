@@ -8,6 +8,8 @@
 
 import { summarize } from "@/lib/arbitrage/stats";
 import type { PriceStats } from "@/lib/arbitrage/types";
+import { resolveSelection } from "@/lib/gba/scorer";
+import type { GbaQuery, OaDependencies, OaSelection } from "@/lib/gba/scorer";
 
 const DEFAULT_BASE = process.env.GBA_API_BASE ?? "https://api.gunbrokeranalytics.com/gba-portal-api";
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -76,6 +78,32 @@ export class GbaApiClient {
       return (body as { data: T }).data;
     }
     return body as T;
+  }
+
+  /** Catalog dependency tree keyed by condition bucket (NEW / USED). */
+  async dependencies(): Promise<OaDependencies> {
+    const data = await this.get<OaDependencies>("/pricing/dependencies");
+    return data && typeof data === "object" ? data : {};
+  }
+
+  /** Resolve desk free-text identity to a catalog model/caliber selection. */
+  async resolve(query: GbaQuery): Promise<OaSelection | null> {
+    return resolveSelection(await this.dependencies(), query);
+  }
+
+  /**
+   * Fully automatic comps pull: resolve the catalog selection from free text,
+   * then fetch sold + asking sets for it. Returns null when no catalog match.
+   */
+  async resolveMarket(query: GbaQuery): Promise<(GbaMarket & { selection: OaSelection }) | null> {
+    const selection = await this.resolve(query);
+    if (!selection) return null;
+    const market = await this.market({
+      modelId: selection.modelId,
+      caliberId: selection.caliberId,
+      condition: selection.conditionParam,
+    });
+    return { ...market, selection };
   }
 
   /** Historical SOLD prices for a resolved model/caliber. */
