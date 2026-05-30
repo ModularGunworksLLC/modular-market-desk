@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import type { EvaluationResult, PriceStats } from "@/lib/arbitrage/types";
@@ -80,7 +81,12 @@ export default function DeskPage() {
     <main className="mx-auto max-w-[1800px] px-4 py-6">
       <header className="mb-6 flex items-baseline justify-between">
         <h1 className="text-xl font-semibold tracking-tight">Modular Market Desk</h1>
-        <span className="text-xs text-desk-muted">Arbitrage Calculator</span>
+        <nav className="flex items-baseline gap-4 text-xs">
+          <Link href="/import" className="text-desk-accent hover:underline">
+            Ingestion dashboard
+          </Link>
+          <span className="text-desk-muted">Arbitrage Calculator</span>
+        </nav>
       </header>
 
       {/* Desktop: form left, results right. Mobile: stacked single column. */}
