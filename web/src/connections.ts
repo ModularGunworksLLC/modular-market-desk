@@ -1,3 +1,4 @@
+import "./style.css";
 import {
   apiBaseUrl,
   fetchConnections,
@@ -6,6 +7,7 @@ import {
   uploadSession,
   type ConnectionRow,
 } from "./connections-api";
+import { initInventoryUi, type InventoryUiElements } from "./inventory-ui";
 
 const els = {
   list: document.getElementById("connections-list") as HTMLDivElement,
@@ -14,6 +16,24 @@ const els = {
   refreshAll: document.getElementById("refresh-all-btn") as HTMLButtonElement,
   linkCompany: document.getElementById("link-company") as HTMLAnchorElement,
   linkLedger: document.getElementById("link-ledger") as HTMLAnchorElement,
+  csvSource: document.getElementById("csv-source") as HTMLInputElement,
+  csvPreset: document.getElementById("csv-preset") as HTMLSelectElement,
+  csvReplace: document.getElementById("csv-replace") as HTMLInputElement,
+  csvFile: document.getElementById("csv-file") as HTMLInputElement,
+  csvFileLabel: document.getElementById("csv-file-label") as HTMLElement,
+  csvImportBtn: document.getElementById("csv-import-btn") as HTMLButtonElement,
+  csvCatalogList: document.getElementById("csv-catalog-list") as HTMLUListElement,
+};
+
+const inventoryEls: InventoryUiElements = {
+  source: els.csvSource,
+  preset: els.csvPreset,
+  replace: els.csvReplace,
+  file: els.csvFile,
+  fileLabel: els.csvFileLabel,
+  importBtn: els.csvImportBtn,
+  catalogList: els.csvCatalogList,
+  status: (msg, kind) => setStatus(msg, kind),
 };
 
 function statusBadge(row: ConnectionRow): { text: string; className: string } {
@@ -221,9 +241,10 @@ async function init(): Promise<void> {
   }
 
   els.refreshAll.addEventListener("click", () => void refreshAllAuto());
+  void initInventoryUi(appConfig, inventoryEls);
   try {
     await loadList();
-    setStatus("Connect each site once; Valuate reuses saved sessions.", "ok");
+    setStatus("Connect sites and import vendor CSV catalogs below.", "ok");
   } catch (err) {
     setStatus(err instanceof Error ? err.message : String(err), "error");
   }

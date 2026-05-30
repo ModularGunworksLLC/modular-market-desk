@@ -44,5 +44,5 @@ if ($Uploaded -eq 0) {
 }
 
 Write-Host "Restarting API on server..." -ForegroundColor Cyan
-ssh $env:MMD_SSH_HOST "cd /opt/modular-market-desk && sudo docker compose restart api && sleep 3 && curl -s https://api.modulargunworks.com/health"
+ssh $env:MMD_SSH_HOST 'cd /opt/modular-market-desk; sudo docker compose restart api; sleep 3; curl -s https://api.modulargunworks.com/health'
 Write-Host "`nDone." -ForegroundColor Green

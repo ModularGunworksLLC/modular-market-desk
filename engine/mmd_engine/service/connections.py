@@ -6,7 +6,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
-from mmd_engine.config import session_path
+from mmd_engine.config import oa_session_path, session_path
+from mmd_engine.oa_session import load_bearer_token, save_token_payload
 from mmd_engine.credentials import SiteCredential, get_site, list_sites
 from mmd_engine.service.session_auth import (
     MARKET_SITE_URLS,
@@ -22,20 +23,14 @@ STALE_HOURS = 168  # 7 days
 
 # Sites that power /api/valuate live data
 VALUATION_CONNECTIONS: list[tuple[str, ConnectionKind]] = [
-    ("gunbroker", "market"),
-    ("gundeals", "market"),
-    ("truegunvalue", "public"),
+    ("outdoor_analytics", "market"),
     ("lipseys", "wholesale"),
     ("zanders", "wholesale"),
 ]
 
-PUBLIC_SOURCES: dict[str, dict[str, str]] = {
-    "truegunvalue": {
-        "label": "TrueGunValue",
-        "login_url": "https://truegunvalue.com/",
-        "notes": "Public pages — no account. Often blocked from cloud servers; use PC cache.",
-    },
-}
+# Public, no-login comp sources. Empty now that valuation uses the
+# Outdoor Analytics API, but referenced by the "public" code paths below.
+PUBLIC_SOURCES: dict[str, dict[str, str]] = {}
 
 
 @dataclass
@@ -55,12 +50,26 @@ class ConnectionRow:
 
 
 def _session_meta(site_id: str) -> tuple[bool, float | None, int | None, SessionStatus]:
+    if site_id == "outdoor_analytics":
+        token = load_bearer_token()
+        path = oa_session_path()
+        if token:
+            size = path.stat().st_size if path.is_file() else len(token)
+            age_hours = (
+                round((time.time() - path.stat().st_mtime) / 3600, 1)
+                if path.is_file()
+                else None
+            )
+            status: SessionStatus = "ok" if not age_hours or age_hours <= STALE_HOURS else "stale"
+            return True, age_hours, size, status
+        return False, None, None, "missing"
+
     path = session_path(site_id)
     if not path.is_file():
         return False, None, None, "missing"
     age_hours = round((time.time() - path.stat().st_mtime) / 3600, 1)
     size = path.stat().st_size
-    status: SessionStatus = "ok" if age_hours <= STALE_HOURS and size > 500 else "stale"
+    status = "ok" if age_hours <= STALE_HOURS and size > 500 else "stale"
     if size < 100:
         status = "missing"
     return True, age_hours, size, status
@@ -72,6 +81,12 @@ def _label_and_url(site_id: str, kind: ConnectionKind) -> tuple[str, str, str]:
         return pub["label"], pub["login_url"], pub["notes"]
     if site_id in MARKET_SITE_URLS:
         meta = MARKET_SITE_URLS[site_id]
+        if site_id == "outdoor_analytics":
+            return (
+                meta["label"],
+                meta["url"],
+                "GunBroker Analytics API — capture bearer token with: python -m mmd_engine.cli.oa_auth",
+            )
         try:
             site = get_site(site_id)
             notes = site.notes or "Market comps — login improves access."
@@ -138,6 +153,11 @@ def list_dealer_connections() -> list[dict[str, Any]]:
 
 def refresh_connection(site_id: str, *, mode: str = "auto") -> dict[str, Any]:
     kind = next((k for sid, k in VALUATION_CONNECTIONS if sid == site_id), None)
+    if site_id == "outdoor_analytics":
+        raise ValueError(
+            "Outdoor Analytics uses an API bearer token — run on your PC: "
+            "python -m mmd_engine.cli.oa_auth then upload outdoor_analytics.json"
+        )
     if site_id in PUBLIC_SOURCES:
         raise ValueError("TrueGunValue has no login — scrape on your PC and upload valuation cache")
 
@@ -174,7 +194,10 @@ def upload_connection_session(site_id: str, payload: dict[str, Any]) -> dict[str
     if site_id not in allowed:
         raise ValueError(f"Unknown site: {site_id}")
 
-    path = save_session_payload(site_id, payload)
+    if site_id == "outdoor_analytics":
+        path = save_token_payload(payload)
+    else:
+        path = save_session_payload(site_id, payload)
     kind = next((k for sid, k in VALUATION_CONNECTIONS if sid == site_id), "wholesale")
     row = build_connection_row(site_id, kind)
     return {

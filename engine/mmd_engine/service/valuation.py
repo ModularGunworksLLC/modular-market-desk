@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from mmd_engine.adapters.valuation_base import ValuationAdapter
 from mmd_engine.cache import load_cached, save_cached
 from mmd_engine.insights import compute_insights
-from mmd_engine.config import scrape_serial
+from mmd_engine.config import allow_cache_fallback, scrape_serial
 from mmd_engine.market_sources import all_valuation_adapters, live_market_adapters
 from mmd_engine.matching import apply_matching, canonical_key
 from mmd_engine.stats import (
@@ -31,8 +31,10 @@ def _fetch_adapter(adapter: ValuationAdapter, query: FirearmQuery) -> tuple[str,
         rows = adapter.fetch(query)
         if not rows:
             hint = ""
-            if adapter.name in {"gunbroker", "gundeals"}:
-                hint = " — try: python -m mmd_engine.cli.market_auth " + adapter.name
+            if adapter.name == "outdoor-analytics":
+                hint = " — run: .\\scripts\\save-oa-token.ps1 then sync-oa-session.ps1 -UploadOnly"
+            elif adapter.name in {"gunbroker", "gundeals", "truegunvalue"}:
+                hint = " — legacy scraper (enable MMD_LEGACY_MARKET_SCRAPERS=1)"
             return adapter.name, [], f"blocked or empty (0 listings){hint}"
         sold = sum(1 for r in rows if r.price_type == "sold")
         asking = sum(1 for r in rows if r.price_type == "asking")
@@ -62,6 +64,11 @@ def _finalize_result(
     reference_msrp: float | None,
     buyer_premium_pct: float | None,
     listing_addons: float | None,
+    target_profit: float | None = None,
+    min_margin_pct: float | None = None,
+    transfer_fee: float | None = None,
+    inbound_ship: float | None = None,
+    sell_assumption: str | None = None,
 ) -> ValuationResult:
     primary, family, sold_label = primary_sold_stats(matched, query, days=90)
     sold_stats_sku = compute_sku_stats(matched, query, "sold", days=90)
@@ -79,11 +86,17 @@ def _finalize_result(
         asking_stats=asking_stats,
         wholesale_stats=wholesale_stats,
         estimate_stats=estimate_stats,
+        trends=compute_trends(matched),
         my_cost=my_cost,
         street_retail=street_retail,
         reference_msrp=reference_msrp,
         buyer_premium_pct=buyer_premium_pct,
         listing_addons=listing_addons,
+        target_profit=target_profit,
+        min_margin_pct=min_margin_pct,
+        transfer_fee=transfer_fee,
+        inbound_ship=inbound_ship,
+        sell_assumption=sell_assumption,
     )
     insights.assumptions["sources_queried"] = list(source_status.keys())
     insights.assumptions["sources_status"] = dict(source_status)
@@ -108,6 +121,46 @@ def _finalize_result(
     )
 
 
+def recompute_valuation(
+    query: FirearmQuery,
+    *,
+    context: ContextMode = "auction_sniper",
+    my_cost: float | None = None,
+    street_retail: float | None = None,
+    reference_msrp: float | None = None,
+    buyer_premium_pct: float | None = None,
+    listing_addons: float | None = None,
+    target_profit: float | None = None,
+    min_margin_pct: float | None = None,
+    transfer_fee: float | None = None,
+    inbound_ship: float | None = None,
+    sell_assumption: str | None = None,
+) -> ValuationResult | None:
+    """Re-run deal math on cached market data (no live OA fetch)."""
+    key = canonical_key(query)
+    cached = load_cached(key)
+    if not cached or not cached.listings:
+        return None
+    rematched = apply_matching(cached.listings, query)
+    return _finalize_result(
+        query=query,
+        context=context,
+        key=key,
+        matched=rematched,
+        source_status=cached.source_status,
+        my_cost=my_cost,
+        street_retail=street_retail,
+        reference_msrp=reference_msrp,
+        buyer_premium_pct=buyer_premium_pct,
+        listing_addons=listing_addons,
+        target_profit=target_profit,
+        min_margin_pct=min_margin_pct,
+        transfer_fee=transfer_fee,
+        inbound_ship=inbound_ship,
+        sell_assumption=sell_assumption,
+    )
+
+
 def run_valuation(
     query: FirearmQuery,
     *,
@@ -117,6 +170,11 @@ def run_valuation(
     reference_msrp: float | None = None,
     buyer_premium_pct: float | None = None,
     listing_addons: float | None = None,
+    target_profit: float | None = None,
+    min_margin_pct: float | None = None,
+    transfer_fee: float | None = None,
+    inbound_ship: float | None = None,
+    sell_assumption: str | None = None,
     use_cache: bool = False,
     force_refresh: bool = False,
     include_live: bool = True,
@@ -143,6 +201,11 @@ def run_valuation(
                     reference_msrp=reference_msrp,
                     buyer_premium_pct=buyer_premium_pct,
                     listing_addons=listing_addons,
+                    target_profit=target_profit,
+                    min_margin_pct=min_margin_pct,
+                    transfer_fee=transfer_fee,
+                    inbound_ship=inbound_ship,
+                    sell_assumption=sell_assumption,
                 )
 
     adapters = all_valuation_adapters(sample_only=sample_only)
@@ -167,6 +230,15 @@ def run_valuation(
             all_listings.extend(rows)
 
     matched = apply_matching(all_listings, query)
+    if allow_cache_fallback() and not sample_only and not matched:
+        cached = load_cached(key)
+        if cached and cached.listings:
+            rematched = apply_matching(cached.listings, query)
+            if rematched:
+                matched = rematched
+                source_status = dict(cached.source_status)
+                source_status["cache"] = "ok (server used saved prices — live scrape had 0)"
+
     result = _finalize_result(
         query=query,
         context=context,
@@ -178,9 +250,14 @@ def run_valuation(
         reference_msrp=reference_msrp,
         buyer_premium_pct=buyer_premium_pct,
         listing_addons=listing_addons,
+        target_profit=target_profit,
+        min_margin_pct=min_margin_pct,
+        transfer_fee=transfer_fee,
+        inbound_ship=inbound_ship,
+        sell_assumption=sell_assumption,
     )
 
-    if not sample_only:
+    if not sample_only and matched:
         save_cached(result)
 
     return result

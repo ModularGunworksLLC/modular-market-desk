@@ -33,6 +33,36 @@
         <p id="connections-status" class="status" role="status"></p>
       </div>
 
+      <section class="panel vendor-import-section">
+        <h2>Vendor CSV catalogs</h2>
+        <p class="muted">
+          Upload wholesaler price files (Lipsey&rsquo;s, Zanders, etc.). Imported items show on the
+          Valuation desk under the <strong>Wholesale</strong> tab.
+        </p>
+        <div class="vendor-import-form">
+          <label class="field">
+            <span>Source id</span>
+            <input id="csv-source" type="text" placeholder="lipseys" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Column preset</span>
+            <select id="csv-preset"></select>
+          </label>
+          <label class="check">
+            <input id="csv-replace" type="checkbox" />
+            Replace existing catalog for this source
+          </label>
+          <label class="field">
+            <span>CSV file</span>
+            <span id="csv-file-label" class="upload-label secondary">Choose CSV file…</span>
+            <input id="csv-file" type="file" accept=".csv,text/csv" hidden />
+          </label>
+          <button id="csv-import-btn" type="button" class="primary">Import CSV</button>
+        </div>
+        <h3 class="conn-section-title">Imported catalogs</h3>
+        <ul id="csv-catalog-list" class="csv-catalog-list"></ul>
+      </section>
+
       <div id="connections-list" class="connections-grid"></div>
     </main>
 

@@ -1,0 +1,14 @@
+{
+  "category": "handgun",
+  "manufacturer": "Glock",
+  "model": "30",
+  "variant": "Gen 5",
+  "caliber": "45 ACP",
+  "condition": "used",
+  "context": "auction_sniper",
+  "sample_only": false,
+  "force_refresh": true,
+  "use_cache": false,
+  "buyer_premium_pct": 18,
+  "listing_addons": 10
+}

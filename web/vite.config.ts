@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 
-// GitHub Pages: VITE_BASE_PATH=/modular-market-desk/
-// Lightsail desk subdomain: VITE_BASE_PATH=/
-const base = process.env.VITE_BASE_PATH ?? "/modular-market-desk/";
+// Production desk (desk.modulargunworks.com): VITE_BASE_PATH=/
+// GitHub Pages only: VITE_BASE_PATH=/modular-market-desk/
+const base = process.env.VITE_BASE_PATH ?? "/";
 
 export default defineConfig({
   base,

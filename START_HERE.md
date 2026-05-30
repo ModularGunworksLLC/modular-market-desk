@@ -99,7 +99,18 @@ cd engine
 python -m mmd_engine.cli.import_csv -s lipseys -f "C:\path\to\your\export.csv" -p lipseys
 ```
 
-Presets: `lipseys`, `zanders`, `generic` in `engine/config/csv_presets/`.
+Presets in `engine/config/csv_presets/`:
+
+| Preset | Vendors / layout |
+|--------|------------------|
+| `dealer_catalog` | Lipsey's, Chattanooga (ITEMNO, DESCRIPTION1, PRICE, …) |
+| `lipseys` | Same columns as `dealer_catalog` |
+| `chattanooga` | Same columns as `dealer_catalog` |
+| `davidsons` | Davidson's download: `Item #`, `Dealer Price`, `Sale Price`, `MSP`, `UPC Code`, … |
+| `zanders` | Zanders export layout |
+| `generic` | Other distributors |
+
+Desk/API upload default is **200 MB** (`MMD_MAX_CSV_MB` in `engine/.env`). Use the CLI for very large files if the browser times out.
 
 ## Re-run full setup anytime
 

@@ -18,7 +18,35 @@ def cache_path(canonical_key: str) -> Path:
     return CACHE_DIR / f"{safe}.json"
 
 
+def _cache_key_candidates(canonical_key: str) -> list[str]:
+    """Exact key first, then relax condition (Any vs used share the same comps)."""
+    keys = [canonical_key]
+    parts = [p for p in canonical_key.split("|") if p]
+    if len(parts) >= 2:
+        cond = parts[-1]
+        base = "|".join(parts[:-1])
+        if cond == "any":
+            keys.append(f"{base}|used")
+        elif cond == "used":
+            keys.append(f"{base}|any")
+    seen: set[str] = set()
+    out: list[str] = []
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
 def load_cached(canonical_key: str) -> ValuationResult | None:
+    for key in _cache_key_candidates(canonical_key):
+        hit = _load_cached_file(key)
+        if hit is not None and len(hit.listings) > 0:
+            return hit
+    return None
+
+
+def _load_cached_file(canonical_key: str) -> ValuationResult | None:
     path = cache_path(canonical_key)
     if not path.exists():
         return None

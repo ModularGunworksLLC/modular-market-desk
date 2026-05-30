@@ -1,6 +1,16 @@
-import { valuate } from "./api";
+import "./style.css";
+import { recompute, valuate } from "./api";
 import { apiBaseUrl, loadConfig, resetConfigCache, type AppConfig } from "./config";
-import type { ContextMode, FirearmQuery, MarketListing, PriceStats, ValuationResult } from "./types";
+import type {
+  ContextMode,
+  DealerBrief,
+  FirearmQuery,
+  MarketListing,
+  PriceStats,
+  SellScenario,
+  ValuationResult,
+} from "./types";
+import { initInventoryUi, type InventoryUiElements } from "./inventory-ui";
 import {
   formatMoney,
   formatStats,
@@ -9,8 +19,21 @@ import {
   searchPreview,
 } from "./valuation-ui";
 
+const DEAL_DEFAULTS_KEY = "mmd_deal_defaults";
+
+interface DealDefaults {
+  target_profit: number;
+  min_margin_pct: number;
+  transfer_fee: number;
+  inbound_ship: number;
+  buyer_premium_pct: number;
+  listing_addons: number;
+}
+
 let appConfig: AppConfig | null = null;
 let lastResult: ValuationResult | null = null;
+let recomputeTimer: number | null = null;
+let recomputeInFlight = false;
 
 const els = {
   category: document.getElementById("category") as HTMLSelectElement,
@@ -28,6 +51,11 @@ const els = {
   msrpField: document.getElementById("msrp-field") as HTMLLabelElement,
   buyerPremiumPct: document.getElementById("buyer-premium-pct") as HTMLInputElement,
   listingAddons: document.getElementById("listing-addons") as HTMLInputElement,
+  targetProfit: document.getElementById("target-profit") as HTMLInputElement,
+  minMarginPct: document.getElementById("min-margin-pct") as HTMLInputElement,
+  transferFee: document.getElementById("transfer-fee") as HTMLInputElement,
+  inboundShip: document.getElementById("inbound-ship") as HTMLInputElement,
+  sellAssumption: document.getElementById("sell-assumption") as HTMLSelectElement,
   auctionFees: document.getElementById("auction-fees") as HTMLDivElement,
   sampleOnly: document.getElementById("sample-only") as HTMLInputElement,
   forceRefresh: document.getElementById("force-refresh") as HTMLInputElement,
@@ -44,9 +72,19 @@ const els = {
   soldSummary: document.getElementById("sold-summary") as HTMLParagraphElement,
   askingSummary: document.getElementById("asking-summary") as HTMLParagraphElement,
   wholesaleSummary: document.getElementById("wholesale-summary") as HTMLParagraphElement,
+  verdictBadge: document.getElementById("verdict-badge") as HTMLParagraphElement,
   insightHeadline: document.getElementById("insight-headline") as HTMLParagraphElement,
   insightBlocks: document.getElementById("insight-blocks") as HTMLDivElement,
   insightDetail: document.getElementById("insight-detail") as HTMLParagraphElement,
+  dealerDesk: document.getElementById("dealer-desk") as HTMLDivElement,
+  confidenceBadge: document.getElementById("confidence-badge") as HTMLSpanElement,
+  dealerMarketLine: document.getElementById("dealer-market-line") as HTMLParagraphElement,
+  dealerRedFlags: document.getElementById("dealer-red-flags") as HTMLUListElement,
+  allInTable: document.querySelector("#all-in-table tbody") as HTMLTableSectionElement,
+  ceilingsTable: document.querySelector("#ceilings-table tbody") as HTMLTableSectionElement,
+  gbNetBody: document.getElementById("gb-net-body") as HTMLTableSectionElement,
+  profitBody: document.getElementById("profit-body") as HTMLTableSectionElement,
+  profitTableTitle: document.getElementById("profit-table-title") as HTMLHeadingElement,
   statsBody: document.getElementById("stats-body") as HTMLTableSectionElement,
   trends: document.getElementById("trends") as HTMLDivElement,
   sourceStatus: document.getElementById("source-status") as HTMLParagraphElement,
@@ -58,6 +96,24 @@ const els = {
   linkCompany: document.getElementById("link-company") as HTMLAnchorElement,
   linkLedger: document.getElementById("link-ledger") as HTMLAnchorElement,
   apiEndpoint: document.getElementById("api-endpoint") as HTMLParagraphElement,
+  csvSource: document.getElementById("csv-source") as HTMLInputElement,
+  csvPreset: document.getElementById("csv-preset") as HTMLSelectElement,
+  csvReplace: document.getElementById("csv-replace") as HTMLInputElement,
+  csvFile: document.getElementById("csv-file") as HTMLInputElement,
+  csvFileLabel: document.getElementById("csv-file-label") as HTMLElement,
+  csvImportBtn: document.getElementById("csv-import-btn") as HTMLButtonElement,
+  csvCatalogList: document.getElementById("csv-catalog-list") as HTMLUListElement,
+};
+
+const inventoryEls: InventoryUiElements = {
+  source: els.csvSource,
+  preset: els.csvPreset,
+  replace: els.csvReplace,
+  file: els.csvFile,
+  fileLabel: els.csvFileLabel,
+  importBtn: els.csvImportBtn,
+  catalogList: els.csvCatalogList,
+  status: (msg, kind) => setStatus(msg, kind),
 };
 
 function getContext(): ContextMode {
@@ -67,12 +123,40 @@ function getContext(): ContextMode {
 
 const DEALER_HINTS: Record<ContextMode, string> = {
   margin_spotter:
-    "Margin spotter: enter your cost. Compares sold comps and shows local vs GunBroker profit.",
+    "Margin spotter: enter your cost. Valuate loads market once; deal fields recalc instantly.",
   vendor_deal:
-    "Vendor deal: enter your cost and their sale price (not MSRP). Queries TrueGunValue, GunBroker, and Gun.deals.",
+    "Vendor deal: cost + their sale price. Market from Outdoor Analytics; profit recalcs locally.",
   auction_sniper:
-    "Auction sniper: max hammer bid from sold comps and buyer premium.",
+    "Auction sniper: max hammer from sold comps. Change premium/add-ons without re-searching.",
 };
+
+function loadDealDefaults(): void {
+  try {
+    const raw = localStorage.getItem(DEAL_DEFAULTS_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw) as Partial<DealDefaults>;
+    if (d.target_profit != null) els.targetProfit.value = String(d.target_profit);
+    if (d.min_margin_pct != null) els.minMarginPct.value = String(d.min_margin_pct);
+    if (d.transfer_fee != null) els.transferFee.value = String(d.transfer_fee);
+    if (d.inbound_ship != null) els.inboundShip.value = String(d.inbound_ship);
+    if (d.buyer_premium_pct != null) els.buyerPremiumPct.value = String(d.buyer_premium_pct);
+    if (d.listing_addons != null) els.listingAddons.value = String(d.listing_addons);
+  } catch {
+    /* ignore */
+  }
+}
+
+function saveDealDefaults(): void {
+  const d: DealDefaults = {
+    target_profit: Number(els.targetProfit.value) || 75,
+    min_margin_pct: Number(els.minMarginPct.value) || 15,
+    transfer_fee: Number(els.transferFee.value) || 0,
+    inbound_ship: Number(els.inboundShip.value) || 0,
+    buyer_premium_pct: Number(els.buyerPremiumPct.value) || 18,
+    listing_addons: Number(els.listingAddons.value) || 10,
+  };
+  localStorage.setItem(DEAL_DEFAULTS_KEY, JSON.stringify(d));
+}
 
 function syncContextPanels(): void {
   const ctx = getContext();
@@ -83,18 +167,27 @@ function syncContextPanels(): void {
   if (hint) hint.textContent = DEALER_HINTS[ctx];
 }
 
-function getBuyerPremiumPct(): number | null {
-  if (getContext() !== "auction_sniper") return null;
-  const raw = els.buyerPremiumPct.value.trim();
-  if (!raw) return null;
-  const n = Number(raw);
+function parseOptionalNumber(raw: string): number | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const n = Number(t);
   return Number.isFinite(n) ? n : null;
 }
 
+function getBuyerPremiumPct(): number | null {
+  if (getContext() !== "auction_sniper") return null;
+  return parseOptionalNumber(els.buyerPremiumPct.value);
+}
+
 function getListingAddons(): number {
-  const raw = els.listingAddons.value.trim();
-  const n = raw ? Number(raw) : 10;
-  return Number.isFinite(n) ? n : 10;
+  const n = parseOptionalNumber(els.listingAddons.value);
+  return n != null ? n : 10;
+}
+
+function getSellAssumption(): SellScenario | null {
+  const v = els.sellAssumption.value;
+  if (v === "p25" || v === "median" || v === "p75") return v;
+  return null;
 }
 
 function getQuery(): FirearmQuery {
@@ -109,6 +202,25 @@ function getQuery(): FirearmQuery {
     upc: els.upc.value.trim(),
     mpn: els.mpn.value.trim(),
     exclude_tokens: [],
+  };
+}
+
+function getDealPayload() {
+  const myCostRaw = els.myCost.value.trim();
+  const streetRaw = els.streetRetail.value.trim();
+  const msrpRaw = els.referenceMsrp.value.trim();
+  return {
+    context: getContext(),
+    my_cost: myCostRaw ? Number(myCostRaw) : null,
+    street_retail: streetRaw ? Number(streetRaw) : null,
+    reference_msrp: msrpRaw ? Number(msrpRaw) : null,
+    buyer_premium_pct: getBuyerPremiumPct(),
+    listing_addons: getListingAddons(),
+    target_profit: parseOptionalNumber(els.targetProfit.value) ?? 75,
+    min_margin_pct: parseOptionalNumber(els.minMarginPct.value) ?? 15,
+    transfer_fee: parseOptionalNumber(els.transferFee.value) ?? 0,
+    inbound_ship: parseOptionalNumber(els.inboundShip.value) ?? 0,
+    sell_assumption: getSellAssumption(),
   };
 }
 
@@ -229,8 +341,137 @@ function renderStatsTable(result: ValuationResult): void {
   }
 }
 
+function renderVerdict(brief: DealerBrief | undefined): void {
+  if (!brief?.verdict) {
+    els.verdictBadge.hidden = true;
+    return;
+  }
+  els.verdictBadge.hidden = false;
+  els.verdictBadge.textContent = brief.verdict;
+  els.verdictBadge.className = `verdict-badge verdict--${brief.verdict}`;
+}
+
+function renderDealerDesk(brief: DealerBrief | undefined): void {
+  if (!brief || !brief.market) {
+    els.dealerDesk.classList.add("hidden");
+    return;
+  }
+  els.dealerDesk.classList.remove("hidden");
+  const m = brief.market;
+  els.confidenceBadge.textContent = `${brief.confidence} confidence`;
+  els.confidenceBadge.className = `confidence-badge confidence--${brief.confidence}`;
+
+  const trend =
+    m.trend === "rising"
+      ? "↑ rising"
+      : m.trend === "falling"
+        ? "↓ falling"
+        : m.trend === "stable"
+          ? "→ stable"
+          : "trend n/a";
+  els.dealerMarketLine.textContent = [
+    `${m.sold_label}: ${m.sold_count} matched (${m.sold_count_all} all)`,
+    `P25 ${formatMoney(m.sold_p25)} · med ${formatMoney(m.sold_median)} · P75 ${formatMoney(m.sold_p75)}`,
+    m.asking_count ? `Asking med ${formatMoney(m.asking_median)} (${m.asking_count})` : "",
+    trend,
+    m.ask_vs_sold_label || "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  els.dealerRedFlags.replaceChildren();
+  for (const flag of brief.red_flags || []) {
+    const li = document.createElement("li");
+    li.textContent = flag;
+    els.dealerRedFlags.appendChild(li);
+  }
+
+  const allIn = brief.all_in || {};
+  const allInRows: [string, string][] = [];
+  if (allIn.invoice_or_hammer != null) {
+    allInRows.push([
+      allIn.mode === "auction" ? "Max hammer (est.)" : "Invoice / hammer",
+      formatMoney(allIn.invoice_or_hammer),
+    ]);
+  }
+  if (allIn.buyer_premium_amt != null && allIn.buyer_premium_amt > 0) {
+    allInRows.push([
+      `Buyer premium (${allIn.buyer_premium_pct}%)`,
+      formatMoney(allIn.buyer_premium_amt),
+    ]);
+  }
+  if (allIn.transfer_fee) allInRows.push(["Transfer in", formatMoney(allIn.transfer_fee)]);
+  if (allIn.inbound_ship) allInRows.push(["Inbound ship", formatMoney(allIn.inbound_ship)]);
+  if (allIn.all_in_total != null) {
+    allInRows.push(["All-in total", formatMoney(allIn.all_in_total)]);
+  }
+  els.allInTable.replaceChildren();
+  for (const [label, val] of allInRows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${label}</td><td>${val}</td>`;
+    els.allInTable.appendChild(tr);
+  }
+
+  const c = brief.ceilings || {};
+  const ceilRows: [string, string][] = [
+    ["Sell assumption", `${c.sell_assumption_label || c.sell_assumption} ${formatMoney(c.sell_price || 0)}`],
+    ["Break-even all-in", formatMoney(c.break_even_all_in || 0)],
+    ["Max pay all-in", formatMoney(c.max_pay_all_in || 0)],
+    ["Conservative max pay (P25 sell)", formatMoney(c.conservative_max_pay_all_in || 0)],
+    ["Aggressive max pay (P75 sell)", formatMoney(c.aggressive_max_pay_all_in || 0)],
+  ];
+  if (c.max_hammer != null && c.max_hammer > 0) {
+    ceilRows.splice(3, 0, ["Max hammer", formatMoney(c.max_hammer)]);
+  }
+  els.ceilingsTable.replaceChildren();
+  for (const [label, val] of ceilRows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${label}</td><td>${val}</td>`;
+    els.ceilingsTable.appendChild(tr);
+  }
+
+  els.gbNetBody.replaceChildren();
+  for (const row of brief.gb_net_table || []) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.scenario}</td>
+      <td>${formatMoney(row.sell_gross)}</td>
+      <td>${formatMoney(row.final_value_fee)}</td>
+      <td>${formatMoney(row.master_ffl_fee)}</td>
+      <td>${formatMoney(row.listing_addons)}</td>
+      <td>${formatMoney(row.net_proceeds)}</td>
+    `;
+    els.gbNetBody.appendChild(tr);
+  }
+
+  const profits = brief.profit_at_cost || [];
+  els.profitBody.replaceChildren();
+  if (!profits.length) {
+    els.profitTableTitle.textContent = "Profit at your cost (enter dealer cost)";
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="5" class="muted">Enter dealer cost to see profit table</td>';
+    els.profitBody.appendChild(tr);
+  } else {
+    els.profitTableTitle.textContent = "Profit at your cost (GunBroker)";
+    for (const row of profits) {
+      const tr = document.createElement("tr");
+      const cls = row.profit >= 0 ? "profit-positive" : "profit-negative";
+      tr.innerHTML = `
+        <td>${row.scenario}</td>
+        <td>${formatMoney(row.sell_gross)}</td>
+        <td>${formatMoney(row.gb_net)}</td>
+        <td class="${cls}">${formatMoney(row.profit)}</td>
+        <td class="${cls}">${row.margin_pct}%</td>
+      `;
+      els.profitBody.appendChild(tr);
+    }
+  }
+}
+
 function renderInsight(result: ValuationResult): void {
   const ins = result.insights;
+  const brief = ins.dealer_brief;
+  renderVerdict(brief);
   els.insightHeadline.textContent = ins.headline || "—";
 
   const acq = ins.assumptions?.acquisition_lines;
@@ -244,12 +485,13 @@ function renderInsight(result: ValuationResult): void {
   }
   els.insightBlocks.innerHTML = blocks.join("");
 
+  renderDealerDesk(brief);
+
   const ctx = getContext();
   const details: string[] = [];
+  if (brief?.verdict_reason) details.push(brief.verdict_reason);
   if (ctx === "auction_sniper") {
     if (ins.max_bid != null) details.push(`Max hammer: ${formatMoney(ins.max_bid)}`);
-    const premium = ins.assumptions?.buyer_premium_pct;
-    if (typeof premium === "number") details.push(`Buyer premium: ${premium}%`);
   } else {
     if (ins.assumptions?.promo_ok === true) details.push("Vendor promo: good");
     if (ins.assumptions?.promo_ok === false) details.push("Vendor promo: weak");
@@ -266,8 +508,10 @@ function hideResultPanels(): void {
   els.results.classList.add("hidden");
 }
 
-function showResultsLoading(detail: string): void {
+function showResultsLoading(detail: string, title = "Fetching Outdoor Analytics…"): void {
   hideResultPanels();
+  const titleEl = els.loadingState.querySelector(".loading-title");
+  if (titleEl) titleEl.textContent = title;
   els.loadingDetail.textContent = detail;
   els.loadingState.classList.remove("hidden");
 }
@@ -324,6 +568,43 @@ function setupTabs(): void {
   });
 }
 
+function scheduleRecompute(): void {
+  if (!lastResult || els.sampleOnly.checked) return;
+  if (recomputeTimer != null) window.clearTimeout(recomputeTimer);
+  recomputeTimer = window.setTimeout(() => void runRecompute(), 350);
+}
+
+async function runRecompute(): Promise<void> {
+  if (!lastResult || recomputeInFlight) return;
+  const apiUrl = appConfig ? apiBaseUrl(appConfig) : "";
+  if (!apiUrl || !appConfig?.apiKey) return;
+
+  const query = getQuery();
+  if (!query.manufacturer || !query.model) return;
+
+  recomputeInFlight = true;
+  setStatus("Updating deal desk…", "loading");
+  saveDealDefaults();
+
+  try {
+    const result = await recompute(apiUrl, appConfig.apiKey, {
+      ...query,
+      ...getDealPayload(),
+    });
+    renderResult(result);
+    setStatus("Deal desk updated (cached market data).", "ok");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("404") || msg.includes("No cached")) {
+      setStatus("No cached market — click Valuate first.", "warn");
+    } else {
+      setStatus(msg, "error");
+    }
+  } finally {
+    recomputeInFlight = false;
+  }
+}
+
 async function runValuation(): Promise<void> {
   const apiUrl = appConfig ? apiBaseUrl(appConfig) : "";
   if (!apiUrl) {
@@ -334,62 +615,81 @@ async function runValuation(): Promise<void> {
   const query = getQuery();
   if (!query.manufacturer || !query.model) {
     setStatus("Enter manufacturer and model, then click Valuate again.", "error");
+    showResultsError(
+      "Manufacturer and model are required. Example: Sig Sauer / 1911 / 45 ACP."
+    );
+    return;
+  }
+  if (!appConfig?.apiKey) {
+    setStatus("Missing apiKey in config.json — cannot call the API.", "error");
+    showResultsError(
+      "Desk config is missing apiKey. On the server run .\\scripts\\fix-desk-api-key.ps1, then Ctrl+F5 this page."
+    );
     return;
   }
 
   const ctx = getContext();
-  const myCostRaw = els.myCost.value.trim();
-  const my_cost = myCostRaw ? Number(myCostRaw) : null;
-  const streetRaw = els.streetRetail.value.trim();
-  const street_retail = streetRaw ? Number(streetRaw) : null;
-  const msrpRaw = els.referenceMsrp.value.trim();
-  const reference_msrp = msrpRaw ? Number(msrpRaw) : null;
+  const deal = getDealPayload();
+  const needsCost =
+    (ctx === "margin_spotter" || ctx === "vendor_deal") &&
+    (!deal.my_cost || deal.my_cost <= 0);
+  const live = !els.sampleOnly.checked;
+  const useCache = live && !els.forceRefresh.checked;
 
   els.valuateBtn.disabled = true;
   els.valuateBtn.textContent = "Searching…";
-  const live = !els.sampleOnly.checked;
-  const needsCost = (ctx === "margin_spotter" || ctx === "vendor_deal") && (!my_cost || my_cost <= 0);
   const statusMsg = needsCost
     ? "No dealer cost entered — showing market comps only (add cost for profit lines)."
     : live
-      ? "Live search in progress — TrueGunValue, GunBroker, Gun.deals (often 5–15 min). Do not close this tab."
+      ? useCache
+        ? "Loading cached market or fetching Outdoor Analytics…"
+        : "Fetching Outdoor Analytics pricing… (usually under a minute)."
       : "Loading sample data…";
   setStatus(statusMsg, needsCost ? "warn" : "loading");
   showResultsLoading(
     live
-      ? "Querying TrueGunValue, GunBroker, and Gun.deals from the server. This usually takes several minutes. Results appear here when finished."
+      ? "Querying GunBroker Analytics (Outdoor Analytics) for sold comps and active listings."
       : "Loading sample valuation data…"
   );
+  saveDealDefaults();
 
   try {
-    const result = await valuate(apiUrl, appConfig?.apiKey ?? "", {
+    const result = await valuate(apiUrl, appConfig.apiKey, {
       ...query,
-      context: getContext(),
-      my_cost,
-      street_retail,
-      reference_msrp,
-      buyer_premium_pct: getBuyerPremiumPct(),
-      listing_addons: getListingAddons(),
+      ...deal,
       sample_only: els.sampleOnly.checked,
-      use_cache: !els.sampleOnly.checked && !els.forceRefresh.checked,
+      use_cache: useCache,
       force_refresh: els.forceRefresh.checked && !els.sampleOnly.checked,
     });
     renderResult(result);
     const sold = result.sold_stats.count;
     const asking = result.asking_stats.count;
-    setStatus(
-      `Done — ${sold} sold · ${asking} asking · ${result.listings.length} raw listings.`,
-      "ok"
-    );
+    const blocked = live && result.listings.length === 0;
+    if (blocked) {
+      const oaStatus = result.source_status["outdoor-analytics"] ?? "";
+      const oaFailed =
+        oaStatus.includes("empty") ||
+        oaStatus.includes("Unauthorized") ||
+        oaStatus.includes("failed");
+      const msg = oaFailed
+        ? "No pricing data — Outdoor Analytics token missing, expired, or API unreachable. Re-run save-oa-token.ps1 then sync-oa-session.ps1 -UploadOnly."
+        : "No listings returned — refresh your Outdoor Analytics token.";
+      setStatus(msg, "warn");
+    } else {
+      setStatus(
+        `Done — ${sold} sold · ${asking} asking · ${result.listings.length} raw. Change deal fields to recalc instantly.`,
+        "ok"
+      );
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const friendly =
       msg.includes("502") || msg.includes("Proxy Error")
-        ? "The server stopped waiting before the search finished (timeout). Try “Sample data only” to verify the desk, or uncheck “Search the web now” if you have cached prices."
+        ? "The server timed out. Try again, or use Sample data only to verify the desk loads."
         : msg.length > 400
           ? `${msg.slice(0, 400)}…`
           : msg;
-    setStatus(`Error: ${friendly}`, "error");
+    setStatus(friendly, "error");
     showResultsError(friendly);
   } finally {
     els.valuateBtn.disabled = false;
@@ -421,7 +721,7 @@ function applyNavLinks(config: AppConfig): void {
 function showApiEndpoint(config: AppConfig): void {
   const base = apiBaseUrl(config);
   if (!base) {
-    els.apiEndpoint.textContent = "API: not set — edit public/config.json";
+    els.apiEndpoint.textContent = "API: not set — edit config.json";
     els.apiEndpoint.classList.add("api-endpoint--warn");
     return;
   }
@@ -430,16 +730,42 @@ function showApiEndpoint(config: AppConfig): void {
     els.apiEndpoint.classList.add("api-endpoint--warn");
     return;
   }
-  els.apiEndpoint.textContent = `API: ${base}`;
+  if (!config.apiKey) {
+    els.apiEndpoint.textContent = `API: ${base} (missing apiKey — valuate will fail with 401)`;
+    els.apiEndpoint.classList.add("api-endpoint--warn");
+    return;
+  }
+  els.apiEndpoint.textContent = `API: ${base} · Outdoor Analytics`;
   els.apiEndpoint.classList.remove("api-endpoint--warn");
 }
 
+const DEAL_INPUT_IDS = [
+  els.myCost,
+  els.streetRetail,
+  els.referenceMsrp,
+  els.buyerPremiumPct,
+  els.listingAddons,
+  els.targetProfit,
+  els.minMarginPct,
+  els.transferFee,
+  els.inboundShip,
+  els.sellAssumption,
+] as const;
+
 async function init(): Promise<void> {
+  loadDealDefaults();
   resetConfigCache();
-  appConfig = await loadConfig();
-  showApiEndpoint(appConfig);
-  applyNavLinks(appConfig);
-  if (apiBaseUrl(appConfig)) {
+  try {
+    appConfig = await loadConfig();
+    showApiEndpoint(appConfig);
+    applyNavLinks(appConfig);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    els.apiEndpoint.textContent = `API: config failed to load (${message})`;
+    els.apiEndpoint.classList.add("api-endpoint--warn");
+    appConfig = null;
+  }
+  if (appConfig && apiBaseUrl(appConfig)) {
     els.sampleOnly.checked = false;
     els.forceRefresh.checked = true;
   }
@@ -454,13 +780,16 @@ async function init(): Promise<void> {
     els.condition,
   ].forEach((el) => el.addEventListener("input", updatePreview));
 
-  const rerunAuctionFees = () => {
-    if (lastResult && getContext() === "auction_sniper") {
-      void runValuation();
-    }
-  };
-  els.buyerPremiumPct.addEventListener("change", rerunAuctionFees);
-  els.listingAddons.addEventListener("change", rerunAuctionFees);
+  for (const el of DEAL_INPUT_IDS) {
+    el.addEventListener("input", () => {
+      saveDealDefaults();
+      scheduleRecompute();
+    });
+    el.addEventListener("change", () => {
+      saveDealDefaults();
+      scheduleRecompute();
+    });
+  }
 
   updatePreview();
   els.valuateBtn.addEventListener("click", () => void runValuation());
@@ -468,13 +797,17 @@ async function init(): Promise<void> {
   document.querySelectorAll('input[name="context"]').forEach((el) => {
     el.addEventListener("change", () => {
       syncContextPanels();
-      if (lastResult) {
-        void runValuation();
-      }
+      saveDealDefaults();
+      scheduleRecompute();
     });
   });
 
+  els.sampleOnly.addEventListener("change", () => {
+    if (els.sampleOnly.checked) els.forceRefresh.checked = false;
+  });
+
   syncContextPanels();
+  void initInventoryUi(appConfig, inventoryEls);
 }
 
 void init();

@@ -7,13 +7,14 @@ services:
       context: ./engine
       network: host
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8000:8000"
+    # Host network: bridge containers cannot reach api.gunbrokeranalytics.com (Azure APIM).
+    network_mode: host
     env_file:
       - ./engine/.env
     volumes:
       - ./engine/data/sessions:/app/data/sessions
       - ./engine/data/valuation_cache:/app/data/valuation_cache
       - ./engine/data/imports:/app/data/imports
+      - ./engine/data/inventory:/app/data/inventory
       # Dealer logins (create on server once; never commit)
       - ./engine/sites.local.yaml:/app/sites.local.yaml:ro

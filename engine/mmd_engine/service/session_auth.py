@@ -12,6 +12,10 @@ from mmd_engine.config import SESSIONS_DIR, session_path
 from mmd_engine.credentials import SiteCredential, get_site
 
 MARKET_SITE_URLS: dict[str, dict[str, str]] = {
+    "outdoor_analytics": {
+        "label": "Outdoor Analytics",
+        "url": "https://hub.outdooranalytics.com/pricing",
+    },
     "gunbroker": {
         "label": "GunBroker",
         "url": "https://www.gunbroker.com/",

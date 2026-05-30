@@ -12,7 +12,7 @@
       <div class="brand">
         <p class="eyebrow">Modular Gunworks LLC</p>
         <h1>Single-Item Valuation Desk</h1>
-        <p class="tagline">One firearm · many sources · actionable price intelligence</p>
+        <p class="tagline">One firearm · Outdoor Analytics pricing · actionable comps</p>
       </div>
       <nav class="site-nav">
         <p id="api-endpoint" class="api-endpoint muted">API: loading…</p>
@@ -91,10 +91,53 @@
           </label>
         </fieldset>
 
-        <div id="auction-fees" class="fee-panel">
-          <h3 class="fee-panel-title">Auction buy &amp; GunBroker sell</h3>
+        <div class="fee-panel deal-assumptions-panel">
+          <h3 class="fee-panel-title">Deal desk (instant recalc)</h3>
           <p class="muted fee-hint">
-            Max bid assumes you sell on GunBroker (tiered FVF: 6% on first $400, 4% above; $5 master FFL included).
+            After Valuate, changing these updates profit and max bid without re-fetching market data.
+          </p>
+          <label class="field">
+            <span>Target profit ($)</span>
+            <input id="target-profit" type="number" min="0" step="1" value="75" inputmode="decimal" />
+          </label>
+          <label class="field">
+            <span>Min margin (%)</span>
+            <input id="min-margin-pct" type="number" min="0" max="100" step="0.5" value="15" inputmode="decimal" />
+          </label>
+          <label class="field">
+            <span>Transfer in ($)</span>
+            <input id="transfer-fee" type="number" min="0" step="1" value="0" inputmode="decimal" />
+          </label>
+          <label class="field">
+            <span>Inbound ship ($)</span>
+            <input id="inbound-ship" type="number" min="0" step="1" value="0" inputmode="decimal" />
+          </label>
+          <label class="field">
+            <span>Listing add-ons ($)</span>
+            <input
+              id="listing-addons"
+              type="number"
+              min="0"
+              step="1"
+              value="10"
+              inputmode="decimal"
+            />
+          </label>
+          <label class="field">
+            <span>Sell assumption</span>
+            <select id="sell-assumption">
+              <option value="">Auto (mode default)</option>
+              <option value="p25">P25 (conservative)</option>
+              <option value="median">Median</option>
+              <option value="p75">P75 (aggressive)</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="auction-fees" class="fee-panel hidden">
+          <h3 class="fee-panel-title">Auction buyer premium</h3>
+          <p class="muted fee-hint">
+            Max hammer uses GunBroker FVF tiers (6% first $400, 4% above) and $5 master FFL on sell.
           </p>
           <label class="field">
             <span>Buyer premium (%)</span>
@@ -108,20 +151,6 @@
               inputmode="decimal"
             />
           </label>
-          <label class="field">
-            <span>Listing add-ons ($)</span>
-            <input
-              id="listing-addons"
-              type="number"
-              min="0"
-              step="1"
-              value="10"
-              inputmode="decimal"
-            />
-          </label>
-          <p class="muted fee-hint">
-            Optional upgrades for a faster sale (default $10). Listing is free until the item sells.
-          </p>
         </div>
 
         <label class="field" id="my-cost-field">
@@ -143,17 +172,54 @@
           <input id="reference-msrp" type="number" min="0" step="0.01" placeholder="Optional — not used for verdict" />
         </label>
         <p class="muted fee-hint" id="dealer-hint">
-          Enter <strong>your cost</strong>, then Valuate. Live search: TrueGunValue, GunBroker, Gun.deals (30–120s).
+          Enter <strong>your cost</strong>, then Valuate. Live pricing uses <strong>Outdoor Analytics</strong> (GunBroker Analytics hub).
         </p>
 
         <label class="check">
           <input id="force-refresh" type="checkbox" checked />
-          Search the web now (live scrape — slower; uncheck to use saved cache)
+          Live pricing (Outdoor Analytics — requires hub login token on server)
         </label>
+        <p class="muted fee-hint">
+          Token setup: <code>.\scripts\save-oa-token.ps1</code> then <code>.\scripts\sync-oa-session.ps1 -UploadOnly</code>
+        </p>
         <label class="check">
           <input id="sample-only" type="checkbox" />
           Sample data only (offline demo)
         </label>
+
+        <div class="fee-panel vendor-import-panel">
+          <h3 class="fee-panel-title">Vendor CSV catalogs</h3>
+          <p class="muted fee-hint">
+            Import Lipsey&rsquo;s, Chattanooga, Davidson&rsquo;s, Zanders, or other distributor exports. Matching rows appear on the
+            <strong>Wholesale</strong> tab when you Valuate.
+          </p>
+          <label class="field">
+            <span>Source id</span>
+            <input id="csv-source" type="text" placeholder="lipseys" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Column preset</span>
+            <select id="csv-preset">
+              <option value="dealer_catalog">dealer_catalog (Lipsey&rsquo;s / Chattanooga layout)</option>
+              <option value="davidsons">davidsons</option>
+              <option value="lipseys">lipseys</option>
+              <option value="chattanooga">chattanooga</option>
+              <option value="zanders">zanders</option>
+              <option value="generic">generic</option>
+            </select>
+          </label>
+          <label class="check">
+            <input id="csv-replace" type="checkbox" />
+            Replace existing catalog for this source
+          </label>
+          <label class="field">
+            <span>CSV file</span>
+            <span id="csv-file-label" class="upload-label secondary">Choose CSV file…</span>
+            <input id="csv-file" type="file" accept=".csv,text/csv" hidden />
+          </label>
+          <button id="csv-import-btn" type="button" class="secondary">Import CSV</button>
+          <ul id="csv-catalog-list" class="csv-catalog-list muted"></ul>
+        </div>
 
         <p id="preview" class="preview"></p>
         <div class="search-panel-actions">
@@ -164,17 +230,17 @@
 
       <section class="results-panel">
         <div id="empty-state" class="empty-state panel">
-          <p>Enter a firearm and click <strong>Valuate</strong> to see market spread across sources.</p>
-          <p class="muted">Live search can take <strong>5–15 minutes</strong> — the right panel updates when done.</p>
+          <p>Enter <strong>manufacturer</strong> and <strong>model</strong>, then click <strong>Valuate</strong>.</p>
+          <p class="muted">Live pricing uses <strong>Outdoor Analytics</strong> (GunBroker Analytics hub). Usually under a minute.</p>
         </div>
 
         <div id="loading-state" class="loading-state panel hidden" role="status" aria-live="polite">
-          <p class="loading-title">Searching market sources…</p>
+          <p class="loading-title">Fetching Outdoor Analytics…</p>
           <p id="loading-detail" class="muted loading-detail"></p>
         </div>
 
         <div id="error-state" class="error-state panel hidden" role="alert">
-          <p class="error-title">Search failed</p>
+          <p class="error-title">Could not load pricing</p>
           <p id="error-detail" class="error-detail"></p>
         </div>
 
@@ -193,10 +259,68 @@
               <p id="wholesale-summary" class="stat-line"></p>
             </div>
             <div class="summary-card panel insight-card">
-              <h3>Insight</h3>
+              <h3>Verdict</h3>
+              <p id="verdict-badge" class="verdict-badge" hidden></p>
               <p id="insight-headline" class="insight-line"></p>
               <div id="insight-blocks" class="insight-blocks"></div>
               <p id="insight-detail" class="muted insight-detail"></p>
+            </div>
+          </div>
+
+          <div id="dealer-desk" class="dealer-desk panel hidden">
+            <div class="dealer-desk-header">
+              <h3>Deal desk</h3>
+              <span id="confidence-badge" class="confidence-badge"></span>
+            </div>
+            <p id="dealer-market-line" class="dealer-market-line muted"></p>
+            <ul id="dealer-red-flags" class="dealer-red-flags"></ul>
+
+            <div class="dealer-grid">
+              <div class="dealer-card">
+                <h4>All-in acquisition</h4>
+                <table class="dealer-table" id="all-in-table">
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="dealer-card">
+                <h4>Bid / pay ceilings</h4>
+                <table class="dealer-table" id="ceilings-table">
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+
+            <h4 class="dealer-subhead">GunBroker net by sell scenario</h4>
+            <div class="table-wrap">
+              <table class="dealer-table dealer-table--wide">
+                <thead>
+                  <tr>
+                    <th>Scenario</th>
+                    <th>Gross</th>
+                    <th>FVF</th>
+                    <th>FFL</th>
+                    <th>Add-ons</th>
+                    <th>Net</th>
+                  </tr>
+                </thead>
+                <tbody id="gb-net-body"></tbody>
+              </table>
+            </div>
+
+            <h4 class="dealer-subhead" id="profit-table-title">Profit at your cost (GunBroker)</h4>
+            <div class="table-wrap">
+              <table class="dealer-table dealer-table--wide">
+                <thead>
+                  <tr>
+                    <th>Scenario</th>
+                    <th>Sell</th>
+                    <th>GB net</th>
+                    <th>Profit</th>
+                    <th>Margin</th>
+                  </tr>
+                </thead>
+                <tbody id="profit-body"></tbody>
+              </table>
             </div>
           </div>
 
@@ -228,7 +352,7 @@
             </div>
             <div id="tab-wholesale" class="tab-panel">
               <div class="table-wrap"><table><thead><tr><th>Title</th><th>Cost</th><th>Source</th><th>Match</th></tr></thead><tbody id="wholesale-body"></tbody></table></div>
-              <p class="muted">Import CSV: <code>python -m mmd_engine.cli.import_csv -s lipseys -f your.csv</code></p>
+              <p class="muted">Import vendor CSV from the left panel (Vendor CSV catalogs) or Connections page.</p>
             </div>
             <div id="tab-all" class="tab-panel">
               <div class="table-wrap"><table><thead><tr><th>Title</th><th>Price</th><th>Type</th><th>Source</th><th>Match</th><th>In stats</th></tr></thead><tbody id="all-body"></tbody></table></div>

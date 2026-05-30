@@ -1,10 +1,12 @@
-import type { ValuatePayload, ValuationResult } from "./types";
+import type { RecomputePayload, ValuatePayload, ValuationResult } from "./types";
 
-export async function valuate(
+async function postJson<T>(
   apiUrl: string,
   apiKey: string,
-  payload: ValuatePayload
-): Promise<ValuationResult> {
+  path: string,
+  payload: unknown,
+  timeoutMs: number
+): Promise<T> {
   const base = apiUrl.replace(/\/$/, "");
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -12,27 +14,19 @@ export async function valuate(
   if (apiKey) headers["X-API-Key"] = apiKey;
 
   const controller = new AbortController();
-  const timeoutMs = payload.sample_only ? 120_000 : 960_000;
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
-    res = await fetch(`${base}/api/valuate`, {
+    res = await fetch(`${base}${path}`, {
       method: "POST",
       headers,
       signal: controller.signal,
-      body: JSON.stringify({
-        ...payload,
-        use_cache: payload.use_cache ?? false,
-        force_refresh: payload.force_refresh ?? true,
-        sample_only: payload.sample_only ?? false,
-      }),
+      body: JSON.stringify(payload),
     });
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(
-        "Request timed out in the browser. Live search can take up to 15 minutes — try again, or use Sample data only."
-      );
+      throw new Error("Request timed out. Try again.");
     }
     throw e;
   } finally {
@@ -41,8 +35,44 @@ export async function valuate(
 
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(detail || `HTTP ${res.status}`);
+    let message = detail || `HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(detail) as { detail?: string | { msg?: string }[] };
+      if (typeof parsed.detail === "string") {
+        message = parsed.detail;
+      } else if (Array.isArray(parsed.detail) && parsed.detail[0]?.msg) {
+        message = parsed.detail[0].msg;
+      }
+    } catch {
+      /* use raw text */
+    }
+    if (res.status === 401) {
+      message = `Invalid API key (401). Hard-refresh the desk (Ctrl+F5) and check config.json has apiKey set.`;
+    }
+    throw new Error(message);
   }
 
-  return (await res.json()) as ValuationResult;
+  return (await res.json()) as T;
+}
+
+export async function valuate(
+  apiUrl: string,
+  apiKey: string,
+  payload: ValuatePayload
+): Promise<ValuationResult> {
+  const timeoutMs = payload.sample_only ? 120_000 : 960_000;
+  return postJson<ValuationResult>(apiUrl, apiKey, "/api/valuate", {
+    ...payload,
+    use_cache: payload.use_cache ?? false,
+    force_refresh: payload.force_refresh ?? true,
+    sample_only: payload.sample_only ?? false,
+  }, timeoutMs);
+}
+
+export async function recompute(
+  apiUrl: string,
+  apiKey: string,
+  payload: RecomputePayload
+): Promise<ValuationResult> {
+  return postJson<ValuationResult>(apiUrl, apiKey, "/api/recompute", payload, 60_000);
 }

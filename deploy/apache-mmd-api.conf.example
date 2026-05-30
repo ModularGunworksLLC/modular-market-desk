@@ -24,7 +24,7 @@
   ProxyPass /.well-known !
   ProxyPass / http://127.0.0.1:8000/
   ProxyPassReverse / http://127.0.0.1:8000/
-  ProxyTimeout 300
+  ProxyTimeout 900
   <Location "/">
     Require all granted
   </Location>

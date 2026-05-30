@@ -13,13 +13,35 @@ from mmd_engine.util import matches_query, parse_price, slug_id
 PRICE_FIELDS = ("dealer_price", "msrp")
 
 
+def decode_csv_bytes(raw: bytes) -> str:
+    """Decode wholesaler CSV exports (UTF-8, UTF-8 BOM, or Windows-1252 / Latin-1)."""
+    if not raw:
+        return ""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for encoding in ("cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1")
+
+
+def read_csv_text(path: Path) -> str:
+    return decode_csv_bytes(path.read_bytes())
+
+
 def import_csv_file(
     path: Path,
     preset: CsvPreset,
     *,
     query: str = "",
 ) -> list[CatalogItem]:
-    text = path.read_text(encoding="utf-8-sig")
+    text = read_csv_text(path)
     delimiter = _detect_delimiter(text)
     reader = csv.DictReader(text.splitlines(), delimiter=delimiter)
     if not reader.fieldnames:
@@ -68,6 +90,8 @@ def _build_column_map(headers: list[str], preset: CsvPreset) -> dict[str, str]:
         "msrp",
         "qty",
         "on_sale",
+        "sale_price",
+        "sale_ends",
     ):
         aliases = preset.aliases_for(field_name)
         if not aliases:
@@ -110,9 +134,11 @@ def _row_to_catalog(
     if dealer_price is None:
         return None
 
+    sale_price = _parse_money(cell("sale_price")) if "sale_price" in col_map else None
+    sale_ends = cell("sale_ends") if "sale_ends" in col_map else ""
+
     sku = cell("sku")
     upc = cell("upc") or None
-    item_id = slug_id(preset.source, sku or upc or manufacturer, model, str(dealer_price), str(row_index))
 
     category_raw = cell("category").lower()
     category = _normalize_category(category_raw, preset)
@@ -122,6 +148,12 @@ def _row_to_catalog(
     qty = _parse_qty(cell("qty"))
     in_stock = qty > 0 if qty is not None else _parse_bool_stock(cell("qty"))
     on_sale = _parse_on_sale(cell("on_sale"), dealer_price, msrp)
+    if _sale_active(sale_ends, sale_price, dealer_price):
+        on_sale = True
+        if sale_price is not None and sale_price > 0:
+            dealer_price = sale_price
+
+    item_id = slug_id(preset.source, sku or upc or manufacturer, model, str(dealer_price), str(row_index))
 
     return CatalogItem(
         id=item_id,
@@ -177,6 +209,15 @@ def _parse_on_sale(value: str, price: float, msrp: float | None) -> bool:
     if v in {"yes", "y", "true", "sale", "on sale", "1"}:
         return True
     if msrp and msrp > price:
+        return True
+    return False
+
+
+def _sale_active(sale_ends: str, sale_price: float | None, dealer_price: float) -> bool:
+    ends = sale_ends.strip().lower()
+    if ends and ends not in {"n/a", "na", "-", "none", "null"}:
+        return True
+    if sale_price is not None and sale_price > 0 and sale_price < dealer_price:
         return True
     return False
 

@@ -60,10 +60,14 @@ def main() -> None:
         site_cfg is not None and site_cfg.is_configured() and site_cfg.login_url
     )
 
-    if use_auto and site_cfg and site_cfg.login_url:
+    if use_auto and site_cfg and site_cfg.is_configured() and site_cfg.login_url:
         print(f"Auto-login to {meta['label']} using saved credentials…")
         print(f"Session file: {out}")
-        refresh_market_session_auto(args.site, wait_seconds=5)
+        try:
+            refresh_market_session_auto(args.site, wait_seconds=5)
+        except Exception as exc:
+            print(f"Auto-login failed: {exc}", file=sys.stderr)
+            sys.exit(1)
     elif args.wait_seconds:
         print(f"Opening {meta['label']} in a browser window.")
         print(f"Log in or pass any captcha/age gate. Saving in {args.wait_seconds}s…")

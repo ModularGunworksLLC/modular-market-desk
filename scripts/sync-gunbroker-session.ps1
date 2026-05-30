@@ -30,23 +30,34 @@ if (-not (Test-Path $VenvPython)) {
 }
 
 Write-Host "=== GunBroker session sync ===" -ForegroundColor Cyan
-Write-Host "Browser opens for $WaitSeconds seconds. LOG IN to GunBroker now." -ForegroundColor Yellow
+Write-Host "Your installed Chrome opens for $WaitSeconds seconds." -ForegroundColor Yellow
+Write-Host "LOG IN to GunBroker and complete any Cloudflare checkbox." -ForegroundColor Yellow
 Write-Host ""
 
-$chromePath = Join-Path $env:PLAYWRIGHT_BROWSERS_PATH "chromium-1223\chrome-win64\chrome.exe"
-if (-not (Test-Path $chromePath)) {
-    Write-Host "Installing Playwright Chromium..." -ForegroundColor Gray
-    & $VenvPlaywright install chromium
+# Playwright bundled Chromium is often blocked by Cloudflare; we use system Chrome when headed.
+if (-not (Get-Command "chrome.exe" -ErrorAction SilentlyContinue) -and -not (Get-Command "msedge" -ErrorAction SilentlyContinue)) {
+    $chromePath = Join-Path $env:PLAYWRIGHT_BROWSERS_PATH "chromium-1223\chrome-win64\chrome.exe"
+    if (-not (Test-Path $chromePath)) {
+        Write-Host "Installing Playwright Chromium fallback..." -ForegroundColor Gray
+        & $VenvPlaywright install chromium
+    }
+}
+
+function Invoke-MarketAuth {
+    param([string[]]$AuthArgs)
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $VenvPython @AuthArgs
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+    return $code
 }
 
 Push-Location $Engine
 try {
-    & $VenvPython -m mmd_engine.cli.market_auth gunbroker --auto-login
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Auto-login failed; trying headed window ($WaitSeconds s)..." -ForegroundColor Yellow
-        & $VenvPython -m mmd_engine.cli.market_auth gunbroker --wait-seconds $WaitSeconds
-    }
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "Opening browser for $WaitSeconds seconds - log in and complete MFA now." -ForegroundColor Yellow
+    $code = Invoke-MarketAuth @("-m", "mmd_engine.cli.market_auth", "gunbroker", "--wait-seconds", "$WaitSeconds")
+    if ($code -ne 0) { exit $code }
 }
 finally {
     Pop-Location
@@ -75,7 +86,7 @@ Write-Host "Uploading to $env:MMD_SSH_HOST ..." -ForegroundColor Cyan
 scp $SessionFile "${env:MMD_SSH_HOST}:/opt/modular-market-desk/engine/data/sessions/"
 
 Write-Host "Restarting API on server..." -ForegroundColor Cyan
-ssh $env:MMD_SSH_HOST "cd /opt/modular-market-desk && sudo docker compose restart api && sleep 4 && curl -s https://api.modulargunworks.com/health"
+ssh $env:MMD_SSH_HOST 'cd /opt/modular-market-desk; sudo docker compose restart api; sleep 4; curl -s https://api.modulargunworks.com/health'
 
 Write-Host ""
 Write-Host "Done. Test https://desk.modulargunworks.com" -ForegroundColor Green

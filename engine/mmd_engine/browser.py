@@ -7,9 +7,24 @@ from pathlib import Path
 from typing import Iterator
 
 from mmd_engine.age_gate import dismiss_age_gate, goto_dealer_page
-from mmd_engine.config import SESSIONS_DIR, nav_timeout_ms, nav_wait_until
+from mmd_engine.config import SESSIONS_DIR, env, nav_timeout_ms, nav_wait_until, proxy_server
 
 __all__ = ["browser_page", "dismiss_age_gate", "goto_dealer_page", "goto_market_url"]
+
+
+def _launch_browser(playwright, *, headless: bool):
+    """Prefer installed Chrome/Edge for headed login (Cloudflare-friendly)."""
+    if headless:
+        return playwright.chromium.launch(headless=True)
+    channel = env("MMD_BROWSER_CHANNEL", "chrome").strip().lower()
+    for name in (channel, "chrome", "msedge", None):
+        if name is None:
+            return playwright.chromium.launch(headless=False)
+        try:
+            return playwright.chromium.launch(channel=name, headless=False)
+        except Exception:
+            continue
+    return playwright.chromium.launch(headless=False)
 
 
 @contextmanager
@@ -28,7 +43,7 @@ def browser_page(
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=headless)
+        browser = _launch_browser(playwright, headless=headless)
         context_kwargs: dict = {}
         if storage_state and storage_state.exists():
             context_kwargs["storage_state"] = str(storage_state)
@@ -41,6 +56,9 @@ def browser_page(
             ),
         )
         context_kwargs.setdefault("viewport", {"width": 1280, "height": 720})
+        proxy = proxy_server()
+        if proxy:
+            context_kwargs["proxy"] = {"server": proxy}
         context = browser.new_context(**context_kwargs)
         page = context.new_page()
         try:

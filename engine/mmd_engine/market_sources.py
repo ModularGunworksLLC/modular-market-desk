@@ -4,11 +4,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mmd_engine.adapters.gunbroker import GunBrokerAdapter
-from mmd_engine.adapters.gundeals_valuation import GunDealsValuationAdapter
-from mmd_engine.adapters.truegunvalue import TrueGunValueAdapter
+from mmd_engine.adapters.outdoor_analytics import OutdoorAnalyticsAdapter
 from mmd_engine.adapters.valuation_base import ValuationAdapter
 from mmd_engine.adapters.wholesale_csv import wholesale_adapters
+from mmd_engine.config import legacy_market_scrapers_enabled
+from mmd_engine.oa_session import load_bearer_token
+
+def _legacy_adapters() -> list[ValuationAdapter]:
+    if not legacy_market_scrapers_enabled():
+        return []
+    from mmd_engine.adapters.gunbroker import GunBrokerAdapter
+    from mmd_engine.adapters.gundeals_valuation import GunDealsValuationAdapter
+    from mmd_engine.adapters.truegunvalue import TrueGunValueAdapter
+
+    return [
+        TrueGunValueAdapter(),
+        GunBrokerAdapter(),
+        GunDealsValuationAdapter(),
+    ]
 
 
 @dataclass(frozen=True)
@@ -16,41 +29,35 @@ class MarketSourceMeta:
     id: str
     label: str
     description: str
-    session_site: str | None = None  # playwright storage_state name under data/sessions/
+    session_site: str | None = None
 
 
 MARKET_SOURCES: tuple[MarketSourceMeta, ...] = (
     MarketSourceMeta(
-        id="truegunvalue",
-        label="TrueGunValue",
-        description="Sold history and estimates (GunBroker-derived comps)",
-    ),
-    MarketSourceMeta(
-        id="gunbroker",
-        label="GunBroker",
-        description="Completed auctions and current listings",
-        session_site="gunbroker",
-    ),
-    MarketSourceMeta(
-        id="gundeals",
-        label="Gun.deals",
-        description="Retail promos across many online gun stores",
-        session_site="gundeals",
+        id="outdoor_analytics",
+        label="Outdoor Analytics",
+        description="GunBroker Analytics — sold comps and active listings (GB Analytics hub API)",
+        session_site="outdoor_analytics",
     ),
 )
 
 
 def live_market_adapters() -> list[ValuationAdapter]:
-    """All public internet price sources for /api/valuate (run in parallel)."""
+    """Live pricing for /api/valuate — Outdoor Analytics only by default."""
     from mmd_engine.config import skip_market_sources
 
     skip = skip_market_sources()
-    adapters: list[ValuationAdapter] = [
-        TrueGunValueAdapter(),
-        GunBrokerAdapter(),
-        GunDealsValuationAdapter(),
-    ]
-    return [a for a in adapters if a.name not in skip]
+    adapters: list[ValuationAdapter] = []
+
+    oa_skipped = "outdoor_analytics" in skip or "outdoor-analytics" in skip
+    if load_bearer_token() and not oa_skipped:
+        adapters.append(OutdoorAnalyticsAdapter())
+
+    for legacy in _legacy_adapters():
+        if legacy.name not in skip:
+            adapters.append(legacy)
+
+    return adapters
 
 
 def all_valuation_adapters(*, sample_only: bool) -> list[ValuationAdapter]:
@@ -65,5 +72,7 @@ def all_valuation_adapters(*, sample_only: bool) -> list[ValuationAdapter]:
 
 def source_catalog_text() -> str:
     lines = [f"{m.label}: {m.description}" for m in MARKET_SOURCES]
-    lines.append("Wholesale CSV: your imported distributor catalogs (dealer cost)")
+    if legacy_market_scrapers_enabled():
+        lines.append("Legacy scrapers enabled (TGV / GunBroker / Gun.deals)")
+    lines.append("Wholesale CSV: imported distributor catalogs (dealer cost only)")
     return " · ".join(lines)

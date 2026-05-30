@@ -1,0 +1,20 @@
+{
+  "source": "davidsons",
+  "_comment": "Davidson's Inventory Download — quoted CSV with Item #, Dealer Price, Sale Price, Sale Ends, etc.",
+  "columns": {
+    "sku": ["Item #", "Item#", "ITEMNO", "Catalog Number"],
+    "upc": ["UPC Code", "UPC", "Upc", "Barcode"],
+    "manufacturer": ["Manufacturer", "MFG", "MANUFACTURER", "Brand"],
+    "model": ["Model Series", "Model", "MODEL", "MANUFACTURERMODELNO"],
+    "description": ["Item Description", "Description", "DESCRIPTION1", "DESCRIPTION2"],
+    "caliber": ["Caliber", "Cal", "Gauge", "CALIBERGAUGE", "CALIBER"],
+    "category": ["Gun Type", "Item Type", "Type", "Category", "TYPE", "ITEMTYPE"],
+    "action": ["Action", "ACTION"],
+    "dealer_price": ["Dealer Price", "Dealer Cost", "Wholesale", "Net Price", "CURRENTPRICE", "PRICE"],
+    "msrp": ["MSP", "Retail Price", "MSRP", "List Price", "RETAILMAP", "MAP"],
+    "sale_price": ["Sale Price", "SALE PRICE"],
+    "sale_ends": ["Sale Ends", "Sale End", "Promo Ends"],
+    "qty": ["Quantity", "Qty", "QUANTITY", "In Stock", "On Hand", "Available"],
+    "on_sale": ["On Sale", "Sale", "Promo", "ONSALE"]
+  }
+}

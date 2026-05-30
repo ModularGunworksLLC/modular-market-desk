@@ -53,6 +53,15 @@ def build_model_aliases(query: FirearmQuery) -> list[str]:
         aliases.extend(["savage-1911", "savage 1911", "sv1911", "sv1911gss"])
     if query.mpn:
         aliases.append(query.mpn.lower())
+    if "glock" in mfr:
+        mdl_num = re.sub(r"\D", "", mdl)
+        if mdl_num:
+            aliases.extend([f"g{mdl_num}", f"glock {mdl_num}", f"glock{mdl_num}"])
+        variant = (query.variant or "").lower()
+        if "gen" in variant and "5" in variant:
+            aliases.extend(["gen5", "gen 5", "gen5"])
+        if "gen" in variant and "4" in variant:
+            aliases.extend(["gen4", "gen 4", "gen4"])
     return list(dict.fromkeys(aliases))
 
 

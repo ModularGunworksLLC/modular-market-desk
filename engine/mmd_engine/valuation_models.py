@@ -86,6 +86,7 @@ class ValuationInsights:
     lowest_wholesale: float | None = None
     retail_street_low: float | None = None
     sold_median_90d: float | None = None
+    dealer_brief: dict[str, Any] = field(default_factory=dict)
     assumptions: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
