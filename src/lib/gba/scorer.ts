@@ -20,6 +20,8 @@ export interface GbaQuery {
   /** Optional sub-model / generation text (e.g. "Gen 5"). */
   variant?: string;
   caliber?: string;
+  /** Desk category hint (handgun, rifle, …) — tightens comp hygiene to complete firearms. */
+  category?: string;
   /** Manufacturer part number, used as an extra model alias. */
   mpn?: string;
   condition?: "new" | "used" | "any";
@@ -68,9 +70,9 @@ export interface OaSelection {
   score: number;
 }
 
-const MIN_MANUFACTURER_SCORE = 50;
-const MIN_MODEL_SCORE = 50;
-const MIN_CALIBER_SCORE = 50;
+const MIN_MANUFACTURER_SCORE = 40;
+const MIN_MODEL_SCORE = 45;
+const MIN_CALIBER_SCORE = 40;
 
 /* ------------------------------------------------------------------ *
  * Text normalization
@@ -182,7 +184,18 @@ export function buildModelAliases(query: GbaQuery): string[] {
   }
 
   if (mfr.includes("savage") && (mdl.includes("1911") || mdl === "1911")) {
-    aliases.push("savage-1911", "savage 1911", "sv1911", "sv1911gss");
+    aliases.push(
+      "savage-1911",
+      "savage 1911",
+      "sv1911",
+      "sv1911gss",
+      "1911 govt",
+      "1911 government",
+      "gov't",
+      "govt",
+      "government",
+      "govt style",
+    );
   }
 
   if (query.mpn) aliases.push(query.mpn.toLowerCase());
@@ -198,12 +211,46 @@ export function buildModelAliases(query: GbaQuery): string[] {
   return Array.from(new Set(aliases));
 }
 
+/**
+ * OA catalog uses glued M&P codes: "M&P45", not "M&P 45".
+ * Desk users often type the spaced form from auction titles.
+ */
+export function compactMpModel(model: string): string {
+  let m = model.trim();
+  m = m.replace(/M\s*&\s*P\s+/gi, "M&P");
+  m = m.replace(/(M&P)\s+(\d)/gi, "$1$2");
+  return m.trim();
+}
+
+/**
+ * Split glued model codes (SD9VE, M&P9) into searchable tokens.
+ * OA catalog titles often insert spaces: "S&W SD9 VE".
+ */
+export function explodeCompactModel(model: string): string[] {
+  const m = model.toLowerCase().trim();
+  if (!m) return [];
+  const out = new Set<string>([m]);
+  const spaced = m
+    .replace(/([a-z])(\d)/gi, "$1 $2")
+    .replace(/(\d)([a-z])/gi, "$1 $2")
+    .replace(/[-_/]+/g, " ");
+  for (const t of spaced.split(/\s+/)) {
+    const p = t.trim();
+    if (p.length >= 2) out.add(p);
+  }
+  return Array.from(out);
+}
+
 /** Search tokens used to score candidate model names. */
 export function modelSearchTokens(query: GbaQuery): string[] {
   const tokens: string[] = [];
   const romans = new Set(["ii", "iv", "v"]);
 
-  for (const value of [query.model, query.variant]) {
+  for (const value of [query.model, query.variant, compactMpModel(query.model ?? "")]) {
+    for (const part of explodeCompactModel(value ?? "")) {
+      const p = part.trim();
+      if (p.length >= 2 || romans.has(p)) tokens.push(p);
+    }
     for (const part of (value ?? "").toLowerCase().split(/\s+/)) {
       const p = part.trim();
       if (p.length >= 2 || romans.has(p)) tokens.push(p);
@@ -217,6 +264,8 @@ export function modelSearchTokens(query: GbaQuery): string[] {
   }
 
   const mdl = (query.model ?? "").toLowerCase().trim();
+  const mfr = (query.manufacturer ?? "").toLowerCase().trim();
+  if (mfr && mdl) tokens.push(`${mfr} ${mdl}`, `${mfr.split(/\s+/)[0]} ${mdl}`);
   if (/^\d+$/.test(mdl)) {
     tokens.push(mdl);
     tokens.push(`g${mdl}`);
@@ -237,6 +286,14 @@ function scoreModelName(modelName: string, tokens: string[]): number {
   if (tokens.length === 0) return 0;
   const name = modelName.toLowerCase();
   const normName = norm(name);
+
+  // M&P45 catalog vs desk tokens "m&p" + "45" or compact "m&p45"
+  if (normName.includes("mp") && /\bm&p\b/i.test(name + " " + tokens.join(" "))) {
+    const mpNum = tokens.find((t) => /^\d{1,3}$/.test(t));
+    if (mpNum && (normName.includes(`mp${mpNum}`) || normName === `mp${mpNum}`)) return 92;
+  }
+
+  if (tokens.includes("1911") && /\b1911\b/i.test(name)) return 88;
 
   for (const tok of tokens) {
     if (/^\d+$/.test(tok)) {
@@ -306,7 +363,11 @@ function conditionParam(key: string): "New" | "Used" {
  * Blended weights: manufacturer 25%, model 55%, caliber 20%, with a small bonus
  * for catalog-flagged common manufacturers to break ties.
  */
-export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelection | null {
+function resolveSelectionWithThresholds(
+  deps: OaDependencies,
+  query: GbaQuery,
+  thresholds: { mfr: number; model: number; cal: number },
+): OaSelection | null {
   const tokens = modelSearchTokens(query);
   const wantCaliber = (query.caliber ?? "").trim().length > 0;
   let best: OaSelection | null = null;
@@ -318,7 +379,7 @@ export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelec
     for (const node of nodes) {
       const mfrName = String(node.Manufacturer ?? "");
       const mfrScore = scoreManufacturer(mfrName, query);
-      if (mfrScore < MIN_MANUFACTURER_SCORE) continue;
+      if (mfrScore < thresholds.mfr) continue;
 
       const mfrId = toInt(node.ManufacturerID);
       const models = node.Models;
@@ -327,7 +388,7 @@ export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelec
       for (const modelNode of models) {
         const modelName = String(modelNode.Model ?? "");
         const modelScore = scoreModelName(modelName, tokens);
-        if (modelScore < MIN_MODEL_SCORE) continue;
+        if (modelScore < thresholds.model) continue;
 
         const modelId = toInt(modelNode.ModelID);
         const calibers = modelNode.Calibers;
@@ -336,7 +397,7 @@ export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelec
         for (const cal of calibers) {
           const calName = cal.Caliber ?? null;
           const calScore = scoreCaliber(calName != null ? String(calName) : null, query);
-          if (wantCaliber && calScore < MIN_CALIBER_SCORE) continue;
+          if (wantCaliber && calScore < thresholds.cal) continue;
 
           const calId = toInt(cal.CaliberID);
           let total = mfrScore * 0.25 + modelScore * 0.55 + calScore * 0.2;
@@ -361,4 +422,87 @@ export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelec
   }
 
   return best;
+}
+
+/** Map desk form fields onto OA catalog IDs (strict pass, then relaxed pass). */
+export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelection | null {
+  const strict = { mfr: MIN_MANUFACTURER_SCORE, model: MIN_MODEL_SCORE, cal: MIN_CALIBER_SCORE };
+  const hit = resolveSelectionWithThresholds(deps, query, strict);
+  if (hit) return hit;
+  return resolveSelectionWithThresholds(deps, query, { mfr: 25, model: 35, cal: 30 });
+}
+
+/** Desk shorthand → OA catalog manufacturer spellings. */
+const MANUFACTURER_CANONICAL: Record<string, string> = {
+  "s&w": "Smith & Wesson",
+  sw: "Smith & Wesson",
+  "smith and wesson": "Smith & Wesson",
+  hk: "Heckler & Koch",
+  "heckler and koch": "Heckler & Koch",
+  sig: "Sig Sauer",
+  fnh: "FN",
+  "taurus intl": "Taurus",
+  "rock island": "Rock Island Armory",
+  ria: "Rock Island Armory",
+  psa: "Palmetto State Armory",
+  "palmetto": "Palmetto State Armory",
+  cz: "CZ",
+  canik: "Canik",
+  ruger: "Ruger",
+  glock: "Glock",
+  mossberg: "Mossberg",
+  beretta: "Beretta",
+  kimber: "Kimber",
+  walther: "Walther",
+  stoeger: "Stoeger",
+  savage: "Savage Arms",
+};
+
+/** Alternate desk queries when the first pass does not match the OA catalog (e.g. Savage → Savage Arms). */
+export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
+  const attempts: GbaQuery[] = [query];
+  const seen = new Set<string>();
+  const push = (q: GbaQuery) => {
+    const key = JSON.stringify(q);
+    if (seen.has(key)) return;
+    seen.add(key);
+    attempts.push(q);
+  };
+
+  if (query.condition !== "any") push({ ...query, condition: "any" });
+
+  const mfr = query.manufacturer.trim();
+  const mfrKey = mfr.toLowerCase();
+  const canonical = MANUFACTURER_CANONICAL[mfrKey] ?? MANUFACTURER_CANONICAL[norm(mfr)];
+  if (canonical && norm(canonical) !== norm(mfr)) {
+    push({ ...query, manufacturer: canonical });
+    if (query.condition !== "any") push({ ...query, manufacturer: canonical, condition: "any" });
+  }
+
+  if (/^savage$/i.test(mfr)) {
+    push({ ...query, manufacturer: "Savage Arms" });
+    push({ ...query, manufacturer: "Savage Arms", condition: "any" });
+  }
+
+  const model = query.model.trim();
+  const mpCompact = compactMpModel(model);
+  if (mpCompact !== model) {
+    push({ ...query, model: mpCompact });
+    if (query.condition !== "any") push({ ...query, model: mpCompact, condition: "any" });
+  }
+
+  if (/[a-z]\d|\d[a-z]/i.test(model)) {
+    const spaced = model
+      .replace(/([a-z])(\d)/gi, "$1 $2")
+      .replace(/(\d)([a-z])/gi, "$1 $2");
+    if (spaced !== model) {
+      push({ ...query, model: spaced });
+      if (query.condition !== "any") push({ ...query, model: spaced, condition: "any" });
+    }
+  }
+
+  const combo = `${mfr} ${query.model}`.trim();
+  if (combo.length > query.model.length) push({ ...query, model: combo });
+
+  return attempts;
 }

@@ -4,8 +4,10 @@ High-speed firearm **arbitrage calculator**. Enter a gun you can buy (auction lo
 special); the desk cross-references distributor catalogs and GunBroker Analytics market comps to
 return a **GO / NO-GO** verdict and an absolute **Max Bid**.
 
-Stack: Next.js (App Router) + React 19 + Tailwind + Drizzle ORM on Neon Postgres. Ships as one
+Stack: Next.js (App Router) + React 19 + Tailwind + Drizzle ORM + SQLite (libsql). Ships as one
 Dockerized Node app for AWS Lightsail.
+
+**Production deploy (existing Lightsail):** see [deploy/lightsail.md](deploy/lightsail.md).
 
 ## Repository map
 

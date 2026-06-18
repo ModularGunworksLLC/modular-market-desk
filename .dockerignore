@@ -1,0 +1,9 @@
+node_modules
+.next
+data
+.git
+engine
+web
+*.md
+.env
+.env.*

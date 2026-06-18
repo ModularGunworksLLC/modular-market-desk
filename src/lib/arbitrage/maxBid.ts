@@ -1,8 +1,7 @@
 /**
- * Max Bid - the highest HAMMER price that still clears both the target profit and the
- * minimum margin floor, working backward from market data.
+ * Max Bid - the highest HAMMER price that still clears the flat target profit floor.
  *
- *   maxAllIn = min( bestNet - targetProfit, bestNet / (1 + minMarginPct/100) )
+ *   maxAllIn = bestNet - targetProfit
  *   maxBid   = max( 0, (maxAllIn - inboundShip) / (1 + buyerPremiumPct/100) )
  */
 
@@ -11,17 +10,13 @@ import { round2 } from "./fees";
 export function maxBid(params: {
   bestNet: number;
   targetProfit: number;
-  minMarginPct: number;
   inboundShip: number;
   buyerPremiumPct: number;
 }): number {
-  const { bestNet, targetProfit, minMarginPct, inboundShip, buyerPremiumPct } = params;
+  const { bestNet, targetProfit, inboundShip, buyerPremiumPct } = params;
   if (!Number.isFinite(bestNet) || bestNet <= 0) return 0;
 
-  const byProfit = bestNet - targetProfit;
-  const marginRate = Math.max(0, minMarginPct) / 100;
-  const byMargin = bestNet / (1 + marginRate);
-  const maxAllIn = Math.min(byProfit, byMargin);
+  const maxAllIn = bestNet - targetProfit;
   if (maxAllIn <= 0) return 0;
 
   const premiumRate = Math.max(0, buyerPremiumPct) / 100;

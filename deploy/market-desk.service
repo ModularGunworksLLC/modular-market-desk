@@ -1,0 +1,19 @@
+[Unit]
+Description=Modular Market Desk (Next.js)
+After=network.target
+
+[Service]
+Type=simple
+User=bitnami
+WorkingDirectory=/opt/market-desk-v2/.next/standalone
+Environment=NODE_ENV=production
+Environment=PORT=3010
+Environment=HOSTNAME=0.0.0.0
+Environment=DATABASE_URL=file:/opt/market-desk-v2/data/desk.db
+EnvironmentFile=-/opt/market-desk-v2/.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

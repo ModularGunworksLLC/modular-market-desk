@@ -1,0 +1,17 @@
+# Run on Lightsail beside your other services. Point nginx/Caddy at port 3010.
+services:
+  market-desk:
+    build: .
+    container_name: modular-market-desk
+    restart: unless-stopped
+    ports:
+      - "3010:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: file:/app/data/desk.db
+    volumes:
+      - desk-data:/app/data
+
+volumes:
+  desk-data:

@@ -5,6 +5,13 @@ import { z } from "zod";
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
 
 export const evaluateSchema = z.object({
+  /** @deprecated use workflow + usedSubtype */
+  acquisitionMode: z.enum(["auction", "dealer"]).optional(),
+  workflow: z.enum(["used", "vendor"]).optional(),
+  usedSubtype: z.enum(["auction", "tradein"]).optional().default("auction"),
+  /** Vendor ad source — highlights row in wholesale grid. */
+  sourceDealer: z.string().optional().default(""),
+
   // identity
   manufacturer: z.string().min(1, "manufacturer required"),
   model: z.string().min(1, "model required"),
@@ -14,19 +21,18 @@ export const evaluateSchema = z.object({
   category: z.string().optional().default("handgun"),
   condition: z.enum(["new", "used", "any"]).optional().default("any"),
 
-  // buy-side inputs
-  targetAcquisitionCost: z.number().nonnegative(),
+  // buy-side inputs — optional for comp-only evaluate; live bid check uses this when set
+  targetAcquisitionCost: z.number().nonnegative().optional().default(0),
   inboundShip: z.number().nonnegative().default(0),
   buyerPremiumPct: z.number().min(0).max(100).default(0),
-  outboundShip: z.number().nonnegative().default(DEAL_DEFAULTS.outboundShip),
+  /** Omit to use category default: handgun $45, rifle/shotgun $60. */
+  outboundShip: z.number().nonnegative().optional(),
+  buyerPaysOutboundShip: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysOutboundShip),
+  buyerPaysCardFee: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysCardFee),
   listingUpgrades: z.number().min(0).max(5).default(DEAL_DEFAULTS.listingUpgrades),
   targetProfit: z.number().nonnegative().default(DEAL_DEFAULTS.targetProfit),
-  minMarginPct: z.number().min(0).default(DEAL_DEFAULTS.minMarginPct),
+  minMarginPct: z.number().min(0).optional().default(DEAL_DEFAULTS.minMarginPct),
 
-  // market source precedence:
-  //   1. explicit `gba` ids (manual override of the resolver)
-  //   2. auto comps: resolve catalog ids from identity text + saved token (default)
-  //   3. manual sold/asking price arrays
   gba: z
     .object({
       modelId: z.number().int().positive(),
@@ -34,8 +40,6 @@ export const evaluateSchema = z.object({
       condition: z.enum(["New", "Used"]),
     })
     .optional(),
-  // When true (default), the server resolves GBA model/caliber ids from the
-  // manufacturer/model/caliber text and pulls live comps automatically.
   autoComps: z.boolean().optional().default(true),
   soldPrices: z.array(z.number().positive()).optional(),
   askingPrices: z.array(z.number().positive()).optional(),

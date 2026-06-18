@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 interface ImportResult {
@@ -7,9 +8,16 @@ interface ImportResult {
   parsed: number;
   upserted: number;
   skipped: number;
+  debug?: {
+    detectedDelimiter: string;
+    columnCount: number;
+    resolvedColumns: Record<string, string>;
+    missingPriceColumn: boolean;
+  };
 }
 
 export function CatalogUploader({ vendors }: { vendors: { value: string; label: string }[] }) {
+  const router = useRouter();
   const [vendor, setVendor] = useState(vendors[0]?.value ?? "lipseys");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -34,6 +42,7 @@ export function CatalogUploader({ vendors }: { vendors: { value: string; label: 
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
       setResult(payload as ImportResult);
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -75,11 +84,39 @@ export function CatalogUploader({ vendors }: { vendors: { value: string; label: 
 
       {error && <p className="text-sm text-desk-nogo">{error}</p>}
       {result && (
-        <div className="rounded-md border border-desk-go/40 bg-desk-go/10 p-3 text-sm">
-          <span className="font-semibold capitalize text-desk-go">{result.vendorName}</span>:{" "}
-          <span className="num">{result.upserted}</span> upserted,{" "}
+        <div
+          className={`rounded-md border p-3 text-sm ${
+            result.upserted > 0
+              ? "border-desk-go/40 bg-desk-go/10"
+              : "border-desk-nogo/40 bg-desk-nogo/10"
+          }`}
+        >
+          <span
+            className={`font-semibold capitalize ${result.upserted > 0 ? "text-desk-go" : "text-desk-nogo"}`}
+          >
+            {result.vendorName}
+          </span>
+          : <span className="num">{result.upserted}</span> upserted,{" "}
           <span className="num">{result.parsed}</span> parsed,{" "}
           <span className="num">{result.skipped}</span> skipped.
+          {result.debug && result.upserted === 0 && (
+            <p className="mt-2 text-xs text-desk-muted">
+              Detected <span className="font-mono">{result.debug.detectedDelimiter}</span> delimiter,{" "}
+              <span className="num">{result.debug.columnCount}</span> columns.
+              {result.debug.missingPriceColumn
+                ? " No price column matched — click Seed / refresh default presets, then re-import."
+                : " Price column mapped but values were empty or unparseable."}
+              {Object.keys(result.debug.resolvedColumns).length > 0 && (
+                <>
+                  {" "}
+                  Mapped:{" "}
+                  {Object.entries(result.debug.resolvedColumns)
+                    .map(([k, v]) => `${k}→${v}`)
+                    .join(", ")}
+                </>
+              )}
+            </p>
+          )}
         </div>
       )}
       <p className="text-[11px] text-desk-muted">

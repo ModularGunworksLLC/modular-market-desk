@@ -27,9 +27,12 @@ function num(name: string, fallback: number): number {
 }
 
 export const DEAL_DEFAULTS = {
-  targetProfit: num("DEAL_TARGET_PROFIT", 75),
-  minMarginPct: num("DEAL_MIN_MARGIN_PCT", 15),
+  targetProfit: num("DEAL_TARGET_PROFIT", 50),
+  minMarginPct: num("DEAL_MIN_MARGIN_PCT", 0),
   buyerPremiumPct: num("DEAL_DEFAULT_BUYER_PREMIUM_PCT", 18),
   listingUpgrades: num("DEAL_DEFAULT_LISTING_UPGRADE", 3),
   outboundShip: num("DEAL_DEFAULT_OUTBOUND_SHIP", 30),
+  /** Default: buyer pays ship + card on GunBroker listings (not absorbed in net). */
+  buyerPaysOutboundShip: true,
+  buyerPaysCardFee: true,
 } as const;

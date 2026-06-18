@@ -32,14 +32,26 @@ describe("routeLocalAlabama backs out 9% AL tax (user's worked example)", () => 
   });
 });
 
-describe("routeGunBroker deducts every leak", () => {
-  it("nets correctly at $1000 with $30 outbound and $3 upgrades", () => {
-    const b = routeGunBroker({ sellPrice: 1000, outboundShip: 30, listingUpgrades: 3 });
+describe("routeGunBroker", () => {
+  it("deducts ship and card when seller pays", () => {
+    const b = routeGunBroker({
+      sellPrice: 1000,
+      outboundShip: 30,
+      listingUpgrades: 3,
+      buyerPaysOutboundShip: false,
+      buyerPaysCardFee: false,
+    });
     // fvf 48, ffl 5, outbound 30, card 0.03*(1000+30)=30.9, upgrades 3
     // net = 1000 - 48 - 5 - 30 - 30.9 - 3 = 883.1
     expect(b.finalValueFee).toBe(48);
     expect(b.cardFee).toBe(30.9);
     expect(b.net).toBe(883.1);
+  });
+
+  it("skips ship and card when buyer pays (default)", () => {
+    const b = routeGunBroker({ sellPrice: 1000, outboundShip: 30, listingUpgrades: 3 });
+    expect(b.cardFee).toBe(30.9);
+    expect(b.net).toBe(944);
   });
 });
 
@@ -51,13 +63,12 @@ describe("allInCost applies buyer premium then inbound", () => {
 
 describe("maxBid inverts the net to a hammer ceiling", () => {
   it("returns 0 when net cannot clear the target", () => {
-    expect(maxBid({ bestNet: 50, targetProfit: 75, minMarginPct: 15, inboundShip: 0, buyerPremiumPct: 0 })).toBe(0);
+    expect(maxBid({ bestNet: 50, targetProfit: 75, inboundShip: 0, buyerPremiumPct: 0 })).toBe(0);
   });
   it("solves backward through premium + inbound", () => {
-    // bestNet 800, target 75 -> byProfit 725; minMargin 15% -> byMargin 800/1.15=695.65
-    // maxAllIn = 695.65 ; hammer = (695.65 - 25)/1.18 = 568.35
-    const mb = maxBid({ bestNet: 800, targetProfit: 75, minMarginPct: 15, inboundShip: 25, buyerPremiumPct: 18 });
-    expect(mb).toBeCloseTo(568.35, 1);
+    // bestNet 800, target 75 -> maxAllIn 725 ; hammer = (725 - 25)/1.18 = 593.22
+    const mb = maxBid({ bestNet: 800, targetProfit: 75, inboundShip: 25, buyerPremiumPct: 18 });
+    expect(mb).toBeCloseTo(593.22, 1);
   });
 });
 
@@ -67,27 +78,33 @@ describe("evaluateDeal end-to-end", () => {
     inboundShip: 25,
     buyerPremiumPct: 0,
     outboundShip: 30,
+    buyerPaysOutboundShip: true,
+    buyerPaysCardFee: true,
     listingUpgrades: 3,
-    targetProfit: 75,
-    minMarginPct: 15,
+    targetProfit: 50,
+    minMarginPct: 0,
   };
   const sold = summarize([700, 750, 800, 820, 850, 900]);
 
-  it("produces a verdict, a best route, and a max bid", () => {
+  it("uses P25 + GunBroker for conservative decision metrics", () => {
     const r = evaluateDeal(input, sold);
     expect(r.allInCost).toBe(425);
+    expect(r.chosen.label).toBe("P25");
+    expect(r.decisionRoute).toBe("gunbroker");
     expect(["GO", "NO-GO"]).toContain(r.verdict);
-    expect(["gunbroker", "local_al"]).toContain(r.bestRoute);
     expect(r.scenarios).toHaveLength(3);
     expect(r.maxBid).toBeGreaterThan(0);
-    // The engine always picks the higher-netting route as bestNet/bestRoute.
-    const expectedBest = Math.max(r.chosen.routeA.net, r.chosen.routeB.net);
-    expect(r.chosen.bestNet).toBe(expectedBest);
-    expect(r.chosen.bestRoute).toBe(
-      r.chosen.routeA.net >= r.chosen.routeB.net ? "gunbroker" : "local_al",
+    expect(r.profitMaxHammer).toBe(
+      maxBid({
+        bestNet: r.chosen.routeA.net,
+        targetProfit: input.targetProfit,
+        inboundShip: input.inboundShip,
+        buyerPremiumPct: input.buyerPremiumPct,
+      }),
     );
-    // At a ~$810 median, AL local (810/1.09 = 743.12) out-nets GunBroker after fees/shipping.
-    expect(r.chosen.routeB.net).toBeGreaterThan(r.chosen.routeA.net);
-    expect(r.bestRoute).toBe("local_al");
+    expect(r.effectiveMaxHammer).toBe(r.profitMaxHammer);
+    expect(r.localNetProfit).toBe(round2(r.chosen.routeB.net - r.allInCost));
+    // With buyer-paid ship/card, GunBroker net can beat local at the same sell price.
+    expect(r.upsideRoute).toBe(r.chosen.bestRoute);
   });
 });

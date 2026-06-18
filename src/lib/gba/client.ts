@@ -7,12 +7,18 @@
  */
 
 import { summarize } from "@/lib/arbitrage/stats";
+import { normalizeVaultSecret, redactSecrets } from "@/lib/vault";
 import type { PriceStats } from "@/lib/arbitrage/types";
-import { resolveSelection } from "@/lib/gba/scorer";
+import { buildDecisionStats, type CompFilterMeta } from "@/lib/comp-filter";
+import { extractGunBrokerItemId } from "@/lib/gunbroker-url";
+import { resolveQueryAttempts, resolveSelection } from "@/lib/gba/scorer";
 import type { GbaQuery, OaDependencies, OaSelection } from "@/lib/gba/scorer";
 
 const DEFAULT_BASE = process.env.GBA_API_BASE ?? "https://api.gunbrokeranalytics.com/gba-portal-api";
 const DEFAULT_TIMEOUT_MS = 180_000;
+const DEPS_CACHE_TTL_MS = 60 * 60 * 1000;
+
+let dependenciesCache: { loadedAt: number; data: OaDependencies } | null = null;
 
 export class GbaApiError extends Error {
   constructor(
@@ -24,11 +30,33 @@ export class GbaApiError extends Error {
   }
 }
 
+export interface SoldCompRow {
+  price: number;
+  salesDate: string;
+  listingType: string;
+  /** Present when the API returns a title (used to drop parts/mags from comps). */
+  title?: string;
+  /** When Outdoor Analytics includes auction detail on sold rows. */
+  startingBid?: number | null;
+  bidCount?: number | null;
+}
+
+export interface AskingCompRow {
+  price: number;
+  title: string;
+  condition: string;
+  location: string;
+  itemId: string | null;
+}
+
 export interface GbaMarket {
   sold: PriceStats;
   asking: PriceStats;
   soldRaw: number[];
   askingRaw: number[];
+  soldRows: SoldCompRow[];
+  askingRows: AskingCompRow[];
+  compMeta: CompFilterMeta;
 }
 
 export class GbaApiClient {
@@ -36,7 +64,7 @@ export class GbaApiClient {
   private readonly base: string;
 
   constructor(token: string, opts?: { baseUrl?: string }) {
-    this.token = token.trim();
+    this.token = normalizeVaultSecret(token);
     if (!this.token) throw new GbaApiError("Missing GunBroker Analytics bearer token");
     this.base = (opts?.baseUrl ?? DEFAULT_BASE).replace(/\/$/, "");
   }
@@ -60,7 +88,7 @@ export class GbaApiClient {
         cache: "no-store",
       });
     } catch (err) {
-      throw new GbaApiError(`Request failed: ${(err as Error).message}`);
+      throw new GbaApiError(`Request failed: ${redactSecrets((err as Error).message)}`);
     } finally {
       clearTimeout(timer);
     }
@@ -80,10 +108,16 @@ export class GbaApiClient {
     return body as T;
   }
 
-  /** Catalog dependency tree keyed by condition bucket (NEW / USED). */
+  /** Catalog dependency tree keyed by condition bucket (NEW / USED). Cached 1h in-process. */
   async dependencies(): Promise<OaDependencies> {
+    const now = Date.now();
+    if (dependenciesCache && now - dependenciesCache.loadedAt < DEPS_CACHE_TTL_MS) {
+      return dependenciesCache.data;
+    }
     const data = await this.get<OaDependencies>("/pricing/dependencies");
-    return data && typeof data === "object" ? data : {};
+    const deps = data && typeof data === "object" ? data : {};
+    dependenciesCache = { loadedAt: now, data: deps };
+    return deps;
   }
 
   /** Resolve desk free-text identity to a catalog model/caliber selection. */
@@ -96,51 +130,122 @@ export class GbaApiClient {
    * then fetch sold + asking sets for it. Returns null when no catalog match.
    */
   async resolveMarket(query: GbaQuery): Promise<(GbaMarket & { selection: OaSelection }) | null> {
-    const selection = await this.resolve(query);
+    const deps = await this.dependencies();
+    let selection: OaSelection | null = null;
+    for (const attempt of resolveQueryAttempts(query)) {
+      selection = resolveSelection(deps, attempt);
+      if (selection) break;
+    }
     if (!selection) return null;
     const market = await this.market({
       modelId: selection.modelId,
       caliberId: selection.caliberId,
       condition: selection.conditionParam,
+      category: query.category,
     });
     return { ...market, selection };
   }
 
-  /** Historical SOLD prices for a resolved model/caliber. */
-  async pricingData(args: { modelId: number; caliberId: number; condition: "New" | "Used" }): Promise<number[]> {
+  /** Historical SOLD rows for a resolved model/caliber. */
+  async pricingDataRows(args: {
+    modelId: number;
+    caliberId: number;
+    condition: "New" | "Used";
+  }): Promise<SoldCompRow[]> {
     const rows = await this.get<Array<Record<string, unknown>>>("/pricing/data", {
       modelID: args.modelId,
       caliberID: args.caliberId,
       condition: args.condition,
     });
     if (!Array.isArray(rows)) return [];
-    return rows
-      .map((r) => Number(r.Amount))
-      .filter((n) => Number.isFinite(n) && n > 0);
+    const out: SoldCompRow[] = [];
+    for (const row of rows) {
+      const price = Number(row.Amount);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const title = String(row.ItemTitle ?? row.Title ?? row.Description ?? "").trim();
+      const startRaw = row.StartingBid ?? row.StartBid ?? row.MinimumBid ?? row.OpeningBid;
+      const bidsRaw = row.BidCount ?? row.NumberOfBids ?? row.Bids ?? row.TotalBids;
+      const startingBid = Number(startRaw);
+      const bidCount = Number(bidsRaw);
+      out.push({
+        price,
+        salesDate: String(row.SalesDate ?? ""),
+        listingType: String(row.ListingType ?? ""),
+        ...(title ? { title } : {}),
+        ...(Number.isFinite(startingBid) && startingBid > 0 ? { startingBid } : { startingBid: null }),
+        ...(Number.isFinite(bidCount) && bidCount >= 0 ? { bidCount: Math.round(bidCount) } : { bidCount: null }),
+      });
+    }
+    return out;
   }
 
-  /** Active ASKING prices for a resolved model/caliber. */
-  async activeListings(args: { modelId: number; caliberId: number; useParentModel?: boolean }): Promise<number[]> {
+  /** Historical SOLD prices for a resolved model/caliber. */
+  async pricingData(args: { modelId: number; caliberId: number; condition: "New" | "Used" }): Promise<number[]> {
+    const rows = await this.pricingDataRows(args);
+    return rows.map((r) => r.price);
+  }
+
+  /** Active ASKING rows for a resolved model/caliber. */
+  async activeListingRows(args: {
+    modelId: number;
+    caliberId: number;
+    useParentModel?: boolean;
+  }): Promise<AskingCompRow[]> {
     const rows = await this.get<Array<Record<string, unknown>>>("/pricing/active-listings", {
       modelID: args.modelId,
       caliberID: args.caliberId,
       useParentModel: args.useParentModel === false ? "0" : "1",
     });
     if (!Array.isArray(rows)) return [];
-    return rows.map(activeListingPrice).filter((n): n is number => n != null && n > 0);
+    const out: AskingCompRow[] = [];
+    for (const row of rows) {
+      const price = activeListingPrice(row);
+      if (price == null || price <= 0) continue;
+      const loc = [
+        String(row.ShipsFromCity ?? "").trim(),
+        String(row.ShipsFromState ?? "").trim(),
+      ]
+        .filter(Boolean)
+        .join(", ");
+      out.push({
+        price,
+        title: String(row.ItemTitle ?? row.Title ?? "").trim(),
+        condition: String(row.Condition ?? "").trim(),
+        location: loc,
+        itemId: extractGunBrokerItemId(row),
+      });
+    }
+    return out.sort((a, b) => a.price - b.price);
+  }
+
+  /** Active ASKING prices for a resolved model/caliber. */
+  async activeListings(args: { modelId: number; caliberId: number; useParentModel?: boolean }): Promise<number[]> {
+    const rows = await this.activeListingRows(args);
+    return rows.map((r) => r.price);
   }
 
   /** Pull both sold + asking sets and summarize into percentile stats. */
-  async market(args: { modelId: number; caliberId: number; condition: "New" | "Used" }): Promise<GbaMarket> {
-    const [soldRaw, askingRaw] = await Promise.all([
-      this.pricingData(args),
-      this.activeListings({ modelId: args.modelId, caliberId: args.caliberId }),
+  async market(args: {
+    modelId: number;
+    caliberId: number;
+    condition: "New" | "Used";
+    category?: string;
+  }): Promise<GbaMarket> {
+    const [soldRows, askingRows] = await Promise.all([
+      this.pricingDataRows(args),
+      this.activeListingRows({ modelId: args.modelId, caliberId: args.caliberId }),
     ]);
+    const soldRaw = soldRows.map((r) => r.price);
+    const askingRaw = askingRows.map((r) => r.price);
+    const filtered = buildDecisionStats(soldRaw, askingRaw, soldRows, askingRows, args.category);
     return {
       soldRaw,
       askingRaw,
-      sold: summarize(soldRaw),
-      asking: summarize(askingRaw),
+      soldRows: filtered.soldDisplay,
+      askingRows: filtered.askingDisplay,
+      sold: filtered.sold,
+      asking: filtered.asking,
+      compMeta: filtered.meta,
     };
   }
 }

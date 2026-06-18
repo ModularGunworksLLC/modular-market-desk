@@ -26,4 +26,19 @@ body {
   .num {
     @apply font-mono tabular-nums;
   }
+  .comp-hero {
+    @apply rounded-lg border border-desk-border bg-gradient-to-br from-desk-panel to-desk-panel2 p-5;
+  }
+  .comp-fmv {
+    @apply text-4xl font-black tracking-tight text-desk-text 3xl:text-5xl;
+  }
+  .comp-range-track {
+    @apply relative mt-2 h-2 w-full rounded-full bg-desk-panel2;
+  }
+  .comp-range-fill {
+    @apply absolute top-0 h-2 rounded-full bg-desk-accent/70;
+  }
+  .comp-range-marker {
+    @apply absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-desk-accent;
+  }
 }

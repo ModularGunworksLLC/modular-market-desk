@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 
 import { revokeConnectionAction, saveConnection, type ActionResult } from "@/lib/actions/vault";
-import type { ConnectionView } from "@/lib/catalog-queries";
+import type { ConnectionView } from "@/lib/import/types";
 import { timeAgo } from "@/lib/format";
 
 export function ConnectionVault({ connections }: { connections: ConnectionView[] }) {
@@ -54,7 +54,17 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="field-label">Vendor</label>
-            <input className="field-input" name="vendor" placeholder="outdoor_analytics" defaultValue="outdoor_analytics" />
+            <input
+              className="field-input"
+              name="vendor"
+              placeholder="outdoor_analytics"
+              list="vault-vendor-options"
+              defaultValue="outdoor_analytics"
+            />
+            <datalist id="vault-vendor-options">
+              <option value="outdoor_analytics" />
+              <option value="2ndamendmentwholesale" />
+            </datalist>
           </div>
           <div>
             <label className="field-label">Kind</label>
@@ -67,6 +77,14 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
         <div>
           <label className="field-label">Label</label>
           <input className="field-input" name="label" placeholder="Outdoor Analytics" />
+        </div>
+        <div>
+          <label className="field-label">Feed URL (2AW / distributor APIs)</label>
+          <input
+            className="field-input font-mono text-xs"
+            name="feedUrl"
+            placeholder="https://... (optional; or TAW_FEED_URL in .env)"
+          />
         </div>
         <div>
           <label className="field-label">Token / session string (encrypted at rest)</label>

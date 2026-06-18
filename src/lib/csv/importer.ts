@@ -12,10 +12,13 @@
 
 import { parse } from "csv-parse";
 import { sql } from "drizzle-orm";
-import type { Readable } from "node:stream";
+import { Readable } from "node:stream";
+import type { Readable as ReadableStream } from "node:stream";
 
 import { db } from "@/lib/db";
 import { catalogItems, type CsvColumnMap, type NewCatalogItem } from "@/lib/db/schema";
+
+import { detectDelimiter } from "./delimiter";
 
 const BATCH_SIZE = 500;
 
@@ -24,6 +27,13 @@ export interface ImportResult {
   parsed: number;
   upserted: number;
   skipped: number;
+  /** Present when every row was skipped — helps fix header/delimiter presets. */
+  debug?: {
+    detectedDelimiter: string;
+    columnCount: number;
+    resolvedColumns: Partial<Record<keyof CsvColumnMap, string>>;
+    missingPriceColumn: boolean;
+  };
 }
 
 /** Normalize a header for tolerant alias matching. */
@@ -86,11 +96,16 @@ function rowToItem(
   const description = cell("description") ?? "";
   const manufacturer = cell("manufacturer") ?? description.split(" ")[0] ?? "Unknown";
   const model = cell("model") ?? description;
-  const dealerPrice = parseMoney(cell("dealerPrice")) ?? parseMoney(cell("msrp"));
+  const dealerPrice =
+    parseMoney(cell("dealerPrice")) ??
+    parseMoney(cell("salePrice")) ??
+    parseMoney(cell("mapPrice")) ??
+    parseMoney(cell("msrp"));
   if (dealerPrice == null) return null; // no usable price -> skip
   if (!model && !description) return null;
 
-  const upc = cell("upc") || null;
+  let upc = cell("upc") || null;
+  if (upc) upc = upc.replace(/^#+|#+$/g, "").trim() || null;
   const sku = cell("sku") || null;
   const dedupeKey = upc ?? sku ?? slug(manufacturer, model, description);
 
@@ -167,18 +182,52 @@ function sqlExcluded(column: string) {
   return sql.raw(`excluded.${column}`);
 }
 
+/** Read through the first line so we can sniff tab vs comma before parsing the rest. */
+async function streamWithFirstLine(
+  stream: ReadableStream,
+): Promise<{ combined: Readable; firstLine: string }> {
+  const reader = stream[Symbol.asyncIterator]();
+  let buffer = "";
+  const prefix: Buffer[] = [];
+
+  while (buffer.length < 65536 && !buffer.includes("\n")) {
+    const { value, done } = await reader.next();
+    if (done) break;
+    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+    prefix.push(chunk);
+    buffer += chunk.toString("utf8");
+  }
+
+  const firstLine = buffer.split(/\r?\n/)[0] ?? "";
+
+  async function* rest(): AsyncGenerator<Buffer> {
+    for (const chunk of prefix) yield chunk;
+    while (true) {
+      const { value, done } = await reader.next();
+      if (done) break;
+      yield Buffer.isBuffer(value) ? value : Buffer.from(value);
+    }
+  }
+
+  return { combined: Readable.from(rest()), firstLine };
+}
+
 export async function importCatalogCsv(
-  stream: Readable,
+  stream: ReadableStream,
   opts: { vendorName: string; columnMap: CsvColumnMap; delimiter?: string; sourceFile: string },
 ): Promise<ImportResult> {
   const now = new Date();
   const result: ImportResult = { vendorName: opts.vendorName, parsed: 0, upserted: 0, skipped: 0 };
 
-  const parser = stream.pipe(
+  const { combined, firstLine } = await streamWithFirstLine(stream);
+  const sniffed = detectDelimiter(firstLine);
+  const delimiter = opts.delimiter?.trim() || sniffed || ",";
+
+  const parser = combined.pipe(
     parse({
       columns: true,
       bom: true,
-      delimiter: opts.delimiter ?? ",",
+      delimiter,
       relax_column_count: true,
       skip_empty_lines: true,
       trim: true,
@@ -186,10 +235,15 @@ export async function importCatalogCsv(
   );
 
   let resolved: Partial<Record<keyof CsvColumnMap, string>> | null = null;
+  let columnCount = 0;
   let batch: NewCatalogItem[] = [];
 
   for await (const record of parser as AsyncIterable<Record<string, string>>) {
-    if (!resolved) resolved = resolveHeaders(Object.keys(record), opts.columnMap);
+    if (!resolved) {
+      const keys = Object.keys(record);
+      columnCount = keys.length;
+      resolved = resolveHeaders(keys, opts.columnMap);
+    }
     result.parsed += 1;
 
     const item = rowToItem(record, resolved, {
@@ -210,5 +264,16 @@ export async function importCatalogCsv(
   }
 
   result.upserted += await flush(batch);
+
+  if (result.parsed > 0 && result.upserted === 0) {
+    const resolvedColumns = resolved ?? {};
+    result.debug = {
+      detectedDelimiter: delimiter === "\t" ? "tab" : delimiter,
+      columnCount,
+      resolvedColumns,
+      missingPriceColumn: !resolvedColumns.dealerPrice && !resolvedColumns.msrp && !resolvedColumns.mapPrice,
+    };
+  }
+
   return result;
 }

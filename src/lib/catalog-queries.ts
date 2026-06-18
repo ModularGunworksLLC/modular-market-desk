@@ -7,6 +7,9 @@ import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { catalogItems, connections, csvPresets, type CsvPreset } from "@/lib/db/schema";
 import { DEFAULT_PRESETS } from "@/lib/csv/presets";
+import type { ConnectionView } from "@/lib/import/types";
+
+export type { ConnectionView };
 
 export interface CatalogSummary {
   vendorName: string;
@@ -53,16 +56,6 @@ export async function getPresetForVendor(
   const fallback = DEFAULT_PRESETS.find((p) => p.vendorName === vendorName);
   if (fallback) return { columnMap: fallback.columnMap, delimiter: fallback.delimiter ?? "," };
   return null;
-}
-
-export interface ConnectionView {
-  id: string;
-  vendor: string;
-  kind: "market_api" | "vendor_session";
-  label: string;
-  status: string;
-  updatedAt: string;
-  expiresAt: string | null;
 }
 
 /** List connections WITHOUT secrets - safe to render. */

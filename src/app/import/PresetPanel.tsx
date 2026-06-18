@@ -1,19 +1,27 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { seedDefaultPresets } from "@/lib/actions/presets";
-
 export function PresetPanel({ presets }: { presets: { vendorName: string; label: string }[] }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [ok, setOk] = useState(true);
 
   function seed() {
     startTransition(async () => {
-      const res = await seedDefaultPresets();
-      setOk(res.ok);
-      setMsg(res.message);
+      setMsg(null);
+      try {
+        const res = await fetch("/api/presets/seed", { method: "POST" });
+        const body = (await res.json()) as { ok: boolean; message: string };
+        setOk(body.ok);
+        setMsg(body.message);
+        if (body.ok) router.refresh();
+      } catch (err) {
+        setOk(false);
+        setMsg(err instanceof Error ? err.message : String(err));
+      }
     });
   }
 
@@ -33,6 +41,7 @@ export function PresetPanel({ presets }: { presets: { vendorName: string; label:
         </ul>
       )}
       <button
+        type="button"
         onClick={seed}
         disabled={pending}
         className="w-full rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-sm font-medium hover:border-desk-accent disabled:opacity-50"
@@ -42,7 +51,7 @@ export function PresetPanel({ presets }: { presets: { vendorName: string; label:
       {msg && <p className={`mt-2 text-sm ${ok ? "text-desk-go" : "text-desk-nogo"}`}>{msg}</p>}
       <p className="mt-2 text-[11px] text-desk-muted">
         Presets map each distributor&apos;s raw headers (Lipsey&apos;s, Zanders, Davidson&apos;s,
-        Chattanooga) onto unified catalog columns.
+        Chattanooga, 2nd Amendment Wholesale) onto unified catalog columns.
       </p>
     </section>
   );

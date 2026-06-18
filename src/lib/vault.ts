@@ -24,6 +24,21 @@ export function encryptSecret(plaintext: string): string {
   return [iv.toString("base64"), tag.toString("base64"), enc.toString("base64")].join(".");
 }
 
+/** Strip DevTools noise (multi-line header copies, Bearer prefix) to a single JWT or cookie line. */
+export function normalizeVaultSecret(secret: string): string {
+  let s = secret.trim();
+  s = s.replace(/^\s*Bearer\s+/i, "");
+  s = (s.split(/\r?\n/)[0] ?? "").trim();
+  const jwt = s.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+  if (jwt) return jwt[0];
+  return s;
+}
+
+/** Remove bearer tokens from strings before surfacing to clients or logs. */
+export function redactSecrets(text: string): string {
+  return text.replace(/Bearer\s+eyJ[^\s"]+/gi, "Bearer [redacted]");
+}
+
 export function decryptSecret(payload: string): string {
   const [ivB64, tagB64, dataB64] = payload.split(".");
   if (!ivB64 || !tagB64 || !dataB64) throw new Error("Malformed vault payload.");

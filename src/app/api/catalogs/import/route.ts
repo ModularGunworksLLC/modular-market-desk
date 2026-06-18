@@ -51,7 +51,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     const result = await importCatalogCsv(nodeStream, {
       vendorName: vendor,
       columnMap: preset.columnMap,
-      delimiter: delimiterOverride || preset.delimiter,
+      // Delimiter is auto-detected from the file header unless the uploader overrides it.
+      delimiter: delimiterOverride || undefined,
       sourceFile: file.name,
     });
     return NextResponse.json({ ok: true, ...result });

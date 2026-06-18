@@ -10,6 +10,7 @@ import {
 import type { CsvPreset } from "@/lib/db/schema";
 import { intFmt, timeAgo, usd } from "@/lib/format";
 
+import { CatalogSync } from "./CatalogSync";
 import { CatalogUploader } from "./CatalogUploader";
 import { ConnectionVault } from "./ConnectionVault";
 import { PresetPanel } from "./PresetPanel";
@@ -99,6 +100,9 @@ export default async function ImportDashboard() {
           <h2 className="mb-3 text-sm font-semibold text-desk-muted">Bulk CSV import</h2>
           <CatalogUploader vendors={vendorOptions} />
         </section>
+
+        {/* API sync */}
+        <CatalogSync />
 
         {/* Session Vault */}
         <ConnectionVault connections={conns.data} />

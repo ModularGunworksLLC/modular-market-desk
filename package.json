@@ -14,7 +14,10 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:init": "tsx scripts/init-db.ts"
+    "db:init": "tsx scripts/init-db.ts",
+    "test:gba": "tsx scripts/test-gba.ts",
+    "flip:check": "tsx scripts/gba-flip-check.ts",
+    "import:catalogs": "tsx scripts/import-catalogs.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",

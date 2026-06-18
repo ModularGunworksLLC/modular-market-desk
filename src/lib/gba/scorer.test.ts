@@ -6,6 +6,7 @@ import {
   modelSearchTokens,
   norm,
   oaConditions,
+  resolveQueryAttempts,
   resolveSelection,
   type OaDependencies,
 } from "./scorer";
@@ -123,6 +124,99 @@ describe("resolveSelection", () => {
     });
     expect(sel).not.toBeNull();
     expect(sel!.caliberId).toBe(9001);
+  });
+
+  it("resolves Savage 1911 via Savage Arms fallback", () => {
+    const savageDeps: OaDependencies = {
+      NEW: [
+        {
+          Manufacturer: "Savage Arms",
+          ManufacturerID: 50,
+          Models: [
+            {
+              Model: "SAVAGE 1911 GOV'T STYLE",
+              ModelID: 9001,
+              Calibers: [{ Caliber: ".45 ACP", CaliberID: 45 }],
+            },
+          ],
+        },
+      ],
+    };
+    const attempts = resolveQueryAttempts({
+      manufacturer: "Savage",
+      model: "1911",
+      caliber: "45 ACP",
+      condition: "new",
+    });
+    let sel = null;
+    for (const q of attempts) {
+      sel = resolveSelection(savageDeps, q);
+      if (sel) break;
+    }
+    expect(sel).not.toBeNull();
+    expect(sel!.model).toContain("1911");
+    expect(sel!.caliberId).toBe(45);
+  });
+
+  it("compacts M&P 45 to M&P45 for OA catalog match", () => {
+    const swDeps: OaDependencies = {
+      USED: [
+        {
+          Manufacturer: "SMITH & WESSON",
+          ManufacturerID: 10106,
+          Models: [
+            {
+              Model: "M&P45",
+              ModelID: 56165,
+              Calibers: [{ Caliber: ".45 ACP", CaliberID: 8125 }],
+            },
+          ],
+        },
+      ],
+    };
+    let sel = null;
+    for (const q of resolveQueryAttempts({
+      manufacturer: "Smith & Wesson",
+      model: "M&P 45",
+      caliber: ".45 ACP",
+      condition: "used",
+    })) {
+      sel = resolveSelection(swDeps, q);
+      if (sel) break;
+    }
+    expect(sel).not.toBeNull();
+    expect(sel!.model).toBe("M&P45");
+  });
+
+  it("resolves compact SD9VE against spaced OA catalog model S&W SD9 VE", () => {
+    const swDeps: OaDependencies = {
+      USED: [
+        {
+          Manufacturer: "SMITH & WESSON",
+          ManufacturerID: 10106,
+          IsCommonManufacturer: true,
+          Models: [
+            {
+              Model: "S&W SD9 VE",
+              ModelID: 126556,
+              Calibers: [{ Caliber: "9MM LUGER", CaliberID: 8206 }],
+            },
+          ],
+        },
+      ],
+    };
+    let sel = null;
+    for (const q of resolveQueryAttempts({
+      manufacturer: "Smith & Wesson",
+      model: "SD9VE",
+      caliber: "9mm",
+      condition: "new",
+    })) {
+      sel = resolveSelection(swDeps, q);
+      if (sel) break;
+    }
+    expect(sel).not.toBeNull();
+    expect(sel!.model).toContain("SD9");
   });
 
   it("returns null when manufacturer is absent from the catalog", () => {

@@ -19,20 +19,28 @@ function clampUpgrades(listingUpgrades: number): number {
 
 /**
  * Route A - Sell on GunBroker (shipped, online).
- *   net = G - FVF(G) - $5 master FFL - outboundShip - 3%(G + outboundShip) - listingUpgrades
+ *   net = G - FVF(G) - $5 master FFL - listingUpgrades
+ *        - (outboundShip unless buyerPaysOutboundShip)
+ *        - (3%(G+ship) unless buyerPaysCardFee)
  */
 export function routeGunBroker(params: {
   sellPrice: number;
   outboundShip: number;
   listingUpgrades: number;
+  buyerPaysOutboundShip?: boolean;
+  buyerPaysCardFee?: boolean;
 }): RouteBreakdown {
   const sell = Math.max(0, params.sellPrice);
   const outbound = Math.max(0, params.outboundShip);
   const upgrades = clampUpgrades(params.listingUpgrades);
+  const buyerPaysShip = params.buyerPaysOutboundShip !== false;
+  const buyerPaysCard = params.buyerPaysCardFee !== false;
 
   const fvf = finalValueFee(sell);
   const card = cardProcessingFee(sell, outbound);
-  const net = sell - fvf - MASTER_FFL_FEE - outbound - card - upgrades;
+  const shipLeak = buyerPaysShip ? 0 : outbound;
+  const cardLeak = buyerPaysCard ? 0 : card;
+  const net = sell - fvf - MASTER_FFL_FEE - shipLeak - cardLeak - upgrades;
 
   return {
     route: "gunbroker",
