@@ -19,7 +19,7 @@ export const VENDOR_LABELS: Record<TrackedVendor, string> = {
 };
 
 /** Vendors that support API/feed catalog sync (token in Session Vault). */
-export const API_SYNC_VENDORS = ["2ndamendmentwholesale"] as const;
+export const API_SYNC_VENDORS = ["2ndamendmentwholesale", "chattanooga"] as const;
 
 export type ApiSyncVendor = (typeof API_SYNC_VENDORS)[number];
 

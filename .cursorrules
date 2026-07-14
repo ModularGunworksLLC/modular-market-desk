@@ -15,11 +15,13 @@ numbers, fee tiers, tax rates, or rounding behavior without an explicit instruct
 - Full-stack **TypeScript**, **Next.js (App Router)**, **React 19**, **Tailwind CSS**.
 - Runs as a single **Dockerized Node** app on **AWS Lightsail** (long-running server; NOT serverless).
   Live valuation calls can take many seconds - never assume short serverless timeouts.
-- Data store is **Neon Postgres** accessed via **Drizzle ORM** (`postgres` / postgres.js driver).
+- Data store is **local SQLite** (`@libsql/client`, `file:./data/desk.db`) accessed via **Drizzle ORM**.
+ The DB file lives on the long-running Lightsail instance (persistent Docker volume). This is the
+ deployed reality; do NOT reintroduce Neon Postgres without an explicit migration instruction.
 - All outbound calls (GunBroker Analytics API, vendor lookups) and all DB queries run **inside
-  Lightsail**. No third-party serverless functions, no edge runtime for data paths.
+ Lightsail**. No third-party serverless functions, no edge runtime for data paths.
 - Money is computed in JS `number` dollars and rounded to cents ONLY at the boundaries via
-  `round2()`. Persisted money columns are `numeric(12,2)`.
+  `round2()`. Persisted money columns are SQLite `real`, rounded to cents at the write boundary.
 - Path alias: `@/*` -> `./src/*`.
 
 ## 2. UI doctrine: one layout, every device
@@ -47,7 +49,7 @@ A deal evaluation always takes:
 
 ## 4. Two avenues, run together on submit
 
-### 4a. Wholesale Verification (local Postgres)
+### 4a. Wholesale Verification (local SQLite)
 Query `catalog_items` for the identity (UPC first, then SKU, then manufacturer+model). Build a
 **side-by-side grid** across the four tracked distributors - **Lipsey's, Zanders, Davidson's,
 Chattanooga** - and FLAG any distributor whose brand-new `dealer_price` is **cheaper than the

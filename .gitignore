@@ -34,3 +34,11 @@ npm-debug.log*
 # legacy v0.4 leftovers (recoverable on the `legacy-v0.4` branch)
 /engine/
 /web/
+
+dollarplan/node_modules/
+dollarplan/.next/
+output/
+tmp-*/
+*.db
+lpp-*.txt
+lpp-*.json

@@ -7,6 +7,8 @@ import type { EvaluationResult, PriceStats } from "@/lib/arbitrage/types";
 import type { DealInsights } from "@/lib/deal-insights";
 import type { DeskMode } from "@/lib/desk-mode";
 import { vendorLabel } from "@/lib/tracked-vendors";
+import type { CompFilterMeta } from "@/lib/comp-filter";
+import { matchTierLabel } from "@/lib/comp-filter";
 import type { WholesaleGrid } from "@/lib/wholesale";
 
 const usd = (n: number | undefined) =>
@@ -20,6 +22,7 @@ export interface AtGlancePanelProps {
   asking: PriceStats;
   wholesale: WholesaleGrid;
   insights: DealInsights | undefined;
+  compMeta?: CompFilterMeta | null;
   liveBid: string;
   onLiveBidChange: (v: string) => void;
   buyerPremiumPct: number;
@@ -35,6 +38,7 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
     asking,
     wholesale,
     insights,
+    compMeta,
     liveBid,
     onLiveBidChange,
     buyerPremiumPct,
@@ -91,6 +95,17 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
           <div>
             <p className="text-xs font-medium uppercase tracking-widest text-desk-muted">At a glance</p>
             <h2 className="text-lg font-bold text-desk-text">{title}</h2>
+            {compMeta && (
+              <p
+                className={`mt-1 text-xs ${
+                  compMeta.matchTier === "exact-upc" || compMeta.matchTier === "exact-mpn"
+                    ? "text-desk-go"
+                    : "text-desk-nogo"
+                }`}
+              >
+                Comps: {matchTierLabel(compMeta.matchTier)}
+              </p>
+            )}
           </div>
           <span
             className={`rounded-full px-4 py-1.5 text-sm font-black ${

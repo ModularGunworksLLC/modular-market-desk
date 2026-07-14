@@ -5,6 +5,16 @@
 
 import { percentile, summarize } from "@/lib/arbitrage/stats";
 import type { PriceStats } from "@/lib/arbitrage/types";
+import {
+  filterAskingByIdentity,
+  filterSoldByIdentity,
+  matchTierLabel,
+  type CompIdentityContext,
+  type CompMatchTier,
+} from "@/lib/comp-identity";
+
+export type { CompIdentityContext, CompMatchTier } from "@/lib/comp-identity";
+export { matchTierLabel } from "@/lib/comp-identity";
 
 /** Minimal sold row shape (matches GbaApiClient SoldCompRow). */
 export interface SoldCompInput {
@@ -31,7 +41,17 @@ export interface CompFilterMeta {
   askingRawCount: number;
   askingDecisionCount: number;
   askingIncompleteRemoved: number;
+  identityRemovedSold: number;
+  identityRemovedAsking: number;
+  matchTier: CompMatchTier;
+  enrichNotes: string[];
   decisionNote: string;
+}
+
+export interface BuildDecisionStatsOptions {
+  category?: string;
+  identity?: CompIdentityContext;
+  enrichNotes?: string[];
 }
 
 /** Minimum sold/asking price for a complete gun by desk category hint. */
@@ -139,12 +159,17 @@ export function filterAskingRows(
   return { rows: kept, removed: rows.length - kept.length };
 }
 
+function resolveBuildOptions(options?: string | BuildDecisionStatsOptions): BuildDecisionStatsOptions {
+  if (typeof options === "string") return { category: options };
+  return options ?? {};
+}
+
 export function buildDecisionStats(
   soldPrices: number[],
   askingPrices: number[],
   soldRows: SoldCompInput[],
   askingRows: AskingCompInput[],
-  category?: string,
+  options?: string | BuildDecisionStatsOptions,
 ): {
   sold: PriceStats;
   asking: PriceStats;
@@ -152,25 +177,51 @@ export function buildDecisionStats(
   askingDisplay: AskingCompInput[];
   meta: CompFilterMeta;
 } {
+  const { category, identity, enrichNotes = [] } = resolveBuildOptions(options);
+
   const soldGunFilter = filterSoldCompRows(soldRows, category);
-  const soldPricesFromRows = soldGunFilter.rows.map((r) => r.price);
+  const soldIdentity = identity
+    ? filterSoldByIdentity(soldGunFilter.rows, identity)
+    : { rows: soldGunFilter.rows, removed: 0, tier: "family" as const };
+  const soldPricesFromRows = soldIdentity.rows.map((r) => r.price);
   const soldFilter = filterOutlierPrices(soldPricesFromRows.length ? soldPricesFromRows : soldPrices);
   const sold = summarize(soldFilter.filtered);
-  const soldDisplay = selectSoldRowsForDisplay(soldGunFilter.rows, sold, category);
+  const soldDisplay = selectSoldRowsForDisplay(soldIdentity.rows, sold, category);
 
   const askingFiltered = filterAskingRows(askingRows, category);
-  const asking = summarize(askingFiltered.rows.map((r) => r.price));
-  const askingDisplay = [...askingFiltered.rows].sort((a, b) => a.price - b.price).slice(0, 15);
+  const askingIdentity = identity
+    ? filterAskingByIdentity(askingFiltered.rows, identity)
+    : { rows: askingFiltered.rows, removed: 0, tier: "family" as const };
+  const asking = summarize(askingIdentity.rows.map((r) => r.price));
+  const askingDisplay = [...askingIdentity.rows].sort((a, b) => a.price - b.price).slice(0, 15);
+
+  const matchTier =
+    askingIdentity.tier !== "family"
+      ? askingIdentity.tier
+      : soldIdentity.tier !== "family"
+        ? soldIdentity.tier
+        : "family";
 
   const parts: string[] = [];
   if (soldGunFilter.removed > 0) {
     parts.push(`${soldGunFilter.removed} non-gun sold removed`);
   }
+  if (soldIdentity.removed > 0) {
+    parts.push(`${soldIdentity.removed} sold rows dropped (UPC/MPN/variant)`);
+  }
   if (soldFilter.removed > 0) parts.push(`${soldFilter.removed} sold outliers removed`);
+  if (askingFiltered.removed > 0) {
+    parts.push(`${askingFiltered.removed} incomplete asking removed`);
+  }
+  if (askingIdentity.removed > 0) {
+    parts.push(`${askingIdentity.removed} asking rows dropped (UPC/MPN/new-only)`);
+  }
+
+  const tierNote = matchTierLabel(matchTier);
   const decisionNote =
     parts.length > 0
-      ? `FMV from ${sold.count} complete-gun sold comps (${parts.join("; ")}). Verdict uses P25.`
-      : `FMV from ${sold.count} complete-gun sold comps. Verdict uses P25.`;
+      ? `${tierNote} · FMV from ${sold.count} sold / ${asking.count} asking (${parts.join("; ")}).`
+      : `${tierNote} · FMV from ${sold.count} sold / ${asking.count} asking comps.`;
 
   const meta: CompFilterMeta = {
     soldRawCount: soldRows.length,
@@ -180,6 +231,10 @@ export function buildDecisionStats(
     askingRawCount: askingRows.length,
     askingDecisionCount: asking.count,
     askingIncompleteRemoved: askingFiltered.removed,
+    identityRemovedSold: soldIdentity.removed,
+    identityRemovedAsking: askingIdentity.removed,
+    matchTier,
+    enrichNotes,
     decisionNote,
   };
 

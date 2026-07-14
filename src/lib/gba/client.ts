@@ -9,7 +9,7 @@
 import { summarize } from "@/lib/arbitrage/stats";
 import { normalizeVaultSecret, redactSecrets } from "@/lib/vault";
 import type { PriceStats } from "@/lib/arbitrage/types";
-import { buildDecisionStats, type CompFilterMeta } from "@/lib/comp-filter";
+import { buildDecisionStats, type CompFilterMeta, type CompIdentityContext } from "@/lib/comp-filter";
 import { extractGunBrokerItemId } from "@/lib/gunbroker-url";
 import { resolveQueryAttempts, resolveSelection } from "@/lib/gba/scorer";
 import type { GbaQuery, OaDependencies, OaSelection } from "@/lib/gba/scorer";
@@ -129,7 +129,15 @@ export class GbaApiClient {
    * Fully automatic comps pull: resolve the catalog selection from free text,
    * then fetch sold + asking sets for it. Returns null when no catalog match.
    */
-  async resolveMarket(query: GbaQuery): Promise<(GbaMarket & { selection: OaSelection }) | null> {
+  async resolveMarket(
+    query: GbaQuery,
+    opts?: {
+      identity?: CompIdentityContext;
+      dealerCost?: number;
+      workflow?: "used" | "vendor";
+      enrichNotes?: string[];
+    },
+  ): Promise<(GbaMarket & { selection: OaSelection }) | null> {
     const deps = await this.dependencies();
     let selection: OaSelection | null = null;
     for (const attempt of resolveQueryAttempts(query)) {
@@ -137,11 +145,24 @@ export class GbaApiClient {
       if (selection) break;
     }
     if (!selection) return null;
+
+    const tight = Boolean(opts?.identity?.upc?.trim() || opts?.identity?.mpn?.trim());
+    const identity: CompIdentityContext = {
+      ...opts?.identity,
+      newOnlyAsking: opts?.workflow === "vendor" ? true : opts?.identity?.newOnlyAsking,
+      minAskRatioOfCost:
+        opts?.workflow === "vendor" ? (opts?.identity?.minAskRatioOfCost ?? 0.75) : opts?.identity?.minAskRatioOfCost,
+      dealerCost: opts?.dealerCost ?? opts?.identity?.dealerCost,
+    };
+
     const market = await this.market({
       modelId: selection.modelId,
       caliberId: selection.caliberId,
       condition: selection.conditionParam,
       category: query.category,
+      identity,
+      useParentModel: !tight,
+      enrichNotes: opts?.enrichNotes,
     });
     return { ...market, selection };
   }
@@ -230,14 +251,25 @@ export class GbaApiClient {
     caliberId: number;
     condition: "New" | "Used";
     category?: string;
+    identity?: CompIdentityContext;
+    useParentModel?: boolean;
+    enrichNotes?: string[];
   }): Promise<GbaMarket> {
     const [soldRows, askingRows] = await Promise.all([
       this.pricingDataRows(args),
-      this.activeListingRows({ modelId: args.modelId, caliberId: args.caliberId }),
+      this.activeListingRows({
+        modelId: args.modelId,
+        caliberId: args.caliberId,
+        useParentModel: args.useParentModel,
+      }),
     ]);
     const soldRaw = soldRows.map((r) => r.price);
     const askingRaw = askingRows.map((r) => r.price);
-    const filtered = buildDecisionStats(soldRaw, askingRaw, soldRows, askingRows, args.category);
+    const filtered = buildDecisionStats(soldRaw, askingRaw, soldRows, askingRows, {
+      category: args.category,
+      identity: args.identity,
+      enrichNotes: args.enrichNotes,
+    });
     return {
       soldRaw,
       askingRaw,

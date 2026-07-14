@@ -147,6 +147,15 @@ function rowToItem(
   };
 }
 
+/** Batched UPSERT for pre-built catalog rows (API syncs, etc.). */
+export async function upsertCatalogItems(items: NewCatalogItem[]): Promise<number> {
+  let upserted = 0;
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    upserted += await flush(items.slice(i, i + BATCH_SIZE));
+  }
+  return upserted;
+}
+
 /** Batched UPSERT: overwrite pricing/stock for an existing (vendor_name, dedupe_key). */
 async function flush(batch: NewCatalogItem[]): Promise<number> {
   if (batch.length === 0) return 0;

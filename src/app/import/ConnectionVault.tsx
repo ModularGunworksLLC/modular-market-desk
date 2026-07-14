@@ -63,20 +63,30 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
             />
             <datalist id="vault-vendor-options">
               <option value="outdoor_analytics" />
+              <option value="chattanooga" />
               <option value="2ndamendmentwholesale" />
             </datalist>
           </div>
           <div>
             <label className="field-label">Kind</label>
             <select className="field-input" name="kind" defaultValue="market_api">
-              <option value="market_api">market_api (bearer token)</option>
+              <option value="market_api">market_api (bearer / API token)</option>
               <option value="vendor_session">vendor_session (cookie string)</option>
             </select>
           </div>
         </div>
         <div>
           <label className="field-label">Label</label>
-          <input className="field-input" name="label" placeholder="Outdoor Analytics" />
+          <input className="field-input" name="label" placeholder="Outdoor Analytics / Chattanooga" />
+        </div>
+        <div>
+          <label className="field-label">API SID (Chattanooga)</label>
+          <input
+            className="field-input font-mono text-xs"
+            name="apiSid"
+            placeholder="CSSI API SID (required with Chattanooga token)"
+            autoComplete="off"
+          />
         </div>
         <div>
           <label className="field-label">Feed URL (2AW / distributor APIs)</label>
@@ -91,7 +101,7 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
           <textarea
             className="field-input min-h-[80px] font-mono text-xs"
             name="secret"
-            placeholder="Paste bearer token or cookie string..."
+            placeholder="OA bearer, Chattanooga API_TOKEN, or cookie string..."
           />
         </div>
         <div>

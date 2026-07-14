@@ -14,6 +14,8 @@ import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import { summarize } from "@/lib/arbitrage/stats";
 import type { DealInput, EvaluationResult, PriceStats } from "@/lib/arbitrage/types";
 import { canonicalKey } from "@/lib/canonical";
+import { enrichEvaluateIdentity } from "@/lib/catalog-enrich";
+import type { CompIdentityContext } from "@/lib/comp-identity";
 import { filterOutlierPrices, type CompFilterMeta } from "@/lib/comp-filter";
 import { deskModeId, resolveDeskMode, type DeskMode } from "@/lib/desk-mode";
 import { getMarketToken } from "@/lib/connections";
@@ -58,6 +60,7 @@ export async function runEvaluation(
   opts?: { persist?: boolean; token?: string | null },
 ): Promise<EvaluationOutput> {
   const persist = opts?.persist ?? true;
+  const enriched = await enrichEvaluateIdentity(body);
   const deskMode = resolveDeskMode(body);
   const modeId = deskModeId(deskMode);
 
@@ -98,6 +101,22 @@ export async function runEvaluation(
   // Allow callers (batch) to pass a pre-fetched token so we don't decrypt per row.
   const token = opts?.token !== undefined ? opts.token : await getMarketToken();
 
+  const identityCtx: CompIdentityContext = {
+    upc: enriched.upc || undefined,
+    mpn: enriched.mpn || undefined,
+    catalogDescription: enriched.catalogDescription ?? undefined,
+    dealerCost: deskMode.workflow === "vendor" ? body.targetAcquisitionCost : undefined,
+    newOnlyAsking: deskMode.workflow === "vendor",
+    minAskRatioOfCost: deskMode.workflow === "vendor" ? 0.75 : undefined,
+  };
+
+  const marketOpts = {
+    identity: identityCtx,
+    dealerCost: deskMode.workflow === "vendor" ? body.targetAcquisitionCost : undefined,
+    workflow: deskMode.workflow,
+    enrichNotes: enriched.notes,
+  };
+
   // --- Avenue 1: market comps ---
   if (body.gba) {
     if (!token) {
@@ -107,7 +126,13 @@ export async function runEvaluation(
       );
     }
     try {
-      const market = await new GbaApiClient(token).market({ ...body.gba, category: body.category });
+      const market = await new GbaApiClient(token).market({
+        ...body.gba,
+        category: body.category,
+        identity: identityCtx,
+        useParentModel: !(identityCtx.upc || identityCtx.mpn),
+        enrichNotes: enriched.notes,
+      });
       sold = market.sold;
       asking = market.asking;
       soldListings = market.soldRows;
@@ -125,14 +150,17 @@ export async function runEvaluation(
         sourceStatus.gba = "skipped (no Outdoor Analytics token in vault)";
       } else {
         try {
-          const market = await new GbaApiClient(token).resolveMarket({
-            manufacturer: body.manufacturer,
-            model: body.model,
-            caliber: body.caliber || undefined,
-            category: body.category,
-            mpn: body.mpn || undefined,
-            condition: compCondition,
-          });
+          const market = await new GbaApiClient(token).resolveMarket(
+            {
+              manufacturer: enriched.manufacturer,
+              model: enriched.model,
+              caliber: enriched.caliber || undefined,
+              category: body.category,
+              mpn: enriched.mpn || undefined,
+              condition: compCondition,
+            },
+            marketOpts,
+          );
           if (market) {
             sold = market.sold;
             asking = market.asking;
@@ -168,6 +196,10 @@ export async function runEvaluation(
         askingRawCount: body.askingPrices?.length ?? 0,
         askingDecisionCount: asking.count,
         askingIncompleteRemoved: 0,
+        identityRemovedSold: 0,
+        identityRemovedAsking: 0,
+        matchTier: "family",
+        enrichNotes: enriched.notes,
         decisionNote: "Manual comps with outlier filtering on sold prices.",
       };
     }
@@ -179,10 +211,10 @@ export async function runEvaluation(
 
   // --- Avenue 2: wholesale cross-reference ---
   const wholesale = await crossReferenceWholesale({
-    upc: body.upc,
-    manufacturer: body.manufacturer,
-    model: body.model,
-    caliber: body.caliber,
+    upc: enriched.upc,
+    manufacturer: enriched.manufacturer,
+    model: enriched.model,
+    caliber: enriched.caliber,
     category: body.category,
     targetAcquisitionCost: body.targetAcquisitionCost,
   });
@@ -223,20 +255,20 @@ export async function runEvaluation(
   if (persist) {
     const key = canonicalKey({
       category: body.category,
-      manufacturer: body.manufacturer,
-      model: body.model,
-      caliber: body.caliber,
+      manufacturer: enriched.manufacturer,
+      model: enriched.model,
+      caliber: enriched.caliber,
       condition: body.condition,
     });
     const money = (n: number) => Math.round(n * 100) / 100;
     await db.insert(valuations).values({
       canonicalKey: key,
       category: body.category,
-      manufacturer: body.manufacturer,
-      model: body.model,
-      upc: body.upc || null,
-      mpn: body.mpn || null,
-      caliber: body.caliber || null,
+      manufacturer: enriched.manufacturer,
+      model: enriched.model,
+      upc: enriched.upc || null,
+      mpn: enriched.mpn || null,
+      caliber: enriched.caliber || null,
       condition: body.condition,
       targetAcquisitionCost: money(body.targetAcquisitionCost),
       inboundShip: money(body.inboundShip),

@@ -1,18 +1,41 @@
 /**
- * GET /api/catalogs/sync/status?vendor=2ndamendmentwholesale
+ * GET /api/catalogs/sync/status?vendor=2ndamendmentwholesale|chattanooga
  * Pre-flight check before pulling a distributor feed.
  */
 
 import { NextResponse } from "next/server";
 
+import { resolveChattanoogaCredentials } from "@/lib/chattanooga/sync";
 import { getPresetForVendor } from "@/lib/catalog-queries";
 import { getVendorApiConnection } from "@/lib/connections";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const vendor = (new URL(request.url).searchParams.get("vendor") ?? "2ndamendmentwholesale").trim().toLowerCase();
+  const vendor = (new URL(request.url).searchParams.get("vendor") ?? "2ndamendmentwholesale")
+    .trim()
+    .toLowerCase();
   const issues: string[] = [];
+
+  if (vendor === "chattanooga") {
+    const creds = await resolveChattanoogaCredentials();
+    if (!creds) {
+      issues.push(
+        "Missing Chattanooga API SID/token. Vault: vendor=chattanooga, kind=market_api, paste API_TOKEN as secret and API_SID in the SID field — or set CHATTANOOGA_API_SID + CHATTANOOGA_API_TOKEN in .env.",
+      );
+    }
+    return NextResponse.json({
+      ok: issues.length === 0,
+      vendor,
+      hasToken: Boolean(creds?.token),
+      hasSid: Boolean(creds?.sid),
+      hasFeedUrl: true,
+      hasPreset: true,
+      credentialSource: creds?.source ?? null,
+      label: "Chattanooga Shooting Supplies",
+      issues,
+    });
+  }
 
   const conn = await getVendorApiConnection(vendor, "market_api");
   if (!conn?.token) {

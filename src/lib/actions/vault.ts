@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
@@ -22,6 +22,7 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
   const label = String(formData.get("label") ?? "").trim() || vendor;
   const secret = String(formData.get("secret") ?? "").trim();
   const feedUrl = String(formData.get("feedUrl") ?? "").trim();
+  const apiSid = String(formData.get("apiSid") ?? "").trim();
   const expiresRaw = String(formData.get("expiresAt") ?? "").trim();
 
   if (!vendor) return { ok: false, message: "Vendor is required." };
@@ -44,14 +45,31 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
 
   const meta: Record<string, unknown> = {};
   if (feedUrl) meta.feedUrl = feedUrl;
+  if (apiSid) meta.apiSid = apiSid;
 
   try {
+    const existing = await db
+      .select({ meta: connections.meta })
+      .from(connections)
+      .where(and(eq(connections.vendor, vendor), eq(connections.kind, kind)))
+      .limit(1);
+    const prevMeta = (existing[0]?.meta as Record<string, unknown> | undefined) ?? {};
+    const mergedMeta = { ...prevMeta, ...meta };
+    // Allow clearing feed URL / SID only when the form explicitly sent empty and we want replace —
+    // keep previous apiSid/feedUrl when the new form left those fields blank.
+    if (!feedUrl && prevMeta.feedUrl != null && meta.feedUrl === undefined) {
+      mergedMeta.feedUrl = prevMeta.feedUrl;
+    }
+    if (!apiSid && prevMeta.apiSid != null && meta.apiSid === undefined) {
+      mergedMeta.apiSid = prevMeta.apiSid;
+    }
+
     await db
       .insert(connections)
-      .values({ vendor, kind, label, secret: encrypted, meta, status: "active", expiresAt })
+      .values({ vendor, kind, label, secret: encrypted, meta: mergedMeta, status: "active", expiresAt })
       .onConflictDoUpdate({
         target: [connections.vendor, connections.kind],
-        set: { label, secret: encrypted, meta, status: "active", expiresAt, updatedAt: new Date() },
+        set: { label, secret: encrypted, meta: mergedMeta, status: "active", expiresAt, updatedAt: new Date() },
       });
     revalidatePath("/import");
     return { ok: true, message: `Saved ${label} (${kind}).` };

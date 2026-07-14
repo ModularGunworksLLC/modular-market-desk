@@ -9,6 +9,7 @@ import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import { evaluateDeal } from "@/lib/arbitrage/evaluate";
 import type { DealInput, DecisionAnchor, EvaluationResult, PriceStats, ScenarioResult } from "@/lib/arbitrage/types";
 import type { CompFilterMeta } from "@/lib/comp-filter";
+import { matchTierLabel } from "@/lib/comp-filter";
 import type { AskingCompRow, SoldCompRow } from "@/lib/gba/client";
 import type { OaSelection } from "@/lib/gba/scorer";
 import type { DealInsights } from "@/lib/deal-insights";
@@ -53,6 +54,7 @@ export default function DeskPage() {
     manufacturer: "Glock",
     model: "19",
     upc: "",
+    mpn: "",
     caliber: "9mm",
     category: "handgun",
     sourceDealer: "",
@@ -115,6 +117,31 @@ export default function DeskPage() {
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  async function lookupCatalogUpc(upc: string) {
+    const clean = upc.trim();
+    if (clean.replace(/\D/g, "").length < 8) return;
+    try {
+      const res = await fetch(`/api/catalogs/lookup?upc=${encodeURIComponent(clean)}`);
+      const j = (await res.json()) as {
+        found?: boolean;
+        manufacturer?: string;
+        model?: string;
+        caliber?: string;
+        mpn?: string;
+      };
+      if (!j.found) return;
+      setForm((f) => ({
+        ...f,
+        manufacturer: j.manufacturer || f.manufacturer,
+        model: j.model || f.model,
+        caliber: j.caliber || f.caliber,
+        mpn: j.mpn || f.mpn,
+      }));
+    } catch {
+      /* optional prefill */
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -131,6 +158,7 @@ export default function DeskPage() {
           manufacturer: form.manufacturer,
           model: form.model,
           upc: form.upc || undefined,
+          mpn: form.mpn || undefined,
           caliber: form.caliber,
           category: form.category,
           condition: isVendor ? "new" : isTradeIn ? "used" : form.condition,
@@ -448,19 +476,40 @@ export default function DeskPage() {
             <Field label="Model" v={form.model} on={set("model")} />
             <Field label="Caliber" v={form.caliber} on={set("caliber")} />
             {isVendor && (
-              <div className="col-span-2">
+              <div className="col-span-2 grid gap-3 sm:grid-cols-2">
                 <FieldHint
                   label="UPC"
-                  hint="Strongly recommended — short model names can match the wrong gun."
+                  hint="Strongly recommended — tightens comps to your exact SKU."
                   v={form.upc}
                   on={set("upc")}
+                  onBlur={() => void lookupCatalogUpc(form.upc)}
+                />
+                <FieldHint
+                  label="MPN / item #"
+                  hint="Manufacturer model number (e.g. 3523) — filters wrong variants."
+                  v={form.mpn}
+                  on={set("mpn")}
                 />
               </div>
             )}
             {!isVendor && (
               <details className="col-span-2 text-xs text-desk-muted">
-                <summary className="cursor-pointer">UPC (optional)</summary>
-                <input className="field-input mt-2" value={form.upc} onChange={set("upc")} placeholder="If known" />
+                <summary className="cursor-pointer">UPC / MPN (optional — tightens comps)</summary>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <input
+                    className="field-input"
+                    value={form.upc}
+                    onChange={set("upc")}
+                    onBlur={() => void lookupCatalogUpc(form.upc)}
+                    placeholder="UPC"
+                  />
+                  <input
+                    className="field-input"
+                    value={form.mpn}
+                    onChange={set("mpn")}
+                    placeholder="MPN / item #"
+                  />
+                </div>
               </details>
             )}
             <div>
@@ -670,6 +719,7 @@ export default function DeskPage() {
               asking={data.asking}
               wholesale={data.wholesale}
               insights={insights}
+              compMeta={data.compMeta}
               liveBid={liveBid}
               onLiveBidChange={setLiveBid}
               buyerPremiumPct={buyerPremiumPct}
@@ -713,6 +763,17 @@ export default function DeskPage() {
                   {confidenceLabel(match.score)} · score {match.score.toFixed(0)}
                 </span>
               )}
+              {data?.compMeta && (
+                <span
+                  className={`rounded-full border px-3 py-1 text-xs ${
+                    data.compMeta.matchTier === "exact-upc" || data.compMeta.matchTier === "exact-mpn"
+                      ? "border-desk-go/40 bg-desk-go/10 text-desk-go"
+                      : "border-desk-nogo/40 bg-desk-nogo/10 text-desk-nogo"
+                  }`}
+                >
+                  {matchTierLabel(data.compMeta.matchTier)}
+                </span>
+              )}
             </div>
 
             {sold && sold.count > 0 ? (
@@ -746,7 +807,12 @@ export default function DeskPage() {
                   </div>
                 </div>
                 {data?.compMeta && (
-                  <p className="text-xs text-desk-muted">{data.compMeta.decisionNote}</p>
+                  <p className="text-xs text-desk-muted">
+                    {data.compMeta.decisionNote}
+                    {data.compMeta.enrichNotes.length > 0 && (
+                      <span className="block mt-1">{data.compMeta.enrichNotes.join(" ")}</span>
+                    )}
+                  </p>
                 )}
                 <p className="text-[11px] text-desk-muted">
                   GunBroker sold comps (cleaned). Official numbers use{" "}
@@ -1310,11 +1376,12 @@ function FieldHint(props: {
   hint: string;
   v: string;
   on: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onBlur?: () => void;
 }) {
   return (
     <div>
       <label className="field-label">{props.label}</label>
-      <input className="field-input" value={props.v} onChange={props.on} />
+      <input className="field-input" value={props.v} onChange={props.on} onBlur={props.onBlur} />
       <p className="mt-0.5 text-[10px] leading-snug text-desk-muted">{props.hint}</p>
     </div>
   );
