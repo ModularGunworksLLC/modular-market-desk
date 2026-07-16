@@ -42,6 +42,106 @@ export default function BatchPage() {
     fileName?: string;
   }>({ kind: "idle", message: "" });
   const fileRef = useRef<HTMLInputElement>(null);
+  const [auctionUrl, setAuctionUrl] = useState(
+    "https://bids.auctionbypearce.com/auctions/47513-july-guns-gear-and-ammo-auction",
+  );
+  const [auctionBusy, setAuctionBusy] = useState(false);
+  const [auctionMsg, setAuctionMsg] = useState<string | null>(null);
+  const [sheetLots, setSheetLots] = useState<
+    Array<{
+      lot: string;
+      title: string;
+      currentBid: number | null;
+      imageUrls?: string[];
+    }>
+  >([]);
+  const [identifyBusy, setIdentifyBusy] = useState(false);
+
+  async function ingestAuction() {
+    const url = auctionUrl.trim();
+    if (!url) return;
+    setAuctionBusy(true);
+    setAuctionMsg(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/auctions/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          buyerPremiumPct: Number(defaults.buyerPremiumPct) || 15,
+          firearmsOnly: true,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || `Ingest failed (${res.status})`);
+      setText(json.batchCsv || "");
+      setSheetLots(
+        (json.sheetLots || []).map(
+          (l: { lot: string; title: string; currentBid?: number | null; imageUrls?: string[] }) => ({
+            lot: String(l.lot),
+            title: String(l.title || ""),
+            currentBid: l.currentBid ?? null,
+            imageUrls: l.imageUrls || [],
+          }),
+        ),
+      );
+      setAuctionMsg(
+        `Loaded ${json.sheetLots?.length ?? 0} firearm lots` +
+          (json.skipped ? ` (${json.skipped} non-firearm skipped)` : "") +
+          (json.warnings?.length ? ` · ${json.warnings.join(" ")}` : "") +
+          " · Optional: AI resolve make/model next",
+      );
+      setFileStatus({
+        kind: "ok",
+        message: `Auction ingest from ${json.host}`,
+        fileName: url,
+      });
+    } catch (err) {
+      setAuctionMsg(err instanceof Error ? err.message : "Ingest failed");
+    } finally {
+      setAuctionBusy(false);
+    }
+  }
+
+  async function aiResolveLots() {
+    if (sheetLots.length === 0) {
+      setAuctionMsg("Ingest an auction URL first (needs lot titles / images).");
+      return;
+    }
+    setIdentifyBusy(true);
+    setAuctionMsg(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/batch/identify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lots: sheetLots.map((l) => ({
+            lot: l.lot,
+            title: l.title,
+            imageUrls: l.imageUrls || [],
+            currentBid: l.currentBid,
+            buyerPremiumPct: Number(defaults.buyerPremiumPct) || 15,
+          })),
+          concurrency: 2,
+          maxImagesPerLot: 2,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error || `AI resolve failed (${res.status})`);
+      setText(json.batchCsv || "");
+      setAuctionMsg(
+        `AI resolved ${json.resolved}/${json.resolved + json.failed} lots` +
+          (json.failed ? ` (${json.failed} failed — check titles)` : "") +
+          " · Review sheet, then Run batch",
+      );
+    } catch (err) {
+      setAuctionMsg(err instanceof Error ? err.message : "AI resolve failed");
+    } finally {
+      setIdentifyBusy(false);
+    }
+  }
 
   const parsed = useMemo(() => {
     if (!text.trim()) return null;
@@ -267,6 +367,41 @@ export default function BatchPage() {
               {fileStatus.message}
             </div>
           )}
+
+          <div className="rounded-md border border-desk-border bg-desk-panel2 p-3 space-y-2">
+            <p className="text-xs font-semibold text-desk-text">Paste auction URL (HiBid / Pearce)</p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                className="field-input flex-1 font-mono text-xs"
+                value={auctionUrl}
+                onChange={(e) => setAuctionUrl(e.target.value)}
+                placeholder="https://bids.auctionbypearce.com/auctions/..."
+              />
+              <button
+                type="button"
+                disabled={auctionBusy || !auctionUrl.trim()}
+                onClick={() => void ingestAuction()}
+                className="rounded-md bg-desk-accent px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+              >
+                {auctionBusy ? "Fetching lots…" : "Load firearm lots"}
+              </button>
+            </div>
+            <button
+              type="button"
+              disabled={identifyBusy || sheetLots.length === 0}
+              onClick={() => void aiResolveLots()}
+              className="w-full rounded-md border border-desk-accent/50 px-3 py-2 text-xs font-semibold text-desk-accent hover:bg-desk-accent/10 disabled:opacity-40"
+            >
+              {identifyBusy
+                ? "AI identifying lots…"
+                : `AI resolve make/model (${sheetLots.length || 0} lots)`}
+            </button>
+            <p className="text-[11px] text-desk-muted">
+              1) Load lots from URL · 2) AI resolve titles/photos → Make/Model · 3) Run buy-sheet (set BP 15% for
+              Pearce). Needs Gemini or OpenAI key.
+            </p>
+            {auctionMsg && <p className="text-xs text-desk-text">{auctionMsg}</p>}
+          </div>
 
           <p className="text-[11px] text-desk-muted">
             <strong className="text-desk-text">CSV or paste only</strong> — not .xlsx. From Excel: Save As →{" "}

@@ -4,6 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { AtGlancePanel } from "@/components/desk/AtGlancePanel";
+import { OaCatalogPickers } from "@/components/desk/OaCatalogPickers";
+import { PhotoIdentifyPanel } from "@/components/desk/PhotoIdentifyPanel";
+import { SerialStolenPanel } from "@/components/desk/SerialStolenPanel";
+import type { FirearmIdentity } from "@/lib/identify/types";
+import type { StolenCheckResult } from "@/lib/stolen/hotgunz";
 import { allInCost } from "@/lib/arbitrage/acquisition";
 import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import { evaluateDeal } from "@/lib/arbitrage/evaluate";
@@ -76,6 +81,9 @@ export default function DeskPage() {
   const [loading, setLoading] = useState(false);
   const [vaultOk, setVaultOk] = useState<boolean | null>(null);
   const [vaultMsg, setVaultMsg] = useState<string>("");
+  const [serial, setSerial] = useState("");
+  const [stolen, setStolen] = useState<StolenCheckResult | null>(null);
+  const [allowStolenProceed, setAllowStolenProceed] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(MODE_STORAGE_KEY);
@@ -144,6 +152,10 @@ export default function DeskPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!isVendor && stolen?.status === "hit" && !allowStolenProceed) {
+      setError("HotGunz HIT on this serial — clear the gun or check “I acknowledge / proceed anyway” before Evaluate.");
+      return;
+    }
     setLoading(true);
     setError(null);
     setData(null);
@@ -177,7 +189,10 @@ export default function DeskPage() {
                 gba: {
                   modelId: Number.parseInt(form.gbaModelId, 10),
                   caliberId: Number.parseInt(form.gbaCaliberId, 10),
-                  condition: form.condition === "used" ? "Used" : "New",
+                  condition:
+                    isVendor || form.condition === "new"
+                      ? ("New" as const)
+                      : ("Used" as const),
                 },
               }
             : {}),
@@ -398,7 +413,7 @@ export default function DeskPage() {
       )}
 
       <header className="mb-6 flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-xl font-semibold tracking-tight">Modular Market Desk</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Evaluator — Max Bid Desk</h1>
         <nav className="flex items-baseline gap-4 text-xs">
           <Link href="/batch" className="text-desk-accent hover:underline">
             Batch buy-sheet
@@ -413,68 +428,139 @@ export default function DeskPage() {
         </nav>
       </header>
 
+      <div className="panel mb-4 space-y-3">
+        <h2 className="text-sm font-semibold text-desk-muted">Workflow</h2>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => selectWorkflow("used")}
+            className={`rounded-md border px-3 py-2 text-left text-xs transition ${
+              workflow === "used"
+                ? "border-desk-accent bg-desk-accent/15 text-desk-text"
+                : "border-desk-border text-desk-muted hover:border-desk-muted"
+            }`}
+          >
+            <span className="block font-semibold">Used</span>
+            <span className="mt-0.5 block text-[10px] opacity-80">Photos / auction → max bid or offer</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => selectWorkflow("vendor")}
+            className={`rounded-md border px-3 py-2 text-left text-xs transition ${
+              isVendor
+                ? "border-desk-accent bg-desk-accent/15 text-desk-text"
+                : "border-desk-border text-desk-muted hover:border-desk-muted"
+            }`}
+          >
+            <span className="block font-semibold">New vendor</span>
+            <span className="mt-0.5 block text-[10px] opacity-80">Dealer ad → street vs CSV</span>
+          </button>
+        </div>
+        {workflow === "used" && (
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => selectUsedSubtype("auction")}
+              className={`rounded-md border px-2 py-1.5 text-xs ${
+                isUsedAuction
+                  ? "border-desk-accent bg-desk-accent/10 text-desk-text"
+                  : "border-desk-border text-desk-muted"
+              }`}
+            >
+              Auction (max bid)
+            </button>
+            <button
+              type="button"
+              onClick={() => selectUsedSubtype("tradein")}
+              className={`rounded-md border px-2 py-1.5 text-xs ${
+                isTradeIn
+                  ? "border-desk-accent bg-desk-accent/10 text-desk-text"
+                  : "border-desk-border text-desk-muted"
+              }`}
+            >
+              Trade-in (max offer)
+            </button>
+          </div>
+        )}
+      </div>
+
+      {workflow === "used" ? (
+        <div className="mb-4 space-y-4">
+          <PhotoIdentifyPanel
+            gunTypeHint={form.category}
+            onApply={(patch, identity: FirearmIdentity) => {
+              setForm((f) => ({
+                ...f,
+                manufacturer: patch.manufacturer || f.manufacturer,
+                model: patch.model || f.model,
+                caliber: patch.caliber || f.caliber,
+                category: patch.category || f.category,
+                condition: patch.condition || f.condition,
+              }));
+              if (identity.serial) {
+                setSerial(identity.serial);
+                setStolen(null);
+                setAllowStolenProceed(false);
+              }
+              setData(null);
+              setError(null);
+            }}
+          />
+          <SerialStolenPanel
+            serial={serial}
+            onSerialChange={(v) => {
+              setSerial(v);
+              setAllowStolenProceed(false);
+            }}
+            stolen={stolen}
+            onStolen={(r) => {
+              setStolen(r);
+              setAllowStolenProceed(false);
+            }}
+          />
+          {stolen?.status === "hit" && (
+            <label className="flex items-start gap-2 text-xs text-desk-nogo">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={allowStolenProceed}
+                onChange={(e) => setAllowStolenProceed(e.target.checked)}
+              />
+              <span>I acknowledge HotGunz HIT and still want to run Evaluate (not a legal clearance).</span>
+            </label>
+          )}
+        </div>
+      ) : (
+        <p className="mb-4 rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-xs text-desk-muted">
+          Photo identify is for Used guns. Switch to <strong className="text-desk-text">Used</strong> above to
+          upload images.
+        </p>
+      )}
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)] 3xl:grid-cols-[400px_minmax(0,1fr)]">
         <form onSubmit={submit} className="panel space-y-3 lg:sticky lg:top-4 lg:self-start">
-          <div>
-            <h2 className="text-sm font-semibold text-desk-muted">Workflow</h2>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => selectWorkflow("used")}
-                className={`rounded-md border px-3 py-2 text-left text-xs transition ${
-                  workflow === "used"
-                    ? "border-desk-accent bg-desk-accent/15 text-desk-text"
-                    : "border-desk-border text-desk-muted hover:border-desk-muted"
-                }`}
-              >
-                <span className="block font-semibold">Used</span>
-                <span className="mt-0.5 block text-[10px] opacity-80">Auction or trade-in → max bid / offer</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => selectWorkflow("vendor")}
-                className={`rounded-md border px-3 py-2 text-left text-xs transition ${
-                  isVendor
-                    ? "border-desk-accent bg-desk-accent/15 text-desk-text"
-                    : "border-desk-border text-desk-muted hover:border-desk-muted"
-                }`}
-              >
-                <span className="block font-semibold">New vendor</span>
-                <span className="mt-0.5 block text-[10px] opacity-80">Dealer ad → street vs CSV</span>
-              </button>
-            </div>
-            {workflow === "used" && (
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => selectUsedSubtype("auction")}
-                  className={`rounded-md border px-2 py-1.5 text-xs ${
-                    isUsedAuction
-                      ? "border-desk-accent bg-desk-accent/10 text-desk-text"
-                      : "border-desk-border text-desk-muted"
-                  }`}
-                >
-                  Auction (max bid)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectUsedSubtype("tradein")}
-                  className={`rounded-md border px-2 py-1.5 text-xs ${
-                    isTradeIn
-                      ? "border-desk-accent bg-desk-accent/10 text-desk-text"
-                      : "border-desk-border text-desk-muted"
-                  }`}
-                >
-                  Trade-in (max offer)
-                </button>
-              </div>
-            )}
-          </div>
           <h2 className="text-sm font-semibold text-desk-muted">Gun</h2>
+          <OaCatalogPickers
+            condition={isVendor ? "new" : isTradeIn ? "used" : form.condition}
+            manufacturer={form.manufacturer}
+            model={form.model}
+            caliber={form.caliber}
+            onPick={(sel) => {
+              setForm((f) => ({
+                ...f,
+                manufacturer: sel.manufacturer,
+                model: sel.model,
+                caliber: sel.caliber,
+                gbaModelId: String(sel.modelId),
+                gbaCaliberId: String(sel.caliberId),
+                condition: sel.condition === "NEW" ? "new" : "used",
+              }));
+            }}
+          />
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Brand" v={form.manufacturer} on={set("manufacturer")} />
-            <Field label="Model" v={form.model} on={set("model")} />
-            <Field label="Caliber" v={form.caliber} on={set("caliber")} />
+            <Field label="Brand (override)" v={form.manufacturer} on={set("manufacturer")} />
+            <Field label="Model (override)" v={form.model} on={set("model")} />
+            <Field label="Caliber (override)" v={form.caliber} on={set("caliber")} />
             {isVendor && (
               <div className="col-span-2 grid gap-3 sm:grid-cols-2">
                 <FieldHint
@@ -665,11 +751,10 @@ export default function DeskPage() {
             <p className="text-[11px] text-desk-muted">Run Evaluate to see live est. profit at P25.</p>
           )}
           <details className="text-xs text-desk-muted">
-            <summary className="cursor-pointer">OA catalog IDs (from hub console)</summary>
+            <summary className="cursor-pointer">OA catalog IDs (auto-filled from dropdown)</summary>
             <p className="mt-1 text-[11px]">
-              On the OA pricing page, F12 → Console shows{" "}
-              <code className="text-desk-accent">modelID</code> and <code className="text-desk-accent">caliberID</code>{" "}
-              when you pick a gun. Paste them here if auto-match fails.
+              Choosing Make → Model → Caliber above fills these. You can still paste IDs from the OA console if
+              needed.
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Field label="Model ID" v={form.gbaModelId} on={set("gbaModelId")} />
@@ -690,7 +775,11 @@ export default function DeskPage() {
             disabled={loading}
             className="w-full rounded-md bg-desk-accent px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {loading ? "Pulling live comps…" : "Evaluate Deal"}
+            {loading
+              ? "Loading comps…"
+              : form.gbaModelId && form.gbaCaliberId
+                ? "Evaluate (local OA comps)"
+                : "Evaluate Deal"}
           </button>
           {loading && (
             <p className="text-center text-xs text-desk-muted">

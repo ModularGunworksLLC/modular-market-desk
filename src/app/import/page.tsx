@@ -13,6 +13,7 @@ import { intFmt, timeAgo, usd } from "@/lib/format";
 import { CatalogSync } from "./CatalogSync";
 import { CatalogUploader } from "./CatalogUploader";
 import { ConnectionVault } from "./ConnectionVault";
+import { OaCatalogSync } from "./OaCatalogSync";
 import { PresetPanel } from "./PresetPanel";
 
 export const dynamic = "force-dynamic";
@@ -106,6 +107,9 @@ export default async function ImportDashboard() {
 
         {/* Session Vault */}
         <ConnectionVault connections={conns.data} />
+
+        {/* Outdoor Analytics full brand/model catalog */}
+        <OaCatalogSync />
       </div>
     </main>
   );

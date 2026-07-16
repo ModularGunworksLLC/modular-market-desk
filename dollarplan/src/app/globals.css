@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background-color: theme("colors.plan.bg");
+  color: theme("colors.plan.text");
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-plan-border bg-plan-panel shadow-card;
+  }
+
+  .field-label {
+    @apply mb-1 block text-xs font-medium text-plan-muted;
+  }
+
+  .field-input {
+    @apply w-full rounded-md border border-plan-border bg-plan-panel px-3 py-2 text-sm text-plan-text outline-none transition-colors focus:border-plan-green focus:ring-2 focus:ring-plan-green/20;
+  }
+
+  .num {
+    @apply tabular-nums;
+  }
+
+  .ed-hero {
+    @apply rounded-lg border border-plan-green/20 bg-plan-green-light px-5 py-4;
+  }
+
+  .ed-hero-title {
+    @apply text-2xl font-bold tracking-tight text-plan-green md:text-3xl;
+  }
+
+  .ed-hero-subtitle {
+    @apply mt-1 text-sm text-plan-text-secondary;
+  }
+
+  .ed-btn-primary {
+    @apply rounded-md bg-plan-green px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-plan-green-dark disabled:opacity-50;
+  }
+
+  .ed-btn-secondary {
+    @apply rounded-md border border-plan-border bg-plan-panel px-4 py-2 text-sm font-medium text-plan-text-secondary transition-colors hover:bg-plan-panel2;
+  }
+
+  .ed-group-header {
+    @apply bg-plan-panel2 px-4 py-2.5 text-sm font-semibold text-plan-text;
+  }
+
+  .ed-col-header {
+    @apply border-b border-plan-border bg-plan-panel px-4 py-2 text-xs font-semibold uppercase tracking-wide text-plan-muted;
+  }
+
+  .ed-budget-row {
+    @apply grid min-w-[28rem] grid-cols-[1fr_5.5rem_5.5rem_5.5rem] items-center gap-2 border-b border-plan-border/70 px-4 py-3 last:border-b-0;
+  }
+
+  .ed-budget-row-income {
+    @apply grid min-w-[16rem] grid-cols-[1fr_5.5rem] items-center gap-2 border-b border-plan-border/70 px-4 py-3 last:border-b-0;
+  }
+
+  .ed-sidebar {
+    @apply rounded-lg border border-plan-border bg-plan-panel shadow-card;
+  }
+
+  .ed-nav-link {
+    @apply rounded-full px-4 py-2 text-sm font-medium text-plan-muted transition-colors hover:text-plan-text;
+  }
+
+  .ed-nav-link-active {
+    @apply bg-plan-green-light text-plan-green;
+  }
+}

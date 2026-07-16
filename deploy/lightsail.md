@@ -103,6 +103,29 @@ In Route 53 (or your DNS host), add **A record**:
 2. Run one evaluate on a known gun (Glock 19 / Ruger 10/22).
 3. Schedule Lightsail **snapshots** or backup `/opt/modular-market-desk/data/desk.db` nightly.
 
+## OA full market sync (catalog + sold comps)
+
+Pulls OA’s full manufacturer/model/caliber tree into `oa_catalog`, then sold + asking comps for every leaf into `oa_market_stats` / `oa_sold_comps`.
+
+**In the Desk UI:** **/import** → Session Vault (`outdoor_analytics` / `market_api`) → **Sync everything (catalog + sold comps)**. Progress polls live. Resume skips leaves synced in the last ~6 days unless “Force” is checked.
+
+**CLI** (recommended for overnight / cron — can take hours):
+
+```bash
+cd /opt/market-desk-v2
+npm run oa:sync
+# smoke: OA_SYNC_LIMIT=20 npm run oa:sync
+# force refresh: OA_SYNC_FORCE=1 npm run oa:sync
+```
+
+Weekly cron example (Sunday 2 AM):
+
+```cron
+0 2 * * 0 cd /opt/market-desk-v2 && /usr/bin/npm run oa:sync >> /home/bitnami/oa-full-sync.log 2>&1
+```
+
+After a full sync, Desk can later evaluate from SQLite without calling OA on every click (token only needed for the weekly job).
+
 ## Updates
 
 ```bash

@@ -1,0 +1,743 @@
+{
+  "pulledAt": "2026-07-15T21:54:02.949Z",
+  "auctionUrl": "https://bids.auctionbypearce.com/auctions/47513-july-guns-gear--ammo-auction",
+  "deskBase": "http://localhost:3002",
+  "tallies": {
+    "sheetRows": 218,
+    "liveInRange": 220,
+    "bidMatch": 159,
+    "bidMismatch": 59,
+    "sheetOnly": 0,
+    "liveOnly": 2,
+    "actionFlipsVsLive": 7
+  },
+  "mismatches": [
+    {
+      "lot": "11",
+      "action": "BID",
+      "sheetBid": 275,
+      "liveBid": 325,
+      "delta": 50,
+      "maxBid": 349.51,
+      "liveHeadroom": 24.51,
+      "gun": "Ruger Super Blackhawk in Gun Locker Hard Case .44 Magnum",
+      "liveTitle": "Ruger New Model Super Blackhawk 44 Mag Revolver in Gun Locker Hard Cas"
+    },
+    {
+      "lot": "14",
+      "action": "NO COMPS",
+      "sheetBid": 475,
+      "liveBid": 500,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Alpha Foxtrot Romulus 9mm",
+      "liveTitle": "Alpha Foxtrot Romulus 9mm Pistol w/ Osight SE Enclosed Red Dot, (2) Ma"
+    },
+    {
+      "lot": "17",
+      "action": "BID",
+      "sheetBid": 300,
+      "liveBid": 325,
+      "delta": 25,
+      "maxBid": 604.81,
+      "liveHeadroom": 279.81,
+      "gun": "Winchester 9422 Lever Action",
+      "liveTitle": "Winchester 9422 Lever-Action Rifle"
+    },
+    {
+      "lot": "42",
+      "action": "NO COMPS",
+      "sheetBid": 275,
+      "liveBid": 300,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Sig Sauer P938 9mm",
+      "liveTitle": "Sig Sauer P938 9mm Pistol"
+    },
+    {
+      "lot": "43",
+      "action": "NO COMPS",
+      "sheetBid": 275,
+      "liveBid": 300,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Sig Sauer P226 .40 S&W",
+      "liveTitle": "Sig Sauer P226 .40 S&W Pistol"
+    },
+    {
+      "lot": "45",
+      "action": "NO COMPS",
+      "sheetBid": 250,
+      "liveBid": 275,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Sig Sauer P365 9mm",
+      "liveTitle": "Sig Sauer P365 9mm Pistol"
+    },
+    {
+      "lot": "52",
+      "action": "NO COMPS",
+      "sheetBid": 95,
+      "liveBid": 100,
+      "delta": 5,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Taurus G2S .40 S&W",
+      "liveTitle": "Taurus G2S .40 S&W Pistol"
+    },
+    {
+      "lot": "55",
+      "action": "PASS",
+      "sheetBid": 95,
+      "liveBid": 125,
+      "delta": 30,
+      "maxBid": 46.26,
+      "liveHeadroom": -78.74,
+      "gun": "Taurus Firearms G2C 9mm",
+      "liveTitle": "Taurus Firearms G2C 9mm Pistol"
+    },
+    {
+      "lot": "62",
+      "action": "NO COMPS",
+      "sheetBid": 95,
+      "liveBid": 125,
+      "delta": 30,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Heritage Firearms BK22B3 .22 LR",
+      "liveTitle": "Heritage Firearms BK22B3 .22 LR Revolver"
+    },
+    {
+      "lot": "64",
+      "action": "BID",
+      "sheetBid": 125,
+      "liveBid": 175,
+      "delta": 50,
+      "maxBid": 159.35,
+      "liveHeadroom": -15.65,
+      "gun": "North American Arms NAA 22M Mini .22 WMR",
+      "liveTitle": "North American Arms NAA-22M .22 WMR Mini Revolver"
+    },
+    {
+      "lot": "65",
+      "action": "BID",
+      "sheetBid": 225,
+      "liveBid": 275,
+      "delta": 50,
+      "maxBid": 238.71,
+      "liveHeadroom": -36.29,
+      "gun": "Ruger Single Six .22 LR",
+      "liveTitle": "Ruger New Model Single-Six .22 LR Revolver"
+    },
+    {
+      "lot": "66",
+      "action": "BID",
+      "sheetBid": 250,
+      "liveBid": 325,
+      "delta": 75,
+      "maxBid": 353.57,
+      "liveHeadroom": 28.57,
+      "gun": "Ruger GP 100 .357",
+      "liveTitle": "Ruger GP-100 .357 Magnum Revolver"
+    },
+    {
+      "lot": "67",
+      "action": "PASS",
+      "sheetBid": 250,
+      "liveBid": 275,
+      "delta": 25,
+      "maxBid": 218.47,
+      "liveHeadroom": -56.53,
+      "gun": "Taurus 66 Stainless Steel .357",
+      "liveTitle": "Taurus 66 Stainless Steel .357 Magnum Revolver"
+    },
+    {
+      "lot": "69",
+      "action": "PASS",
+      "sheetBid": 225,
+      "liveBid": 250,
+      "delta": 25,
+      "maxBid": 149.43,
+      "liveHeadroom": -100.57,
+      "gun": "Taurus 605 .357",
+      "liveTitle": "Taurus Model 605 .357 Mag Revolver"
+    },
+    {
+      "lot": "77",
+      "action": "PASS",
+      "sheetBid": 70,
+      "liveBid": 85,
+      "delta": 15,
+      "maxBid": 34.96,
+      "liveHeadroom": -50.04,
+      "gun": "Savage Arms 320 Pump Action 12ga",
+      "liveTitle": "Savage Arms Stevens 320 12-Gauge Pump-Action Shotgun"
+    },
+    {
+      "lot": "79",
+      "action": "NO COMPS",
+      "sheetBid": 100,
+      "liveBid": 125,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Sun City Machinery 320 Pump Action 12ga",
+      "liveTitle": "Sun City Machinery 320 12-Gauge Pump-Action Shotgun"
+    },
+    {
+      "lot": "80",
+      "action": "NO COMPS",
+      "sheetBid": 175,
+      "liveBid": 200,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Tokarev Bullpup M Semi Auto 12ga",
+      "liveTitle": "Tokarev Bullpup M 12-Gauge Semi-Auto Shotgun"
+    },
+    {
+      "lot": "86",
+      "action": "NO COMPS",
+      "sheetBid": 250,
+      "liveBid": 300,
+      "delta": 50,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Remington Sportsman 74 .30-06",
+      "liveTitle": "Remington Sportsman 74 .30-06 Springfield Rifle"
+    },
+    {
+      "lot": "87",
+      "action": "BID",
+      "sheetBid": 225,
+      "liveBid": 300,
+      "delta": 75,
+      "maxBid": 268.47,
+      "liveHeadroom": -31.53,
+      "gun": "Remington 742 Woodsmaster .30-06",
+      "liveTitle": "Remington 742 Woodsmaster .30-06 Springfield Rifle"
+    },
+    {
+      "lot": "90",
+      "action": "NO COMPS",
+      "sheetBid": 450,
+      "liveBid": 550,
+      "delta": 100,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Ruger Precision Bolt Action 6.5 Creedmoor",
+      "liveTitle": "Ruger Precision Bolt-Action Rifle 6.5 Creedmoor"
+    },
+    {
+      "lot": "93",
+      "action": "PASS",
+      "sheetBid": 250,
+      "liveBid": 300,
+      "delta": 50,
+      "maxBid": 243.87,
+      "liveHeadroom": -56.13,
+      "gun": "Smith & Wesson M&P 15 5.56",
+      "liveTitle": "Smith & Wesson M&P 15 5.56 NATO Rifle"
+    },
+    {
+      "lot": "94",
+      "action": "NO COMPS",
+      "sheetBid": 250,
+      "liveBid": 300,
+      "delta": 50,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Smith & Wesson T/C Compass 6.5 Creedmoor",
+      "liveTitle": "Smith & Wesson T/C Compass 6.5 Creedmoor Rifle"
+    },
+    {
+      "lot": "98",
+      "action": "BID",
+      "sheetBid": 275,
+      "liveBid": 300,
+      "delta": 25,
+      "maxBid": 402.2,
+      "liveHeadroom": 102.2,
+      "gun": "Winchester 70 .30-06",
+      "liveTitle": "Winchester Model 70 .30-06 Springfield Rifle"
+    },
+    {
+      "lot": "106",
+      "action": "NO COMPS",
+      "sheetBid": 275,
+      "liveBid": 325,
+      "delta": 50,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Sears, Roebuck, & Co 20ga 20ga",
+      "liveTitle": "Sears, Roebuck, & Co 20-Gauge Shotgun"
+    },
+    {
+      "lot": "111",
+      "action": "PASS",
+      "sheetBid": 325,
+      "liveBid": 350,
+      "delta": 25,
+      "maxBid": 195.46,
+      "liveHeadroom": -154.54,
+      "gun": "Remington 740 SPRG .30-06",
+      "liveTitle": "Remington Model 740 30-06 SPRG Rifle"
+    },
+    {
+      "lot": "115",
+      "action": "NO COMPS",
+      "sheetBid": 65,
+      "liveBid": 95,
+      "delta": 30,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Linberta PA 101 12ga",
+      "liveTitle": "Linberta PA 101 12-Gauge Shotgun"
+    },
+    {
+      "lot": "116",
+      "action": "NO COMPS",
+      "sheetBid": 125,
+      "liveBid": 150,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Roma 816",
+      "liveTitle": "Roma Model 816 Rifle"
+    },
+    {
+      "lot": "117",
+      "action": "PASS",
+      "sheetBid": 250,
+      "liveBid": 275,
+      "delta": 25,
+      "maxBid": 193.08,
+      "liveHeadroom": -81.92,
+      "gun": "Dpms A 15 223/ 5.56",
+      "liveTitle": "DPMS A-15 223/5.56 Rifle"
+    },
+    {
+      "lot": "119",
+      "action": "NO COMPS",
+      "sheetBid": 275,
+      "liveBid": 325,
+      "delta": 50,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Ruger P90DC .45 ACP",
+      "liveTitle": "Ruger P90DC 45ACP Pistol"
+    },
+    {
+      "lot": "124",
+      "action": "BID",
+      "sheetBid": 90,
+      "liveBid": 150,
+      "delta": 60,
+      "maxBid": 117.69,
+      "liveHeadroom": -32.31,
+      "gun": "Taurus 85 30 SPL",
+      "liveTitle": "Taurus Model 85 30 SPL Revolver"
+    },
+    {
+      "lot": "130",
+      "action": "NO COMPS",
+      "sheetBid": 50,
+      "liveBid": 60,
+      "delta": 10,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Rg Industries RG 14",
+      "liveTitle": "RG Industries RG-14 Revolver"
+    },
+    {
+      "lot": "131",
+      "action": "NO COMPS",
+      "sheetBid": 55,
+      "liveBid": 60,
+      "delta": 5,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Rohm RG 10 22 Short",
+      "liveTitle": "Rohm RG-10 22-Short Revolver"
+    },
+    {
+      "lot": "137",
+      "action": "PASS",
+      "sheetBid": 80,
+      "liveBid": 150,
+      "delta": 70,
+      "maxBid": 54.6,
+      "liveHeadroom": -95.4,
+      "gun": "Remington 1946 510 Routledge Bore 22",
+      "liveTitle": "1946 Remington 510 Routledge Bore 22 Rifle"
+    },
+    {
+      "lot": "146",
+      "action": "NO COMPS",
+      "sheetBid": 55,
+      "liveBid": 60,
+      "delta": 5,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Break Action Single Barrel 12ga 12ga",
+      "liveTitle": "Break-Action Single-Barrel 12-Gauge Shotgun"
+    },
+    {
+      "lot": "148",
+      "action": "BID",
+      "sheetBid": 80,
+      "liveBid": 85,
+      "delta": 5,
+      "maxBid": 112.93,
+      "liveHeadroom": 27.93,
+      "gun": "Winchester 37A 12ga",
+      "liveTitle": "Winchester Model 37A 12-Gauge Shotgun"
+    },
+    {
+      "lot": "153",
+      "action": "BID",
+      "sheetBid": 95,
+      "liveBid": 100,
+      "delta": 5,
+      "maxBid": 106.78,
+      "liveHeadroom": 6.78,
+      "gun": "Smith & Wesson M&P9 Shield 9mm",
+      "liveTitle": "Smith & Wesson M&P9 Shield 9mm Pistol"
+    },
+    {
+      "lot": "158",
+      "action": "PASS",
+      "sheetBid": 100,
+      "liveBid": 125,
+      "delta": 25,
+      "maxBid": 76.82,
+      "liveHeadroom": -48.18,
+      "gun": "Taurus PT 22 Pocket",
+      "liveTitle": "Taurus PT-22 Pocket Pistol"
+    },
+    {
+      "lot": "161",
+      "action": "PASS",
+      "sheetBid": 95,
+      "liveBid": 100,
+      "delta": 5,
+      "maxBid": 78.01,
+      "liveHeadroom": -21.99,
+      "gun": "Smith & Wesson SD40VE .40 S&W",
+      "liveTitle": "Smith & Wesson SD40VE 40 S&W Pistol"
+    },
+    {
+      "lot": "164",
+      "action": "BID",
+      "sheetBid": 200,
+      "liveBid": 225,
+      "delta": 25,
+      "maxBid": 204.98,
+      "liveHeadroom": -20.02,
+      "gun": "Tisas Arms Zig M1911",
+      "liveTitle": "Tisas Arms Zig M1911 Pistol"
+    },
+    {
+      "lot": "169",
+      "action": "BID",
+      "sheetBid": 95,
+      "liveBid": 125,
+      "delta": 30,
+      "maxBid": 117.69,
+      "liveHeadroom": -7.31,
+      "gun": "Smith & Wesson NEK7834 M&P 9 Shield EZ M2.0",
+      "liveTitle": "NEK7834 Smith & Wesson M&P 9 Shield EZ M2.0 Pistol"
+    },
+    {
+      "lot": "175",
+      "action": "BID",
+      "sheetBid": 175,
+      "liveBid": 225,
+      "delta": 50,
+      "maxBid": 549.09,
+      "liveHeadroom": 324.09,
+      "gun": "Colt Firearms Trooper",
+      "liveTitle": "Colt Firearms Trooper"
+    },
+    {
+      "lot": "176",
+      "action": "NO COMPS",
+      "sheetBid": 300,
+      "liveBid": 375,
+      "delta": 75,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Browning A 500G Semi Auto 12ga",
+      "liveTitle": "Browning A-500G Semi-Auto 12-Gauge Shotgun"
+    },
+    {
+      "lot": "177",
+      "action": "BID",
+      "sheetBid": 125,
+      "liveBid": 175,
+      "delta": 50,
+      "maxBid": 126.22,
+      "liveHeadroom": -48.78,
+      "gun": "Winchester 1300 Pump Action 12ga",
+      "liveTitle": "Winchester 1300 Pump-Action 12-Gauge Shotgun"
+    },
+    {
+      "lot": "178",
+      "action": "NO COMPS",
+      "sheetBid": 85,
+      "liveBid": 100,
+      "delta": 15,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Harrington & Richardson Pardner Pump Pump Action 12ga",
+      "liveTitle": "Harrington & Richardson Pardner Pump 12-Gauge Pump-Action Shotgun"
+    },
+    {
+      "lot": "191",
+      "action": "PASS",
+      "sheetBid": 375,
+      "liveBid": 400,
+      "delta": 25,
+      "maxBid": 219.07,
+      "liveHeadroom": -180.93,
+      "gun": "Browning Takedown 22",
+      "liveTitle": "Browning Takedown 22 Rifle"
+    },
+    {
+      "lot": "194",
+      "action": "BID",
+      "sheetBid": 300,
+      "liveBid": 350,
+      "delta": 50,
+      "maxBid": 661.54,
+      "liveHeadroom": 311.54,
+      "gun": "Ruger 77 .22 Hornet",
+      "liveTitle": "Ruger Model 77 22 Hornet Rifle"
+    },
+    {
+      "lot": "199",
+      "action": "PASS",
+      "sheetBid": 80,
+      "liveBid": 85,
+      "delta": 5,
+      "maxBid": 46.26,
+      "liveHeadroom": -38.74,
+      "gun": "Taurus G2C 9mm",
+      "liveTitle": "Taurus G2C 9mm Pistol"
+    },
+    {
+      "lot": "200",
+      "action": "NO COMPS",
+      "sheetBid": 95,
+      "liveBid": 100,
+      "delta": 5,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Sarsilmaz CM9 with Hilight P20GL Light/Laser 9mm",
+      "liveTitle": "Sarsilmaz CM9 9x19 Pistol with Hilight P20GL Light/Laser"
+    },
+    {
+      "lot": "201",
+      "action": "NO COMPS",
+      "sheetBid": 65,
+      "liveBid": 85,
+      "delta": 20,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Cz V20R70 7.65 Semi Auto",
+      "liveTitle": "CZ V20R70 7.65 Cal Semi Auto Pistol"
+    },
+    {
+      "lot": "202",
+      "action": "NO COMPS",
+      "sheetBid": 95,
+      "liveBid": 100,
+      "delta": 5,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Ruger P9S x 19 9mm",
+      "liveTitle": "Ruger P9S 9mm x 19 Pistol"
+    },
+    {
+      "lot": "203",
+      "action": "PASS",
+      "sheetBid": 175,
+      "liveBid": 200,
+      "delta": 25,
+      "maxBid": 149.43,
+      "liveHeadroom": -50.57,
+      "gun": "Taurus 605 Protector Poly .357",
+      "liveTitle": "Taurus 605 Protector Poly 357 Mag Revolver"
+    },
+    {
+      "lot": "207",
+      "action": "PASS",
+      "sheetBid": 150,
+      "liveBid": 175,
+      "delta": 25,
+      "maxBid": 81.78,
+      "liveHeadroom": -93.22,
+      "gun": "Savage Mark II with .22 LR",
+      "liveTitle": "Savage Mark II 22LR Rifle with Scope"
+    },
+    {
+      "lot": "208",
+      "action": "NO COMPS",
+      "sheetBid": 125,
+      "liveBid": 150,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "CAI M53 7.62x54R",
+      "liveTitle": "CAI M53 7.62x54R Rifle"
+    },
+    {
+      "lot": "209",
+      "action": "NO COMPS",
+      "sheetBid": 65,
+      "liveBid": 70,
+      "delta": 5,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Tokarev 7.62x25",
+      "liveTitle": "7.62x25 Tokarev Pistol"
+    },
+    {
+      "lot": "214",
+      "action": "NO COMPS",
+      "sheetBid": 100,
+      "liveBid": 125,
+      "delta": 25,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Llama .38 Special .38 Special",
+      "liveTitle": "Stoeger Llama 38 SPL Revolver"
+    },
+    {
+      "lot": "215",
+      "action": "BID",
+      "sheetBid": 100,
+      "liveBid": 125,
+      "delta": 25,
+      "maxBid": 169.27,
+      "liveHeadroom": 44.27,
+      "gun": "Ithaca 37 12ga",
+      "liveTitle": "Ithaca Model 37 12-Gauge Shotgun"
+    },
+    {
+      "lot": "218",
+      "action": "NO COMPS",
+      "sheetBid": 60,
+      "liveBid": 65,
+      "delta": 5,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Revelation 350A Break Action 20ga",
+      "liveTitle": "Revelation Model 350A Break-Action 20-Gauge Single-Shot Shotgun"
+    },
+    {
+      "lot": "225",
+      "action": "NO COMPS",
+      "sheetBid": 50,
+      "liveBid": 70,
+      "delta": 20,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Iver Johnson TP22 .22 LR",
+      "liveTitle": "Iver Johnson TP22 22LR Pistol"
+    },
+    {
+      "lot": "229",
+      "action": "NO COMPS",
+      "sheetBid": 200,
+      "liveBid": 250,
+      "delta": 50,
+      "maxBid": null,
+      "liveHeadroom": null,
+      "gun": "Just Right Carbine JR Carbine GEN 2 9mm",
+      "liveTitle": "Just Right Carbine JR Carbine GEN 2 9mm Rifle"
+    }
+  ],
+  "flips": [
+    {
+      "lot": "64",
+      "sheetAction": "BID",
+      "liveWould": "PASS",
+      "sheetBid": 125,
+      "liveBid": 175,
+      "maxBid": 159.35,
+      "gun": "North American Arms NAA 22M Mini .22 WMR"
+    },
+    {
+      "lot": "65",
+      "sheetAction": "BID",
+      "liveWould": "PASS",
+      "sheetBid": 225,
+      "liveBid": 275,
+      "maxBid": 238.71,
+      "gun": "Ruger Single Six .22 LR"
+    },
+    {
+      "lot": "87",
+      "sheetAction": "BID",
+      "liveWould": "PASS",
+      "sheetBid": 225,
+      "liveBid": 300,
+      "maxBid": 268.47,
+      "gun": "Remington 742 Woodsmaster .30-06"
+    },
+    {
+      "lot": "124",
+      "sheetAction": "BID",
+      "liveWould": "PASS",
+      "sheetBid": 90,
+      "liveBid": 150,
+      "maxBid": 117.69,
+      "gun": "Taurus 85 30 SPL"
+    },
+    {
+      "lot": "164",
+      "sheetAction": "BID",
+      "liveWould": "PASS",
+      "sheetBid": 200,
+      "liveBid": 225,
+      "maxBid": 204.98,
+      "gun": "Tisas Arms Zig M1911"
+    },
+    {
+      "lot": "169",
+      "sheetAction": "BID",
+      "liveWould": "PASS",
+      "sheetBid": 95,
+      "liveBid": 125,
+      "maxBid": 117.69,
+      "gun": "Smith & Wesson NEK7834 M&P 9 Shield EZ M2.0"
+    },
+    {
+      "lot": "177",
+      "sheetAction": "BID",
+      "liveWould": "PASS",
+      "sheetBid": 125,
+      "liveBid": 175,
+      "maxBid": 126.22,
+      "gun": "Winchester 1300 Pump Action 12ga"
+    }
+  ],
+  "sheetOnly": [],
+  "liveOnly": [
+    {
+      "lot": "112",
+      "liveBid": 65,
+      "title": "Armory Gun Co Shotgun"
+    },
+    {
+      "lot": "224",
+      "liveBid": 60,
+      "title": ".36 Cal Navy Black Powder Revolver"
+    }
+  ]
+}

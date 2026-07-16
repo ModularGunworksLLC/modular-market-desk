@@ -164,6 +164,7 @@ async function evaluateRow(
     headroom: null,
     matchNote: "",
     matchScore: null,
+    oaCatalog: null,
     error: null,
   };
 
@@ -219,6 +220,15 @@ async function evaluateRow(
       headroom,
       matchNote: out.sourceStatus.gba ?? "no comps",
       matchScore: out.catalogMatch?.score ?? null,
+      oaCatalog: out.catalogMatch
+        ? {
+            manufacturer: out.catalogMatch.manufacturer,
+            model: out.catalogMatch.model,
+            caliber: out.catalogMatch.caliber,
+            condition: out.catalogMatch.conditionParam,
+            score: out.catalogMatch.score,
+          }
+        : null,
       error: null,
     };
   } catch (err) {

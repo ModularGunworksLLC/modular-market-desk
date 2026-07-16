@@ -1,11 +1,13 @@
 /**
  * Drizzle schema - Modular Market Desk (local SQLite via @libsql/client).
  *
- * Four tables:
+ * Tables:
  *   - connections   : Session Vault for pasted bearer tokens / cookie strings (encrypted).
  *   - csv_presets   : data-driven header maps so the importer is vendor-agnostic.
  *   - catalog_items : imported distributor catalogs, indexed for fast UPC/model cross-reference.
  *   - valuations    : persisted deal evaluations (query + market metrics + profit verdict).
+ *   - oa_catalog    : Outdoor Analytics brand/model/caliber tree (synced from /pricing/dependencies).
+ *   - oa_sync_runs  : metadata for OA catalog (and later comps) sync jobs.
  *
  * SQLite type conventions used here:
  *   - ids        : text PK seeded with crypto.randomUUID()
@@ -177,6 +179,33 @@ export type RouteBreakdown = {
   net: number;
 };
 
+/** Sidekick identify snapshots (photos / auction title → FirearmIdentity). */
+export const identifies = sqliteTable(
+  "identifies",
+  {
+    id: id(),
+    createdAt: createdAt(),
+    source: text("source").notNull().default("counter"), // counter | auction
+    lot: text("lot"),
+    manufacturer: text("manufacturer").notNull(),
+    model: text("model").notNull(),
+    variant: text("variant"),
+    caliber: text("caliber"),
+    category: text("category"),
+    condition: text("condition"),
+    serial: text("serial"),
+    confidence: integer("confidence"),
+    modelUsed: text("model_used"),
+    stolenStatus: text("stolen_status"),
+    hintText: text("hint_text"),
+    raw: text("raw", { mode: "json" }).$type<unknown>(),
+  },
+  (t) => ({
+    createdIdx: index("identifies_created_idx").on(sql`${t.createdAt} DESC`),
+    serialIdx: index("identifies_serial_idx").on(t.serial),
+  }),
+);
+
 export const valuations = sqliteTable(
   "valuations",
   {
@@ -232,6 +261,126 @@ export const valuations = sqliteTable(
   }),
 );
 
+/* ----------------------------------------------------------- oa_catalog */
+/*
+ * Flattened Outdoor Analytics /pricing/dependencies tree.
+ * One row per (condition bucket × manufacturer × model × caliber).
+ * Synced by scripts/sync-oa-catalog.ts — Desk will resolve against this
+ * instead of calling OA live for catalog matching.
+ */
+
+export const oaCatalog = sqliteTable(
+  "oa_catalog",
+  {
+    id: id(),
+    /** OA condition bucket: NEW | USED */
+    condition: text("condition").notNull(),
+    manufacturerId: integer("manufacturer_id").notNull(),
+    manufacturer: text("manufacturer").notNull(),
+    isCommon: integer("is_common", { mode: "boolean" }).notNull().default(false),
+    modelId: integer("model_id").notNull(),
+    model: text("model").notNull(),
+    caliberId: integer("caliber_id").notNull(),
+    caliber: text("caliber").notNull(),
+    syncedAt: integer("synced_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    uniq: uniqueIndex("oa_catalog_uniq").on(t.condition, t.modelId, t.caliberId),
+    mfrIdx: index("oa_catalog_mfr_idx").on(t.manufacturer),
+    modelIdx: index("oa_catalog_model_idx").on(t.manufacturer, t.model),
+    idsIdx: index("oa_catalog_ids_idx").on(t.modelId, t.caliberId),
+  }),
+);
+
+export const oaSyncRuns = sqliteTable("oa_sync_runs", {
+  id: id(),
+  kind: text("kind").notNull().default("catalog"), // catalog | comps | full
+  status: text("status").notNull(), // running | ok | error
+  startedAt: integer("started_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  finishedAt: integer("finished_at", { mode: "timestamp" }),
+  manufacturerCount: integer("manufacturer_count"),
+  modelCount: integer("model_count"),
+  rowCount: integer("row_count"),
+  error: text("error"),
+  meta: text("meta", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+});
+
+/**
+ * Sold + asking market snapshot per OA catalog leaf.
+ * Refreshed by full/comps sync from /pricing/data + /pricing/active-listings.
+ */
+export const oaMarketStats = sqliteTable(
+  "oa_market_stats",
+  {
+    id: id(),
+    condition: text("condition").notNull(), // NEW | USED
+    manufacturerId: integer("manufacturer_id").notNull(),
+    manufacturer: text("manufacturer").notNull(),
+    modelId: integer("model_id").notNull(),
+    model: text("model").notNull(),
+    caliberId: integer("caliber_id").notNull(),
+    caliber: text("caliber").notNull(),
+    soldCount: integer("sold_count").notNull().default(0),
+    soldLow: real("sold_low"),
+    soldP25: real("sold_p25"),
+    soldMedian: real("sold_median"),
+    soldP75: real("sold_p75"),
+    soldHigh: real("sold_high"),
+    soldAvg: real("sold_avg"),
+    askingCount: integer("asking_count").notNull().default(0),
+    askingLow: real("asking_low"),
+    askingP25: real("asking_p25"),
+    askingMedian: real("asking_median"),
+    askingP75: real("asking_p75"),
+    askingHigh: real("asking_high"),
+    askingAvg: real("asking_avg"),
+    /** Compact samples for verify UI (not every historical row forever). */
+    soldSamples: text("sold_samples", { mode: "json" })
+      .$type<Array<{ price: number; salesDate: string; listingType: string; title?: string }>>()
+      .notNull()
+      .default([]),
+    askingSamples: text("asking_samples", { mode: "json" })
+      .$type<Array<{ price: number; title: string; condition: string; itemId: string | null }>>()
+      .notNull()
+      .default([]),
+    lastError: text("last_error"),
+    syncedAt: integer("synced_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    uniq: uniqueIndex("oa_market_stats_uniq").on(t.condition, t.modelId, t.caliberId),
+    mfrIdx: index("oa_market_stats_mfr_idx").on(t.manufacturer),
+    soldIdx: index("oa_market_stats_sold_idx").on(t.soldCount),
+  }),
+);
+
+/** Every sold row returned by OA for a catalog leaf (replaced each comps sync for that leaf). */
+export const oaSoldComps = sqliteTable(
+  "oa_sold_comps",
+  {
+    id: id(),
+    condition: text("condition").notNull(),
+    modelId: integer("model_id").notNull(),
+    caliberId: integer("caliber_id").notNull(),
+    price: real("price").notNull(),
+    salesDate: text("sales_date").notNull().default(""),
+    listingType: text("listing_type").notNull().default(""),
+    title: text("title").notNull().default(""),
+    syncedAt: integer("synced_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    leafIdx: index("oa_sold_comps_leaf_idx").on(t.condition, t.modelId, t.caliberId),
+    priceIdx: index("oa_sold_comps_price_idx").on(t.price),
+  }),
+);
+
 /* --------------------------------------------------------- inferred types */
 
 export type Connection = typeof connections.$inferSelect;
@@ -242,3 +391,10 @@ export type CatalogItem = typeof catalogItems.$inferSelect;
 export type NewCatalogItem = typeof catalogItems.$inferInsert;
 export type Valuation = typeof valuations.$inferSelect;
 export type NewValuation = typeof valuations.$inferInsert;
+export type IdentifySnapshot = typeof identifies.$inferSelect;
+export type NewIdentifySnapshot = typeof identifies.$inferInsert;
+export type OaCatalogRow = typeof oaCatalog.$inferSelect;
+export type NewOaCatalogRow = typeof oaCatalog.$inferInsert;
+export type OaSyncRun = typeof oaSyncRuns.$inferSelect;
+export type OaMarketStat = typeof oaMarketStats.$inferSelect;
+export type OaSoldComp = typeof oaSoldComps.$inferSelect;

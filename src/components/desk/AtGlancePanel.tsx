@@ -124,6 +124,7 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
             </p>
             <p className="mt-1 text-sm text-desk-muted">
               Walk-away — do not exceed this {isTradeIn ? "cash offer" : "hammer"}.
+              {sold.count > 0 ? ` Est. resale ~${usd(sold.median)} median / ${usd(sold.p25)} P25 sold.` : ""}
             </p>
             {result.profitMaxHammer > result.effectiveMaxHammer + 0.01 && (
               <p className="mt-1 text-xs text-desk-nogo">

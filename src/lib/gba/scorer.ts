@@ -223,6 +223,75 @@ export function compactMpModel(model: string): string {
 }
 
 /**
+ * Strip auction-title noise so OA catalog match can see the real model.
+ * Free, local — no AI. Examples:
+ *   "Super Blackhawk in Gun Locker Hard Case" → "Super Blackhawk"
+ *   "DR920 Elite with Holosun HS507C…" → "DR920 Elite"
+ *   "Firearms G3C" / "G3C 9x19mm" → "G3C"
+ */
+export function cleanModelForOa(model: string): string {
+  let m = model.trim();
+  if (!m) return m;
+
+  m = m.replace(/\bwith\b[\s\S]*$/i, " ");
+  m = m.replace(/\bw\/\b[\s\S]*$/i, " ");
+  // "… in Gun Locker Hard Case" / "… in Hard Case" / "… Hard Case"
+  m = m.replace(/\bin\b.+?\b(?:hard\s+)?case\b[\s\S]*$/i, " ");
+  m = m.replace(/\bhard(?:[- ]?duty)?\s+case\b[\s\S]*$/i, " ");
+  m = m.replace(/\bin\s+(?:factory\s+)?(?:bag|box)\b[\s\S]*$/i, " ");
+  m = m.replace(/,\s*\(\d+\).*$/i, " ");
+  m = m.replace(/\b(?:engraved|turkish\s+walnut|hand[- ]?carved|hard[- ]?carved)\b[\s\S]*$/i, " ");
+  m = m.replace(/\s*\/\s*\.?45\s*L?C\b/gi, " ");
+  m = m.replace(/^\s*Firearms\s+/i, "");
+  m = m.replace(/\bFirearms\b/gi, " ");
+  // Trailing caliber glued into model (Desk already has a caliber field)
+  m = m.replace(
+    /\b(?:9\s*x\s*19(?:mm)?|9\s*mm(?:\s*luger)?|10\s*mm|\.?(?:22|25|32|38|357|380|40|44|45)\s*(?:lr|acp|auto|special|spl|mag(?:num)?|wmr|s\s*&\s*w|colt)?|12\s*ga(?:uge)?|20\s*ga(?:uge)?)\s*$/i,
+    " ",
+  );
+  m = m.replace(/[*#|]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  // Drop orphan punctuation left after strips
+  m = m.replace(/(?:^|\s)[-–—./]+(?=\s|$)/g, " ").replace(/\s{2,}/g, " ").trim();
+  return m;
+}
+
+/** Progressive shorter model variants for OA retry (cleaned → core → first code token). */
+export function modelQueryVariants(model: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (s: string) => {
+    const t = s.trim();
+    if (!t || seen.has(t.toLowerCase())) return;
+    seen.add(t.toLowerCase());
+    out.push(t);
+  };
+
+  push(model);
+  const cleaned = cleanModelForOa(model);
+  push(cleaned);
+
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  if (tokens.length > 3) push(tokens.slice(0, 3).join(" "));
+  if (tokens.length > 2) push(tokens.slice(0, 2).join(" "));
+
+  // First token that looks like a model code (P365, DR920, G3C, 1911, RS22P)
+  const code = tokens.find((t) => /[a-z].*\d|\d.*[a-z]|\d{3,}/i.test(t));
+  if (code) push(code);
+
+  // Sig style: keep family before dash variant (P365-9-BXR3 → P365)
+  const dashBase = cleaned.match(/^([A-Za-z]{1,4}\d{2,4})(?:[-_\s]|$)/);
+  if (dashBase?.[1]) push(dashBase[1]);
+
+  // Rock Island / 1911 lines: M1911 A1 FS → M1911, 1911
+  if (/\bm?1911\b/i.test(cleaned)) {
+    push("M1911");
+    push("1911");
+  }
+
+  return out;
+}
+
+/**
  * Split glued model codes (SD9VE, M&P9) into searchable tokens.
  * OA catalog titles often insert spaces: "S&W SD9 VE".
  */
@@ -246,7 +315,12 @@ export function modelSearchTokens(query: GbaQuery): string[] {
   const tokens: string[] = [];
   const romans = new Set(["ii", "iv", "v"]);
 
-  for (const value of [query.model, query.variant, compactMpModel(query.model ?? "")]) {
+  for (const value of [
+    query.model,
+    query.variant,
+    compactMpModel(query.model ?? ""),
+    cleanModelForOa(query.model ?? ""),
+  ]) {
     for (const part of explodeCompactModel(value ?? "")) {
       const p = part.trim();
       if (p.length >= 2 || romans.has(p)) tokens.push(p);
@@ -485,6 +559,17 @@ export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
   }
 
   const model = query.model.trim();
+  for (const variant of modelQueryVariants(model)) {
+    if (variant === model) continue;
+    push({ ...query, model: variant });
+    if (query.condition !== "any") push({ ...query, model: variant, condition: "any" });
+    const mp = compactMpModel(variant);
+    if (mp !== variant) {
+      push({ ...query, model: mp });
+      if (query.condition !== "any") push({ ...query, model: mp, condition: "any" });
+    }
+  }
+
   const mpCompact = compactMpModel(model);
   if (mpCompact !== model) {
     push({ ...query, model: mpCompact });
@@ -501,7 +586,37 @@ export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
     }
   }
 
-  const combo = `${mfr} ${query.model}`.trim();
+  // Manufacturer aliases that often arrive glued into the model line from auction parsers
+  if (/^tisas(\s+arms)?$/i.test(mfr)) {
+    push({ ...query, manufacturer: "Tisas" });
+    push({ ...query, manufacturer: "SDS Imports" });
+  }
+  if (/^cz$/i.test(mfr)) {
+    push({ ...query, manufacturer: "CZ-USA" });
+    push({ ...query, manufacturer: "CZ" });
+  }
+  if (/american tactical/i.test(mfr)) {
+    push({ ...query, manufacturer: "ATI" });
+    push({ ...query, manufacturer: "American Tactical Imports" });
+  }
+  if (/^sig(\s*sauer)?$/i.test(mfr)) {
+    push({ ...query, manufacturer: "SIG SAUER" });
+    push({ ...query, manufacturer: "Sig Sauer" });
+  }
+  if (/rock island/i.test(mfr)) {
+    push({ ...query, manufacturer: "Armscor" });
+    push({ ...query, manufacturer: "Rock Island Armory" });
+  }
+
+  // Caliber mismatches often block otherwise-good models — try model-only.
+  if ((query.caliber ?? "").trim()) {
+    for (const variant of modelQueryVariants(model)) {
+      push({ ...query, model: variant, caliber: undefined });
+      push({ ...query, model: variant, caliber: undefined, condition: "any" });
+    }
+  }
+
+  const combo = `${mfr} ${cleanModelForOa(query.model)}`.trim();
   if (combo.length > query.model.length) push({ ...query, model: combo });
 
   return attempts;

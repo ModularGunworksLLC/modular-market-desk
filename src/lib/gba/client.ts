@@ -109,9 +109,13 @@ export class GbaApiClient {
   }
 
   /** Catalog dependency tree keyed by condition bucket (NEW / USED). Cached 1h in-process. */
-  async dependencies(): Promise<OaDependencies> {
+  async dependencies(opts?: { force?: boolean }): Promise<OaDependencies> {
     const now = Date.now();
-    if (dependenciesCache && now - dependenciesCache.loadedAt < DEPS_CACHE_TTL_MS) {
+    if (
+      !opts?.force &&
+      dependenciesCache &&
+      now - dependenciesCache.loadedAt < DEPS_CACHE_TTL_MS
+    ) {
       return dependenciesCache.data;
     }
     const data = await this.get<OaDependencies>("/pricing/dependencies");

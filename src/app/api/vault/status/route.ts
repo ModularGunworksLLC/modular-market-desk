@@ -1,11 +1,12 @@
 /**
  * GET /api/vault/status
- * Verifies the Session Vault can decrypt the stored OA token with the current SESSION_VAULT_KEY.
+ * Verifies vault decrypt + Outdoor Analytics token still accepted (not just present).
  */
 
 import { NextResponse } from "next/server";
 
 import { getMarketToken } from "@/lib/connections";
+import { GbaApiClient, GbaApiError } from "@/lib/gba/client";
 
 export const runtime = "nodejs";
 
@@ -27,8 +28,22 @@ export async function GET(): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({
-    ok: true,
-    message: `Vault OK (token length ${token.length}).`,
-  });
+  try {
+    await new GbaApiClient(token).dependencies();
+    return NextResponse.json({
+      ok: true,
+      message: `Vault OK — Outdoor Analytics accepts token (len ${token.length}).`,
+      oaAuth: "ok",
+    });
+  } catch (err) {
+    const status = err instanceof GbaApiError ? err.status : 0;
+    return NextResponse.json({
+      ok: false,
+      oaAuth: "unauthorized",
+      message:
+        status === 401
+          ? `Vault decrypts a token (len ${token.length}) but Outdoor Analytics rejects it — re-paste a fresh Bearer token on Import → Connections.`
+          : `Vault has a token but OA probe failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
 }

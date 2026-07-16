@@ -20,6 +20,14 @@ export interface BatchResultRow {
   headroom: number | null;
   matchNote: string;
   matchScore: number | null;
+  /** Outdoor Analytics catalog hit used for sold/asking comps (when auto-matched). */
+  oaCatalog: {
+    manufacturer: string;
+    model: string;
+    caliber: string;
+    condition: string;
+    score: number;
+  } | null;
   error: string | null;
 }
 

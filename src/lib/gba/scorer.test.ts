@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildCaliberTokens,
   buildModelAliases,
+  cleanModelForOa,
+  modelQueryVariants,
   modelSearchTokens,
   norm,
   oaConditions,
@@ -156,6 +158,47 @@ describe("resolveSelection", () => {
     expect(sel).not.toBeNull();
     expect(sel!.model).toContain("1911");
     expect(sel!.caliberId).toBe(45);
+  });
+
+  it("cleans auction noise from model for OA match", () => {
+    expect(cleanModelForOa("Super Blackhawk in Gun Locker Hard Case")).toBe("Super Blackhawk");
+    expect(cleanModelForOa("DR920 Elite with Holosun HS507C X2, (3) Magazines & Bag")).toBe(
+      "DR920 Elite",
+    );
+    expect(cleanModelForOa("Firearms G3C")).toBe("G3C");
+    expect(cleanModelForOa("G3C 9x19mm")).toBe("G3C");
+    expect(modelQueryVariants("P365-9 BXR3")).toContain("P365");
+  });
+
+  it("matches Ruger Super Blackhawk after case trailer stripped", () => {
+    const rugerDeps: OaDependencies = {
+      USED: [
+        {
+          Manufacturer: "RUGER",
+          ManufacturerID: 99,
+          IsCommonManufacturer: true,
+          Models: [
+            {
+              Model: "NEW MODEL SUPER BLACKHAWK",
+              ModelID: 501,
+              Calibers: [{ Caliber: ".44 MAGNUM", CaliberID: 44 }],
+            },
+          ],
+        },
+      ],
+    };
+    let sel = null;
+    for (const q of resolveQueryAttempts({
+      manufacturer: "Ruger",
+      model: "Super Blackhawk in Gun Locker Hard Case",
+      caliber: ".44 Magnum",
+      condition: "used",
+    })) {
+      sel = resolveSelection(rugerDeps, q);
+      if (sel) break;
+    }
+    expect(sel).not.toBeNull();
+    expect(sel!.model.toLowerCase()).toContain("blackhawk");
   });
 
   it("compacts M&P 45 to M&P45 for OA catalog match", () => {

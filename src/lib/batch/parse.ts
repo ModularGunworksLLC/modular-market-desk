@@ -190,38 +190,72 @@ function parsePct(raw: string | undefined): number | null {
 const BRANDS: string[] = [
   "smith & wesson",
   "smith and wesson",
-  "sig sauer",
-  "daniel defense",
+  "harrington & richardson",
+  "harrington and richardson",
+  "hopkins & allen",
+  "hopkins and allen",
+  "connecticut valley arms",
+  "palmetto state armory",
+  "sears, roebuck, & co",
+  "sears roebuck",
+  "radical firearms",
+  "shadow systems",
+  "american tactical",
+  "alpha foxtrot",
+  "double tap defense",
+  "north american arms",
   "rock island armory",
   "rock island",
   "heckler & koch",
   "heckler and koch",
   "springfield armory",
-  "springfield",
+  "daniel defense",
   "wilson combat",
   "thompson center",
   "thompson/center",
   "auto-ordnance",
   "auto ordnance",
-  "sharps bros",
   "sharps brothers",
+  "sharps bros",
   "spikes tactical",
+  "heritage manufacturing",
+  "national ordnance",
+  "charles daly",
+  "jc higgins",
+  "just right carbine",
+  "bearman industries",
+  "rg industries",
+  "glenfield firearms",
+  "arminius firearms",
+  "citadel firearms",
+  "fmk firearms",
+  "jts firearms",
+  "panzer arms",
+  "richland arms",
+  "raven arms",
+  "adler hunting arms",
+  "sun city machinery",
+  "sig sauer",
   "bond arms",
   "high standard",
   "hi-point",
   "hi point",
   "charter arms",
-  "north american arms",
   "iver johnson",
-  "heritage manufacturing",
-  "heritage",
-  "tippmann",
   "kel-tec",
   "kel tec",
-  "palmetto state armory",
+  "magnum research",
+  "aero precision",
+  "century arms",
+  "tisas arms",
+  "arthemis silah sanayi",
+  "leopar sil san",
+  "springfield",
+  "weatherby",
   "diamondback",
   "christensen arms",
-  "weatherby",
+  "tippmann",
+  "heritage",
   "maverick",
   "remington",
   "winchester",
@@ -245,23 +279,44 @@ const BRANDS: string[] = [
   "savage",
   "stevens",
   "bushmaster",
-  "aero precision",
   "aero",
   "rossi",
   "llama",
   "norinco",
   "zastava",
-  "century arms",
   "century",
   "palmetto",
   "psa",
+  "ria",
+  "chiappa",
+  "howa",
+  "ithaca",
+  "tokarev",
+  "archangel",
+  "tisas",
+  "sears",
+  "h&r",
+  "cva",
+  "eaa",
+  "cai",
+  "fmk",
+  "rohm",
+  "grendel",
+  "sarsilmaz",
+  "pardus",
+  "churchill",
+  "akkar",
+  "llama",
+  "linberta",
+  "revelation",
+  "ina",
+  "gsg",
   "fnh",
   "fn",
   "hk",
   "cz",
   "sccy",
   "kahr",
-  "magnum research",
   "dpms",
   "armscor",
   "staccato",
@@ -305,6 +360,20 @@ const BRAND_ALIASES: Record<string, string> = {
   "fnh": "FN",
   "century": "Century Arms",
   "magnum research": "Magnum Research",
+  ria: "Rock Island Armory",
+  "h&r": "Harrington & Richardson",
+  "harrington & richardson": "Harrington & Richardson",
+  "harrington and richardson": "Harrington & Richardson",
+  cva: "Connecticut Valley Arms",
+  "connecticut valley arms": "Connecticut Valley Arms",
+  "american tactical": "American Tactical",
+  "shadow systems": "Shadow Systems",
+  "radical firearms": "Radical Firearms",
+  "alpha foxtrot": "Alpha Foxtrot",
+  "hopkins & allen": "Hopkins & Allen",
+  "hopkins and allen": "Hopkins & Allen",
+  eaa: "EAA",
+  cai: "CAI",
 };
 
 /** Common caliber/gauge tokens, most-specific first. */
@@ -368,18 +437,95 @@ export interface ParsedTitle {
   category: string;
 }
 
+/** Title cleanup before brand/model split (typos, dash spacing, ACP glued to digits). */
+function normalizeTitleText(raw: string): string {
+  return raw
+    .replace(/\barmoty\b/gi, "Armory")
+    .replace(/\bmoel\b/gi, "Model")
+    .replace(/\b(\d{2,3})ACP\b/gi, "$1 ACP")
+    // Collapse spaced / letter↔digit dashes (LC - 5.7, A1-FS) but KEEP caliber hyphens (.30-06, 44-40).
+    .replace(/([A-Za-z])\s*-\s*([A-Za-z0-9])/g, "$1 $2")
+    .replace(/([0-9])\s*-\s*([A-Za-z])/g, "$1 $2")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Importer listed first, real make second — prefer the make for OA. */
+const IMPORTER_MAKE_PAIRS: Array<{ importer: string; make: string; alias?: string }> = [
+  { importer: "stoeger", make: "llama", alias: "Llama" },
+  { importer: "churchill", make: "akkar", alias: "Akkar" },
+  { importer: "american tactical", make: "gsg", alias: "GSG" },
+];
+
+type BrandHit = { brand: string; index: number; length: number };
+
+function findBrandHits(lower: string): BrandHit[] {
+  const hits: BrandHit[] = [];
+  for (const brand of BRANDS) {
+    const re = new RegExp(`(^|\\b)${brand.replace(/[.*+?^${}()|[\]\\&]/g, "\\$&")}(\\b|$)`, "i");
+    const m = re.exec(lower);
+    if (m) {
+      const index = m.index + (m[1] ? m[1].length : 0);
+      hits.push({ brand, index, length: brand.length });
+    }
+  }
+  // Leftmost wins; at same index, longest multi-word brand wins.
+  hits.sort((a, b) => a.index - b.index || b.length - a.length);
+  return hits;
+}
+
 export function parseTitleBlob(title: string): ParsedTitle {
-  const text = title.trim();
+  const text = normalizeTitleText(title);
   const lower = text.toLowerCase();
 
   let manufacturer = "";
   let brandMatch = "";
-  for (const brand of BRANDS) {
-    const re = new RegExp(`(^|\\b)${brand.replace(/[.*+?^${}()|[\]\\&]/g, "\\$&")}(\\b|$)`, "i");
-    if (re.test(lower)) {
-      manufacturer = BRAND_ALIASES[brand] ?? brand.replace(/\b\w/g, (c) => c.toUpperCase());
-      brandMatch = brand;
-      break;
+
+  const hits = findBrandHits(lower);
+  if (hits.length > 0) {
+    let chosen = hits[0]!;
+
+    // Trailing "<Brand> Rifle/Shotgun/Pistol" is usually the category maker, not the gun brand.
+    // If a different brand appears earlier, prefer that.
+    const trailingCat = lower.match(/\b(springfield|winchester|remington|mossberg)\s+(rifle|shotgun|pistol|carbine)\s*$/i);
+    if (trailingCat && hits.length > 1) {
+      const trailingBrand = trailingCat[1]!.toLowerCase();
+      if (chosen.brand === trailingBrand || chosen.brand.startsWith(trailingBrand)) {
+        const earlier = hits.find((h) => h.index < chosen.index);
+        if (earlier) chosen = earlier;
+      }
+    }
+
+    // Importer + make compounds (Stoeger Llama, Churchill Akkar, …)
+    for (const pair of IMPORTER_MAKE_PAIRS) {
+      const hasImporter = hits.some((h) => h.brand === pair.importer || h.brand.startsWith(pair.importer));
+      const makeHit = hits.find((h) => h.brand === pair.make || h.brand.includes(pair.make));
+      if (hasImporter && makeHit) {
+        chosen = makeHit;
+        manufacturer = pair.alias ?? (BRAND_ALIASES[makeHit.brand] ?? makeHit.brand.replace(/\b\w/g, (c) => c.toUpperCase()));
+        brandMatch = makeHit.brand;
+        break;
+      }
+    }
+
+    if (!manufacturer) {
+      manufacturer = BRAND_ALIASES[chosen.brand] ?? chosen.brand.replace(/\b\w/g, (c) => c.toUpperCase());
+      brandMatch = chosen.brand;
+    }
+  }
+
+  // Fallback when brand isn't in the lexicon: leading name + optional company noun.
+  if (!manufacturer) {
+    const lead = text.match(
+      /^([A-Za-z][A-Za-z0-9.&'/-]*(?:\s+[A-Za-z][A-Za-z0-9.&'/-]*){0,3}?)(?=\s+(?:Model|Moel|[A-Z0-9][A-Za-z0-9-]{0,12}\d|\d|\.|#))/i,
+    );
+    const soft = text.match(
+      /^((?:[A-Za-z][A-Za-z0-9.&'/-]*\s+){0,2}(?:Firearms|Arms|Systems|Defense|Industries|Armory|Manufacturing|Ordnance|Machinery|Inc\.?|Co\.?))(?:\s+|$)/i,
+    );
+    const raw = (soft?.[1] || lead?.[1] || "").replace(/,/g, "").trim();
+    if (raw.split(/\s+/).length >= 1 && raw.length >= 2 && !/^(break|single|double|semi|with|the)$/i.test(raw)) {
+      manufacturer = raw.replace(/\b\w/g, (c) => c.toUpperCase());
+      brandMatch = raw.toLowerCase();
     }
   }
 
@@ -407,17 +553,31 @@ export function parseTitleBlob(title: string): ParsedTitle {
   if (brandMatch) {
     model = model.replace(new RegExp(brandMatch.replace(/[.*+?^${}()|[\]\\&]/g, "\\$&"), "i"), " ");
   }
+  // Drop other secondary brand tokens (e.g. trailing "Springfield" / "Winchester" after Remington/Ruger).
+  for (const hit of hits) {
+    if (hit.brand === brandMatch) continue;
+    model = model.replace(new RegExp(`\\b${hit.brand.replace(/[.*+?^${}()|[\]\\&]/g, "\\$&")}\\b`, "i"), " ");
+  }
   if (caliberRaw) {
     model = model.replace(caliberRaw, " ");
   }
   model = model
     .replace(
-      /\b(new|used|nib|like new|excellent|model|pistol|handgun|rifle|shotgun|revolver|carbine|semi-?automatic|semi|auto|luger|cal|caliber|gauge|guage|ga|magnum|mag|nato|wylde|rem|colt|scope|in box|box|additional barrel|hand-?crank|single-?action|double-?barrel|single shot|over\/under|o\/u|w\/.*$)\b/gi,
+      /\b(new|used|nib|like new|excellent|model|pistol|handgun|rifle|shotgun|revolver|semi-?automatic|semi-?auto|luger|cal|caliber|gauge|guage|ga|magnum|mag|nato|wylde|scope|in box|box|additional barrel|hand-?crank|single-?action|double-?barrel|single shot|over\/under|o\/u|w\/.*$)\b/gi,
       " ",
     )
+    // Keep "carbine" when it looks like a model name (LC Carbine); strip only trailing category use.
+    .replace(/\bcarbine\b/gi, "Carbine")
     .replace(/[*#|]+/g, " ")
+    .replace(/(?:^|\s)[-–—./]+(?=\s|$)/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
+
+  // Titles that are only make + caliber + type leave an empty model after cleanup → batch skip.
+  // Prefer caliber as a searchable model stub (e.g. Rossi .38 Special / Llama .38 Special).
+  if (!model && manufacturer && caliber) {
+    model = caliber;
+  }
 
   return { manufacturer, model, caliber, category: normalizeCategory(category) || category };
 }

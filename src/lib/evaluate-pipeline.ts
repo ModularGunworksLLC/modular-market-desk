@@ -25,6 +25,8 @@ import { valuations } from "@/lib/db/schema";
 import { buildDealInsights, type DealInsights } from "@/lib/deal-insights";
 import { GbaApiClient, GbaApiError, type AskingCompRow, type SoldCompRow } from "@/lib/gba/client";
 import type { OaSelection } from "@/lib/gba/scorer";
+import { loadLocalMarket } from "@/lib/oa/local-comps";
+import { loadDepsAndResolve } from "@/lib/oa/resolve-local";
 import type { EvaluateRequest } from "@/lib/validation";
 import { crossReferenceWholesale, type WholesaleGrid } from "@/lib/wholesale";
 
@@ -117,68 +119,145 @@ export async function runEvaluation(
     enrichNotes: enriched.notes,
   };
 
-  // --- Avenue 1: market comps ---
+  // --- Avenue 1: market comps (local OA cache first, then live API) ---
   if (body.gba) {
-    if (!token) {
+    const local = await loadLocalMarket({
+      modelId: body.gba.modelId,
+      caliberId: body.gba.caliberId,
+      condition: body.gba.condition,
+      category: body.category,
+      identity: identityCtx,
+      enrichNotes: enriched.notes,
+      manufacturer: enriched.manufacturer,
+      model: enriched.model,
+      caliber: enriched.caliber,
+    });
+    if (local && local.sold.count > 0) {
+      sold = local.sold;
+      asking = local.asking;
+      soldListings = local.soldRows;
+      askingListings = local.askingRows;
+      compMeta = local.compMeta;
+      catalogMatch = local.selection;
+      sourceStatus.gba = local.source;
+    } else if (token) {
+      try {
+        const market = await new GbaApiClient(token).market({
+          ...body.gba,
+          category: body.category,
+          identity: identityCtx,
+          useParentModel: !(identityCtx.upc || identityCtx.mpn),
+          enrichNotes: enriched.notes,
+        });
+        sold = market.sold;
+        asking = market.asking;
+        soldListings = market.soldRows;
+        askingListings = market.askingRows;
+        compMeta = market.compMeta;
+        sourceStatus.gba = `live OA (${sold.count} sold, ${asking.count} asking)`;
+      } catch (err) {
+        if (local) {
+          sold = local.sold;
+          asking = local.asking;
+          soldListings = local.soldRows;
+          askingListings = local.askingRows;
+          compMeta = local.compMeta;
+          catalogMatch = local.selection;
+          sourceStatus.gba = `${local.source} (live OA failed)`;
+        } else {
+          const status = err instanceof GbaApiError ? (err.status ?? 502) : 502;
+          throw new EvaluationError((err as Error).message, status);
+        }
+      }
+    } else if (local) {
+      sold = local.sold;
+      asking = local.asking;
+      soldListings = local.soldRows;
+      askingListings = local.askingRows;
+      compMeta = local.compMeta;
+      catalogMatch = local.selection;
+      sourceStatus.gba = local.source;
+    } else {
       throw new EvaluationError(
-        "No active Outdoor Analytics token in the Session Vault. Paste one in Connections.",
+        "No local comps for that Make/Model/Caliber and no Outdoor Analytics token. Sync OA on Import, or paste a token.",
         409,
       );
-    }
-    try {
-      const market = await new GbaApiClient(token).market({
-        ...body.gba,
-        category: body.category,
-        identity: identityCtx,
-        useParentModel: !(identityCtx.upc || identityCtx.mpn),
-        enrichNotes: enriched.notes,
-      });
-      sold = market.sold;
-      asking = market.asking;
-      soldListings = market.soldRows;
-      askingListings = market.askingRows;
-      compMeta = market.compMeta;
-      sourceStatus.gba = `ok (${sold.count} sold, ${asking.count} asking)`;
-    } catch (err) {
-      const status = err instanceof GbaApiError ? (err.status ?? 502) : 502;
-      throw new EvaluationError((err as Error).message, status);
     }
   } else {
     let resolved = false;
     if (body.autoComps) {
-      if (!token) {
-        sourceStatus.gba = "skipped (no Outdoor Analytics token in vault)";
-      } else {
-        try {
-          const market = await new GbaApiClient(token).resolveMarket(
-            {
-              manufacturer: enriched.manufacturer,
-              model: enriched.model,
-              caliber: enriched.caliber || undefined,
-              category: body.category,
-              mpn: enriched.mpn || undefined,
-              condition: compCondition,
-            },
-            marketOpts,
-          );
-          if (market) {
-            sold = market.sold;
-            asking = market.asking;
-            catalogMatch = market.selection;
-            soldListings = market.soldRows;
-            askingListings = market.askingRows;
-            compMeta = market.compMeta;
+      // Prefer synced catalog resolve + local comps when available (no token needed).
+      try {
+        const hit = await loadDepsAndResolve({
+          manufacturer: enriched.manufacturer,
+          model: enriched.model,
+          caliber: enriched.caliber || undefined,
+          condition: compCondition,
+        });
+        if (hit) {
+          const local = await loadLocalMarket({
+            modelId: hit.modelId,
+            caliberId: hit.caliberId,
+            condition: hit.conditionParam,
+            category: body.category,
+            identity: identityCtx,
+            enrichNotes: enriched.notes,
+            manufacturer: hit.manufacturer,
+            model: hit.model,
+            caliber: hit.caliber,
+          });
+          if (local && local.sold.count > 0) {
+            sold = local.sold;
+            asking = local.asking;
+            catalogMatch = hit;
+            soldListings = local.soldRows;
+            askingListings = local.askingRows;
+            compMeta = local.compMeta;
             resolved = true;
-            const s = market.selection;
-            sourceStatus.gba = `auto: ${s.manufacturer} ${s.model}${s.caliber ? ` ${s.caliber}` : ""} (${s.conditionParam}, score ${s.score.toFixed(0)}) - ${sold.count} sold, ${asking.count} asking`;
-          } else {
-            sourceStatus.gba = "no catalog match for this manufacturer/model";
+            sourceStatus.gba = local.source;
           }
-        } catch (err) {
-          const reason = redactSecrets(
-            err instanceof GbaApiError ? err.message : (err as Error).message,
-          );
-          sourceStatus.gba = `error: ${reason}`;
+        }
+      } catch {
+        /* fall through to live OA */
+      }
+
+      if (!resolved) {
+        if (!token) {
+          sourceStatus.gba =
+            sourceStatus.gba ||
+            "no local comps match — sync OA catalog on Import, or paste a token for live pull";
+        } else {
+          try {
+            const market = await new GbaApiClient(token).resolveMarket(
+              {
+                manufacturer: enriched.manufacturer,
+                model: enriched.model,
+                caliber: enriched.caliber || undefined,
+                category: body.category,
+                mpn: enriched.mpn || undefined,
+                condition: compCondition,
+              },
+              marketOpts,
+            );
+            if (market) {
+              sold = market.sold;
+              asking = market.asking;
+              catalogMatch = market.selection;
+              soldListings = market.soldRows;
+              askingListings = market.askingRows;
+              compMeta = market.compMeta;
+              resolved = true;
+              const s = market.selection;
+              sourceStatus.gba = `live auto: ${s.manufacturer} ${s.model}${s.caliber ? ` ${s.caliber}` : ""} (${s.conditionParam}, score ${s.score.toFixed(0)}) - ${sold.count} sold, ${asking.count} asking`;
+            } else {
+              sourceStatus.gba = "no catalog match for this manufacturer/model";
+            }
+          } catch (err) {
+            const reason = redactSecrets(
+              err instanceof GbaApiError ? err.message : (err as Error).message,
+            );
+            sourceStatus.gba = `error: ${reason}`;
+          }
         }
       }
     }

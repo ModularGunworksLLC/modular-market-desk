@@ -17,8 +17,14 @@
     "db:studio": "drizzle-kit studio",
     "db:init": "tsx scripts/init-db.ts",
     "test:gba": "tsx scripts/test-gba.ts",
+    "oa:sync-catalog": "tsx scripts/sync-oa-catalog.ts",
+    "oa:sync": "tsx scripts/sync-oa-full.ts",
     "flip:check": "tsx scripts/gba-flip-check.ts",
-    "import:catalogs": "tsx scripts/import-catalogs.ts"
+    "import:catalogs": "tsx scripts/import-catalogs.ts",
+    "pearce:ai-resolve": "tsx scripts/ai-resolve-no-comps.mjs",
+    "pearce:bid-pass": "node scripts/build-bid-pass-list.mjs",
+    "pearce:buy-sheet": "node scripts/build-dealer-buy-sheet.mjs",
+    "pearce:compare-oa": "tsx scripts/compare-pearce-to-oa-db.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
