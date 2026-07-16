@@ -32,6 +32,10 @@ export const evaluateSchema = z.object({
   listingUpgrades: z.number().min(0).max(5).default(DEAL_DEFAULTS.listingUpgrades),
   targetProfit: z.number().nonnegative().default(DEAL_DEFAULTS.targetProfit),
   minMarginPct: z.number().min(0).optional().default(DEAL_DEFAULTS.minMarginPct),
+  /** Exit channel for headline max bid / GO-NO-GO. */
+  sellChannel: z.enum(["gunbroker", "local"]).optional().default("gunbroker"),
+  /** Local sales tax percent (e.g. 9 for 9%). Used when sellChannel is local. */
+  salesTaxPct: z.number().min(0).max(100).optional().default(9),
 
   gba: z
     .object({

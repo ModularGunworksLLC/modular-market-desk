@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import {
   getCatalogSummaries,
   listConnections,
@@ -38,15 +36,10 @@ export default async function ImportDashboard() {
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
-      <header className="mb-6 flex items-baseline justify-between">
-        <div className="flex items-baseline gap-4">
-          <h1 className="text-xl font-semibold tracking-tight">Ingestion Dashboard</h1>
-          <Link href="/" className="text-sm text-desk-accent hover:underline">
-            &larr; Back to desk
-          </Link>
-        </div>
-        <span className="text-xs text-desk-muted">Catalogs &amp; Session Vault</span>
-      </header>
+      <div className="mb-6">
+        <h1 className="text-lg font-semibold tracking-tight">Ingestion Dashboard</h1>
+        <p className="text-xs text-desk-muted">Catalogs &amp; Session Vault</p>
+      </div>
 
       {dbError && (
         <div className="panel mb-4 border-desk-nogo">

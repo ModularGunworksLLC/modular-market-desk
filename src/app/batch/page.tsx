@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
@@ -47,15 +46,6 @@ export default function BatchPage() {
   );
   const [auctionBusy, setAuctionBusy] = useState(false);
   const [auctionMsg, setAuctionMsg] = useState<string | null>(null);
-  const [sheetLots, setSheetLots] = useState<
-    Array<{
-      lot: string;
-      title: string;
-      currentBid: number | null;
-      imageUrls?: string[];
-    }>
-  >([]);
-  const [identifyBusy, setIdentifyBusy] = useState(false);
 
   async function ingestAuction() {
     const url = auctionUrl.trim();
@@ -76,21 +66,11 @@ export default function BatchPage() {
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.error || `Ingest failed (${res.status})`);
       setText(json.batchCsv || "");
-      setSheetLots(
-        (json.sheetLots || []).map(
-          (l: { lot: string; title: string; currentBid?: number | null; imageUrls?: string[] }) => ({
-            lot: String(l.lot),
-            title: String(l.title || ""),
-            currentBid: l.currentBid ?? null,
-            imageUrls: l.imageUrls || [],
-          }),
-        ),
-      );
       setAuctionMsg(
         `Loaded ${json.sheetLots?.length ?? 0} firearm lots` +
           (json.skipped ? ` (${json.skipped} non-firearm skipped)` : "") +
           (json.warnings?.length ? ` · ${json.warnings.join(" ")}` : "") +
-          " · Optional: AI resolve make/model next",
+          " · Titles parse heuristically — fix Make/Model in the sheet if needed, then Run batch",
       );
       setFileStatus({
         kind: "ok",
@@ -101,45 +81,6 @@ export default function BatchPage() {
       setAuctionMsg(err instanceof Error ? err.message : "Ingest failed");
     } finally {
       setAuctionBusy(false);
-    }
-  }
-
-  async function aiResolveLots() {
-    if (sheetLots.length === 0) {
-      setAuctionMsg("Ingest an auction URL first (needs lot titles / images).");
-      return;
-    }
-    setIdentifyBusy(true);
-    setAuctionMsg(null);
-    setError(null);
-    try {
-      const res = await fetch("/api/batch/identify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lots: sheetLots.map((l) => ({
-            lot: l.lot,
-            title: l.title,
-            imageUrls: l.imageUrls || [],
-            currentBid: l.currentBid,
-            buyerPremiumPct: Number(defaults.buyerPremiumPct) || 15,
-          })),
-          concurrency: 2,
-          maxImagesPerLot: 2,
-        }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error || `AI resolve failed (${res.status})`);
-      setText(json.batchCsv || "");
-      setAuctionMsg(
-        `AI resolved ${json.resolved}/${json.resolved + json.failed} lots` +
-          (json.failed ? ` (${json.failed} failed — check titles)` : "") +
-          " · Review sheet, then Run batch",
-      );
-    } catch (err) {
-      setAuctionMsg(err instanceof Error ? err.message : "AI resolve failed");
-    } finally {
-      setIdentifyBusy(false);
     }
   }
 
@@ -304,22 +245,12 @@ export default function BatchPage() {
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
-      <header className="mb-6 flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Batch Buy-Sheet</h1>
-          <p className="text-xs text-desk-muted">
-            Paste or upload an auction manifest — get Max Bid, GO/NO-GO, and dealer floor on every lot.
-          </p>
-        </div>
-        <nav className="flex items-baseline gap-4 text-xs">
-          <Link href="/" className="text-desk-accent hover:underline">
-            Single deal
-          </Link>
-          <Link href="/import" className="text-desk-accent hover:underline">
-            Ingestion
-          </Link>
-        </nav>
-      </header>
+      <div className="mb-6">
+        <h1 className="text-lg font-semibold tracking-tight">Batch Buy-Sheet</h1>
+        <p className="text-xs text-desk-muted">
+          Paste or upload an auction manifest — Max Bid, GO/NO-GO, and dealer floor per lot.
+        </p>
+      </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[400px_minmax(0,1fr)]">
         <section className="panel space-y-3 lg:sticky lg:top-4 lg:self-start">
@@ -377,28 +308,18 @@ export default function BatchPage() {
                 onChange={(e) => setAuctionUrl(e.target.value)}
                 placeholder="https://bids.auctionbypearce.com/auctions/..."
               />
-              <button
-                type="button"
-                disabled={auctionBusy || !auctionUrl.trim()}
-                onClick={() => void ingestAuction()}
-                className="rounded-md bg-desk-accent px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
-              >
-                {auctionBusy ? "Fetching lots…" : "Load firearm lots"}
-              </button>
-            </div>
             <button
               type="button"
-              disabled={identifyBusy || sheetLots.length === 0}
-              onClick={() => void aiResolveLots()}
-              className="w-full rounded-md border border-desk-accent/50 px-3 py-2 text-xs font-semibold text-desk-accent hover:bg-desk-accent/10 disabled:opacity-40"
+              disabled={auctionBusy || !auctionUrl.trim()}
+              onClick={() => void ingestAuction()}
+              className="rounded-md bg-desk-accent px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
             >
-              {identifyBusy
-                ? "AI identifying lots…"
-                : `AI resolve make/model (${sheetLots.length || 0} lots)`}
+              {auctionBusy ? "Fetching lots…" : "Load firearm lots"}
             </button>
+            </div>
             <p className="text-[11px] text-desk-muted">
-              1) Load lots from URL · 2) AI resolve titles/photos → Make/Model · 3) Run buy-sheet (set BP 15% for
-              Pearce). Needs Gemini or OpenAI key.
+              Load lots from URL → review/fix Make/Model in the sheet (title heuristics, no AI) → set BP (15% for
+              Pearce) → Run buy-sheet. Single-gun Max Bid: use Desk home OA Make → Model → Caliber pickers.
             </p>
             {auctionMsg && <p className="text-xs text-desk-text">{auctionMsg}</p>}
           </div>

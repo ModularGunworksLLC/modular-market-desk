@@ -1,6 +1,8 @@
 /** Shared types for the arbitrage math engine. Pure data - no I/O. */
 
 export type SellRoute = "gunbroker" | "local_al";
+/** User-selected exit channel for headline max bid / verdict. */
+export type SellChannel = "gunbroker" | "local";
 export type Verdict = "GO" | "NO-GO";
 export type ScenarioLabel = "P25" | "Median" | "P75";
 export type DecisionAnchor = "p25-sold" | "low-asking";
@@ -34,6 +36,13 @@ export interface DealInput {
   targetProfit: number;
   /** Legacy field — not used for verdict or max bid (kept for API compat). */
   minMarginPct: number;
+  /**
+   * Local sales-tax rate as a fraction (e.g. 0.09 for 9%).
+   * Only affects local_al net / local max bid.
+   */
+  salesTaxRate: number;
+  /** Which exit channel drives verdict + headline max bid. Default gunbroker. */
+  sellChannel: SellChannel;
 }
 
 export interface RouteBreakdown {

@@ -20,6 +20,7 @@ const config: Config = {
         },
       },
       fontFamily: {
+        sans: ["var(--font-desk)", "Segoe UI", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
       screens: {

@@ -83,6 +83,8 @@ describe("evaluateDeal end-to-end", () => {
     listingUpgrades: 3,
     targetProfit: 50,
     minMarginPct: 0,
+    salesTaxRate: 0.09,
+    sellChannel: "gunbroker",
   };
   const sold = summarize([700, 750, 800, 820, 850, 900]);
 

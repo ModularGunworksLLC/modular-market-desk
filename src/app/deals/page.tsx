@@ -47,18 +47,10 @@ export default function DealsPage() {
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
-      <header className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
-        <div className="flex items-baseline gap-4">
-          <h1 className="text-xl font-semibold tracking-tight">Wholesale deal scanner</h1>
-          <Link href="/" className="text-sm text-desk-accent hover:underline">
-            &larr; Desk
-          </Link>
-          <Link href="/import" className="text-sm text-desk-accent hover:underline">
-            Import / sync
-          </Link>
-        </div>
-        <span className="text-xs text-desk-muted">2nd Amendment Wholesale · GB exit math</span>
-      </header>
+      <div className="mb-6">
+        <h1 className="text-lg font-semibold tracking-tight">Wholesale deal scanner</h1>
+        <p className="text-xs text-desk-muted">2nd Amendment Wholesale · GB exit math</p>
+      </div>
 
       <section className="panel mb-4">
         <p className="mb-3 text-sm text-desk-muted">

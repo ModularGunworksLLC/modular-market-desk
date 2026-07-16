@@ -190,6 +190,8 @@ async function evaluateRow(
     listingUpgrades: defaults.listingUpgrades,
     targetProfit: defaults.targetProfit,
     minMarginPct: 0,
+    sellChannel: "gunbroker",
+    salesTaxPct: DEAL_DEFAULTS.salesTaxPct,
     autoComps: true,
   };
 

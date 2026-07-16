@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { CatalogCombobox } from "@/components/desk/CatalogCombobox";
 
 type CatalogItem = {
   id: number;
@@ -46,6 +48,9 @@ export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPi
   const [caliberId, setCaliberId] = useState<number | "">("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const lastPickKey = useRef("");
+  const onPickRef = useRef(onPick);
+  onPickRef.current = onPick;
 
   useEffect(() => {
     setLoading(true);
@@ -66,9 +71,9 @@ export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPi
     setCaliberId("");
     setModels([]);
     setCalibers([]);
+    lastPickKey.current = "";
   }, [cond]);
 
-  // Prefill make from free-text brand when possible
   useEffect(() => {
     if (!manufacturers.length || !manufacturer.trim()) return;
     const q = manufacturer.trim().toLowerCase();
@@ -113,7 +118,6 @@ export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPi
     setCaliberId("");
   }, [cond, modelId]);
 
-  // Prefill model / caliber from free text once lists load
   useEffect(() => {
     if (!models.length || !model.trim()) return;
     const q = model.trim().toLowerCase();
@@ -132,18 +136,16 @@ export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPi
     if (hit) setCaliberId(hit.id);
   }, [calibers, caliber]);
 
-  const selectedCaliber = useMemo(
-    () => calibers.find((c) => c.id === caliberId) ?? null,
-    [calibers, caliberId],
-  );
-
-  function applyCaliber(id: number) {
-    setCaliberId(id);
+  useEffect(() => {
+    if (typeof mfrId !== "number" || typeof modelId !== "number" || typeof caliberId !== "number") return;
     const mfr = manufacturers.find((m) => m.id === mfrId);
     const mod = models.find((m) => m.id === modelId);
-    const cal = calibers.find((c) => c.id === id);
+    const cal = calibers.find((c) => c.id === caliberId);
     if (!mfr || !mod || !cal) return;
-    onPick({
+    const key = `${cond}:${mfr.id}:${mod.id}:${cal.id}`;
+    if (key === lastPickKey.current) return;
+    lastPickKey.current = key;
+    onPickRef.current({
       manufacturerId: mfr.id,
       manufacturer: mfr.name,
       modelId: mod.id,
@@ -152,84 +154,70 @@ export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPi
       caliber: cal.name,
       condition: cond,
     });
-  }
+  }, [mfrId, modelId, caliberId, manufacturers, models, calibers, cond]);
 
-  const commonFirst = useMemo(() => {
+  const selectedCaliber = useMemo(
+    () => calibers.find((c) => c.id === caliberId) ?? null,
+    [calibers, caliberId],
+  );
+
+  const makeItems = useMemo(() => {
     const common = manufacturers.filter((m) => m.isCommon);
     const rest = manufacturers.filter((m) => !m.isCommon);
-    return { common, rest };
+    const ordered = common.length ? [...common, ...rest] : manufacturers;
+    return ordered.map((m) => ({
+      id: m.id,
+      name: m.name,
+      hint: m.modelCount != null ? `${m.modelCount} models` : undefined,
+    }));
   }, [manufacturers]);
+
+  const modelItems = useMemo(
+    () =>
+      models.map((m) => ({
+        id: m.id,
+        name: m.name,
+        hint: m.caliberCount != null ? `${m.caliberCount} cal` : undefined,
+      })),
+    [models],
+  );
 
   return (
     <div className="col-span-2 space-y-2 rounded-md border border-desk-border bg-desk-panel2/60 p-3">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-desk-muted">
-          OA catalog pick (Make → Model → Caliber)
+          OA catalog (Make → Model → Caliber)
         </h3>
         <span className="text-[10px] text-desk-muted">{cond} comps</span>
       </div>
-      <p className="text-[11px] text-desk-muted">
-        Pick from the synced Outdoor Analytics catalog so Evaluate pulls exact local comps — same flow as OA’s
-        dropdowns.
-      </p>
+      <p className="text-[11px] text-desk-muted">Type to search Make or Model, then pick Caliber.</p>
 
       {loading && <p className="text-xs text-desk-muted">Loading manufacturers…</p>}
       {error && <p className="text-xs text-desk-nogo">{error}</p>}
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <div>
-          <label className="field-label">Make</label>
-          <select
-            className="field-input"
-            value={mfrId === "" ? "" : String(mfrId)}
-            onChange={(e) => setMfrId(e.target.value ? Number(e.target.value) : "")}
-            disabled={!manufacturers.length}
-          >
-            <option value="">Select make…</option>
-            {commonFirst.common.length > 0 && (
-              <optgroup label="Common">
-                {commonFirst.common.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            <optgroup label="All">
-              {(commonFirst.common.length ? commonFirst.rest : manufacturers).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-        </div>
-        <div>
-          <label className="field-label">Model</label>
-          <select
-            className="field-input"
-            value={modelId === "" ? "" : String(modelId)}
-            onChange={(e) => setModelId(e.target.value ? Number(e.target.value) : "")}
-            disabled={!models.length}
-          >
-            <option value="">{mfrId ? "Select model…" : "Pick make first"}</option>
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <CatalogCombobox
+          label="Make"
+          items={makeItems}
+          value={mfrId}
+          onChange={setMfrId}
+          placeholder="Search make…"
+          disabled={!manufacturers.length}
+        />
+        <CatalogCombobox
+          label="Model"
+          items={modelItems}
+          value={modelId}
+          onChange={setModelId}
+          placeholder={mfrId ? "Search model…" : "Pick make first"}
+          disabled={!models.length}
+        />
         <div>
           <label className="field-label">Caliber</label>
           <select
             className="field-input"
             value={caliberId === "" ? "" : String(caliberId)}
-            onChange={(e) => {
-              const id = e.target.value ? Number(e.target.value) : NaN;
-              if (Number.isFinite(id)) applyCaliber(id);
-              else setCaliberId("");
-            }}
+            onChange={(e) => setCaliberId(e.target.value ? Number(e.target.value) : "")}
             disabled={!calibers.length}
           >
             <option value="">{modelId ? "Select caliber…" : "Pick model first"}</option>

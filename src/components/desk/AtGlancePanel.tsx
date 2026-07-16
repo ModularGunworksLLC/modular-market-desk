@@ -87,13 +87,13 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
   return (
     <div className="space-y-3">
       <div
-        className={`panel border-2 ${
-          viable ? "border-desk-go/50 bg-desk-go/5" : "border-desk-nogo/40 bg-desk-nogo/5"
+        className={`panel border-2 transition-[border-color,background-color] duration-300 ${
+          viable ? "border-desk-go/60 bg-desk-go/10" : "border-desk-nogo/50 bg-desk-nogo/10"
         }`}
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-medium uppercase tracking-widest text-desk-muted">At a glance</p>
+            <p className="text-xs font-medium uppercase tracking-widest text-desk-muted">Result</p>
             <h2 className="text-lg font-bold text-desk-text">{title}</h2>
             {compMeta && (
               <p
@@ -119,11 +119,12 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
         {!isVendor && (
           <div className="mt-4">
             <p className="text-xs uppercase tracking-widest text-desk-muted">{heroLabel}</p>
-            <p className={`num text-5xl font-black tracking-tight ${viable ? "text-desk-go" : "text-desk-nogo"}`}>
+            <p className={`num text-5xl font-black tracking-tight transition-opacity duration-300 ${viable ? "text-desk-go" : "text-desk-nogo"}`}>
               {sold.count > 0 ? usd(heroNumber ?? undefined) : "—"}
             </p>
             <p className="mt-1 text-sm text-desk-muted">
-              Walk-away — do not exceed this {isTradeIn ? "cash offer" : "hammer"}.
+              Walk-away via {result.input.sellChannel === "local" ? "local sale" : "GunBroker"} — do not exceed
+              this {isTradeIn ? "cash offer" : "hammer"}.
               {sold.count > 0 ? ` Est. resale ~${usd(sold.median)} median / ${usd(sold.p25)} P25 sold.` : ""}
             </p>
             {result.profitMaxHammer > result.effectiveMaxHammer + 0.01 && (

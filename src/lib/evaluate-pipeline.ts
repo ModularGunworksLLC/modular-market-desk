@@ -90,6 +90,8 @@ export async function runEvaluation(
     listingUpgrades: body.listingUpgrades,
     targetProfit: body.targetProfit,
     minMarginPct: body.minMarginPct,
+    salesTaxRate: (body.salesTaxPct ?? 9) / 100,
+    sellChannel: body.sellChannel ?? "gunbroker",
   };
 
   const sourceStatus: Record<string, string> = {};

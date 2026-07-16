@@ -5,22 +5,19 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AtGlancePanel } from "@/components/desk/AtGlancePanel";
 import { OaCatalogPickers } from "@/components/desk/OaCatalogPickers";
-import { PhotoIdentifyPanel } from "@/components/desk/PhotoIdentifyPanel";
 import { SerialStolenPanel } from "@/components/desk/SerialStolenPanel";
-import type { FirearmIdentity } from "@/lib/identify/types";
 import type { StolenCheckResult } from "@/lib/stolen/hotgunz";
 import { allInCost } from "@/lib/arbitrage/acquisition";
 import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import { evaluateDeal } from "@/lib/arbitrage/evaluate";
 import type { DealInput, DecisionAnchor, EvaluationResult, PriceStats, ScenarioResult } from "@/lib/arbitrage/types";
 import type { CompFilterMeta } from "@/lib/comp-filter";
-import { matchTierLabel } from "@/lib/comp-filter";
 import type { AskingCompRow, SoldCompRow } from "@/lib/gba/client";
 import type { OaSelection } from "@/lib/gba/scorer";
 import type { DealInsights } from "@/lib/deal-insights";
 import { buildDealInsights, DEALER_OPTIONS } from "@/lib/deal-insights";
+import { loadDealerDefaults, type DeskDealerDefaults } from "@/lib/desk-defaults";
 import type { DeskMode, UsedSubtype, Workflow } from "@/lib/desk-mode";
-import { gunBrokerListingUrl } from "@/lib/gunbroker-url";
 import type { WholesaleGrid } from "@/lib/wholesale";
 
 const MODE_STORAGE_KEY = "desk-workflow";
@@ -44,13 +41,6 @@ interface ApiResponse {
 const usd = (n: number | undefined) =>
   n == null || !Number.isFinite(n) ? "-" : n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-function confidenceLabel(score: number | undefined): string {
-  if (score == null) return "—";
-  if (score >= 90) return "High confidence";
-  if (score >= 75) return "Good match";
-  return "Fair match";
-}
-
 export default function DeskPage() {
   const [workflow, setWorkflow] = useState<Workflow>("used");
   const [usedSubtype, setUsedSubtype] = useState<UsedSubtype>("auction");
@@ -71,6 +61,8 @@ export default function DeskPage() {
     buyerPaysCardFee: true,
     listingUpgrades: "3",
     targetProfit: "50",
+    salesTaxPct: "9",
+    sellChannel: "gunbroker" as "gunbroker" | "local",
     condition: "any",
     soldPrices: "",
     gbaModelId: "",
@@ -80,7 +72,6 @@ export default function DeskPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [vaultOk, setVaultOk] = useState<boolean | null>(null);
-  const [vaultMsg, setVaultMsg] = useState<string>("");
   const [serial, setSerial] = useState("");
   const [stolen, setStolen] = useState<StolenCheckResult | null>(null);
   const [allowStolenProceed, setAllowStolenProceed] = useState(false);
@@ -92,6 +83,27 @@ export default function DeskPage() {
     if (sub === "auction" || sub === "tradein") setUsedSubtype(sub);
     const legacy = localStorage.getItem("desk-acquisition-mode");
     if (!saved && legacy === "dealer") setWorkflow("vendor");
+
+    function applyDefaults(d: DeskDealerDefaults) {
+      setForm((f) => ({
+        ...f,
+        targetProfit: d.targetProfit,
+        salesTaxPct: d.salesTaxPct,
+        outboundShip: d.outboundShip,
+        listingUpgrades: d.listingUpgrades,
+        buyerPremiumPct: d.buyerPremiumPct,
+        buyerPaysOutboundShip: d.buyerPaysOutboundShip,
+        buyerPaysCardFee: d.buyerPaysCardFee,
+        sellChannel: d.sellChannel,
+      }));
+    }
+    applyDefaults(loadDealerDefaults());
+    const onDefaults = (e: Event) => {
+      const detail = (e as CustomEvent<DeskDealerDefaults>).detail;
+      if (detail) applyDefaults(detail);
+    };
+    window.addEventListener("desk-defaults-changed", onDefaults);
+    return () => window.removeEventListener("desk-defaults-changed", onDefaults);
   }, []);
 
   function selectWorkflow(w: Workflow) {
@@ -112,13 +124,11 @@ export default function DeskPage() {
   useEffect(() => {
     fetch("/api/vault/status")
       .then((r) => r.json())
-      .then((j: { ok?: boolean; message?: string }) => {
+      .then((j: { ok?: boolean }) => {
         setVaultOk(Boolean(j.ok));
-        setVaultMsg(j.message ?? "");
       })
       .catch(() => {
         setVaultOk(false);
-        setVaultMsg("Could not check vault status.");
       });
   }, []);
 
@@ -183,6 +193,8 @@ export default function DeskPage() {
           listingUpgrades: Number(form.listingUpgrades),
           targetProfit: Number(form.targetProfit),
           minMarginPct: 0,
+          sellChannel: form.sellChannel,
+          salesTaxPct: Number(form.salesTaxPct) || 0,
           autoComps: true,
           ...(form.gbaModelId.trim() && form.gbaCaliberId.trim()
             ? {
@@ -274,6 +286,8 @@ export default function DeskPage() {
       listingUpgrades: Number(form.listingUpgrades) || 0,
       targetProfit: Number(form.targetProfit) || 0,
       minMarginPct: 0,
+      salesTaxRate: (Number(form.salesTaxPct) || 0) / 100,
+      sellChannel: form.sellChannel,
     };
   }
 
@@ -396,37 +410,19 @@ export default function DeskPage() {
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
       {vaultOk === false && (
-        <div className="mb-4 rounded-lg border border-desk-nogo/50 bg-desk-nogo/10 px-4 py-3 text-sm">
-          <p className="font-semibold text-desk-nogo">Live comps unavailable</p>
-          <p className="mt-1 text-desk-muted">{vaultMsg}</p>
-          <p className="mt-2 text-xs text-desk-muted">
-            Fix: stop the server, run <code className="text-desk-accent">npm run dev</code>, open{" "}
-            <Link href="/import" className="text-desk-accent hover:underline">
-              Import
-            </Link>
-            , re-paste your Bearer token, save, then evaluate again.
-          </p>
-        </div>
-      )}
-      {vaultOk === true && (
-        <p className="mb-4 text-xs text-desk-go">{vaultMsg}</p>
+        <p className="mb-4 text-xs text-desk-muted">
+          Live OA token needs refresh on{" "}
+          <Link href="/import" className="text-desk-accent hover:underline">
+            Import → Connections
+          </Link>{" "}
+          (only needed to re-sync catalogs). Evaluate still uses your local OA comps DB.
+        </p>
       )}
 
-      <header className="mb-6 flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-xl font-semibold tracking-tight">Evaluator — Max Bid Desk</h1>
-        <nav className="flex items-baseline gap-4 text-xs">
-          <Link href="/batch" className="text-desk-accent hover:underline">
-            Batch buy-sheet
-          </Link>
-          <Link href="/deals" className="text-desk-accent hover:underline">
-            Wholesale deals
-          </Link>
-          <Link href="/import" className="text-desk-accent hover:underline">
-            Ingestion dashboard
-          </Link>
-          <span className="text-desk-muted">Arbitrage Calculator</span>
-        </nav>
-      </header>
+      <div className="mb-4">
+        <h1 className="text-lg font-semibold tracking-tight text-desk-text">Evaluate</h1>
+        <p className="text-xs text-desk-muted">Identify → Local or GB → max bid from sold comps.</p>
+      </div>
 
       <div className="panel mb-4 space-y-3">
         <h2 className="text-sm font-semibold text-desk-muted">Workflow</h2>
@@ -441,7 +437,7 @@ export default function DeskPage() {
             }`}
           >
             <span className="block font-semibold">Used</span>
-            <span className="mt-0.5 block text-[10px] opacity-80">Photos / auction → max bid or offer</span>
+            <span className="mt-0.5 block text-[10px] opacity-80">OA catalog → max bid or offer</span>
           </button>
           <button
             type="button"
@@ -484,28 +480,8 @@ export default function DeskPage() {
         )}
       </div>
 
-      {workflow === "used" ? (
+      {workflow === "used" && (
         <div className="mb-4 space-y-4">
-          <PhotoIdentifyPanel
-            gunTypeHint={form.category}
-            onApply={(patch, identity: FirearmIdentity) => {
-              setForm((f) => ({
-                ...f,
-                manufacturer: patch.manufacturer || f.manufacturer,
-                model: patch.model || f.model,
-                caliber: patch.caliber || f.caliber,
-                category: patch.category || f.category,
-                condition: patch.condition || f.condition,
-              }));
-              if (identity.serial) {
-                setSerial(identity.serial);
-                setStolen(null);
-                setAllowStolenProceed(false);
-              }
-              setData(null);
-              setError(null);
-            }}
-          />
           <SerialStolenPanel
             serial={serial}
             onSerialChange={(v) => {
@@ -530,16 +506,16 @@ export default function DeskPage() {
             </label>
           )}
         </div>
-      ) : (
-        <p className="mb-4 rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-xs text-desk-muted">
-          Photo identify is for Used guns. Switch to <strong className="text-desk-text">Used</strong> above to
-          upload images.
-        </p>
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)] 3xl:grid-cols-[400px_minmax(0,1fr)]">
-        <form onSubmit={submit} className="panel space-y-3 lg:sticky lg:top-4 lg:self-start">
-          <h2 className="text-sm font-semibold text-desk-muted">Gun</h2>
+        <form onSubmit={submit} className="panel space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <div>
+            <h2 className="text-sm font-semibold text-desk-text">1. What is the gun?</h2>
+            <p className="mt-0.5 text-[11px] text-desk-muted">
+              Pick Make → Model → Caliber from the OA catalog.
+            </p>
+          </div>
           <OaCatalogPickers
             condition={isVendor ? "new" : isTradeIn ? "used" : form.condition}
             manufacturer={form.manufacturer}
@@ -558,46 +534,6 @@ export default function DeskPage() {
             }}
           />
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Brand (override)" v={form.manufacturer} on={set("manufacturer")} />
-            <Field label="Model (override)" v={form.model} on={set("model")} />
-            <Field label="Caliber (override)" v={form.caliber} on={set("caliber")} />
-            {isVendor && (
-              <div className="col-span-2 grid gap-3 sm:grid-cols-2">
-                <FieldHint
-                  label="UPC"
-                  hint="Strongly recommended — tightens comps to your exact SKU."
-                  v={form.upc}
-                  on={set("upc")}
-                  onBlur={() => void lookupCatalogUpc(form.upc)}
-                />
-                <FieldHint
-                  label="MPN / item #"
-                  hint="Manufacturer model number (e.g. 3523) — filters wrong variants."
-                  v={form.mpn}
-                  on={set("mpn")}
-                />
-              </div>
-            )}
-            {!isVendor && (
-              <details className="col-span-2 text-xs text-desk-muted">
-                <summary className="cursor-pointer">UPC / MPN (optional — tightens comps)</summary>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <input
-                    className="field-input"
-                    value={form.upc}
-                    onChange={set("upc")}
-                    onBlur={() => void lookupCatalogUpc(form.upc)}
-                    placeholder="UPC"
-                  />
-                  <input
-                    className="field-input"
-                    value={form.mpn}
-                    onChange={set("mpn")}
-                    placeholder="MPN / item #"
-                  />
-                </div>
-              </details>
-            )}
             <div>
               <label className="field-label">Category</label>
               <select
@@ -617,23 +553,6 @@ export default function DeskPage() {
                 <option value="shotgun">Shotgun</option>
               </select>
             </div>
-            {isDealer && (
-              <div className="col-span-2">
-                <label className="field-label">Source dealer (optional)</label>
-                <select
-                  className="field-input"
-                  value={form.sourceDealer}
-                  onChange={(e) => setForm((f) => ({ ...f, sourceDealer: e.target.value }))}
-                >
-                  <option value="">— not set —</option>
-                  {DEALER_OPTIONS.map((d) => (
-                    <option key={d.value} value={d.value}>
-                      {d.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
             {!isVendor && (
               <div>
                 <label className="field-label">Condition (comps)</label>
@@ -647,143 +566,224 @@ export default function DeskPage() {
                 </select>
               </div>
             )}
+            {isVendor && (
+              <div className="col-span-2 grid gap-3 sm:grid-cols-2">
+                <FieldHint
+                  label="UPC"
+                  hint="Strongly recommended — tightens comps to your exact SKU."
+                  v={form.upc}
+                  on={set("upc")}
+                  onBlur={() => void lookupCatalogUpc(form.upc)}
+                />
+                <FieldHint label="MPN / item #" hint="Filters wrong variants." v={form.mpn} on={set("mpn")} />
+                <div className="col-span-2">
+                  <label className="field-label">Source dealer (optional)</label>
+                  <select
+                    className="field-input"
+                    value={form.sourceDealer}
+                    onChange={(e) => setForm((f) => ({ ...f, sourceDealer: e.target.value }))}
+                  >
+                    <option value="">— not set —</option>
+                    {DEALER_OPTIONS.map((d) => (
+                      <option key={d.value} value={d.value}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+            {!isVendor && (
+              <details className="col-span-2 text-xs text-desk-muted">
+                <summary className="cursor-pointer">UPC / MPN / text overrides (rare)</summary>
+                <p className="mt-1 text-[11px]">
+                  Only if the OA leaf is wrong or missing — normally the dropdowns above are enough.
+                </p>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <Field label="Brand override" v={form.manufacturer} on={set("manufacturer")} />
+                  <Field label="Model override" v={form.model} on={set("model")} />
+                  <Field label="Caliber override" v={form.caliber} on={set("caliber")} />
+                  <input
+                    className="field-input"
+                    value={form.upc}
+                    onChange={set("upc")}
+                    onBlur={() => void lookupCatalogUpc(form.upc)}
+                    placeholder="UPC"
+                  />
+                  <input
+                    className="field-input"
+                    value={form.mpn}
+                    onChange={set("mpn")}
+                    placeholder="MPN / item #"
+                  />
+                </div>
+              </details>
+            )}
           </div>
 
-          <h2 className="text-sm font-semibold text-desk-muted">
-            {isVendor ? "Your dealer cost" : "Acquisition fees"}
-          </h2>
-          <p className="text-[11px] leading-snug text-desk-muted">
-            {isVendor
-              ? "Price on the vendor ad — compared to CSV catalogs and lowest active asks."
-              : "Buyer’s premium and inbound ship feed the max bid. Check live hammer under the hero after Evaluate."}
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            {isVendor && (
-              <FieldHint
-                label="Dealer price ($)"
-                hint="What you would pay on this ad."
-                v={form.vendorCost}
-                on={set("vendorCost")}
-              />
-            )}
-            {isUsedAuction && (
-              <FieldHint
-                label="Buyer’s premium %"
-                hint="Include CC in this number (e.g. 15% + 3.5% = 18.5%)."
-                v={form.buyerPremiumPct}
-                on={set("buyerPremiumPct")}
-              />
-            )}
+          <div className="border-t border-desk-border pt-3">
+            <h2 className="text-sm font-semibold text-desk-text">2. How will you sell it?</h2>
+            <p className="mt-0.5 mb-2 text-[11px] text-desk-muted">
+              Max bid / GO-NO-GO use this channel’s fees only.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, sellChannel: "local" }))}
+                className={`rounded-md border px-3 py-2.5 text-left text-xs transition ${
+                  form.sellChannel === "local"
+                    ? "border-desk-accent bg-desk-accent/15 text-desk-text"
+                    : "border-desk-border text-desk-muted hover:border-desk-muted"
+                }`}
+              >
+                <span className="block font-semibold">Local</span>
+                <span className="mt-0.5 block text-[10px] opacity-80">In-store / pickup · sales tax</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, sellChannel: "gunbroker" }))}
+                className={`rounded-md border px-3 py-2.5 text-left text-xs transition ${
+                  form.sellChannel === "gunbroker"
+                    ? "border-desk-accent bg-desk-accent/15 text-desk-text"
+                    : "border-desk-border text-desk-muted hover:border-desk-muted"
+                }`}
+              >
+                <span className="block font-semibold">GunBroker</span>
+                <span className="mt-0.5 block text-[10px] opacity-80">Ship · listing · card fees</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-desk-border pt-3 space-y-3">
+            <div>
+              <h2 className="text-sm font-semibold text-desk-text">3. Your money rules</h2>
+              <p className="mt-0.5 text-[11px] text-desk-muted">
+                Minimum profit you need after exit fees (at conservative P25 sold).
+              </p>
+            </div>
             <FieldHint
-              label="Inbound ship ($)"
-              hint="Shipping to you — leave blank for $0."
-              v={form.inboundShip}
-              on={set("inboundShip")}
+              label="Min profit ($)"
+              hint="GO when channel profit at P25 ≥ this amount."
+              v={form.targetProfit}
+              on={set("targetProfit")}
             />
-            {(isVendor || isUsedAuction) && (
-              <div className="col-span-2 rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-sm">
-                <span className="text-desk-muted">Your all-in cost </span>
-                <span className="num font-bold text-desk-text">{usd(previewAllIn)}</span>
+
+            {form.sellChannel === "local" ? (
+              <FieldHint
+                label="Sales tax %"
+                hint="Backed out of the local sell price (e.g. 9 for Alabama)."
+                v={form.salesTaxPct}
+                on={set("salesTaxPct")}
+              />
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <FieldHint
+                    label="Outbound ship ($)"
+                    hint="Listing ship charge (buyer pays if checked below)."
+                    v={form.outboundShip}
+                    on={set("outboundShip")}
+                  />
+                  <FieldHint
+                    label="Listing fees ($)"
+                    hint="GunBroker listing upgrades — always deducted from your net."
+                    v={form.listingUpgrades}
+                    on={set("listingUpgrades")}
+                  />
+                </div>
+                <div className="flex flex-col gap-2 rounded-md border border-desk-border bg-desk-panel2 p-3">
+                  <BuyerPaidFeeToggle
+                    id="buyer-pays-ship"
+                    title="Buyer pays outbound shipping"
+                    hint="Ship not deducted from max bid / net."
+                    checked={form.buyerPaysOutboundShip}
+                    onChange={(checked) => setForm((f) => ({ ...f, buyerPaysOutboundShip: checked }))}
+                  />
+                  <BuyerPaidFeeToggle
+                    id="buyer-pays-card"
+                    title="Buyer pays card / CC fees"
+                    hint="~3% processing not deducted from your net."
+                    checked={form.buyerPaysCardFee}
+                    onChange={(checked) => setForm((f) => ({ ...f, buyerPaysCardFee: checked }))}
+                  />
+                </div>
               </div>
             )}
           </div>
 
-          <h2 className="text-sm font-semibold text-desk-muted">If you sell (exit assumptions)</h2>
-          <p className="text-[11px] leading-snug text-desk-muted">
-            GunBroker route only. Checkboxes reflect what the <strong className="text-desk-text">buyer</strong> pays
-            — when checked, that cost is not deducted from your net or max screen bid.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <FieldHint
-              label="Outbound ship on listing ($)"
-              hint="Shipping charge shown on the listing (buyer pays if checked below)."
-              v={form.outboundShip}
-              on={set("outboundShip")}
-            />
-            <FieldHint
-              label="Listing upgrades ($)"
-              hint="Your GunBroker listing fee (always deducted from net)."
-              v={form.listingUpgrades}
-              on={set("listingUpgrades")}
-            />
-          </div>
-          <div className="flex flex-col gap-2 rounded-md border border-desk-border bg-desk-panel2 p-3">
-            <BuyerPaidFeeToggle
-              id="buyer-pays-ship"
-              title="Buyer pays outbound shipping"
-              hint="Shipping is not deducted from net or max screen bid."
-              checked={form.buyerPaysOutboundShip}
-              onChange={(checked) =>
-                setForm((f) => ({ ...f, buyerPaysOutboundShip: checked }))
-              }
-            />
-            <BuyerPaidFeeToggle
-              id="buyer-pays-card"
-              title="Buyer pays card processing"
-              hint="3% on item + ship is not deducted from your net."
-              checked={form.buyerPaysCardFee}
-              onChange={(checked) => setForm((f) => ({ ...f, buyerPaysCardFee: checked }))}
-            />
+          <div className="border-t border-desk-border pt-3 space-y-3">
+            <div>
+              <h2 className="text-sm font-semibold text-desk-text">
+                {isVendor ? "4. Your dealer cost" : "4. Auction / buy-side (optional)"}
+              </h2>
+              <p className="mt-0.5 text-[11px] text-desk-muted">
+                {isVendor
+                  ? "Price on the vendor ad."
+                  : isTradeIn
+                    ? "Inbound ship only — no buyer premium on trade-ins."
+                    : "Buyer’s premium + inbound ship set the max hammer. Enter live bid after Evaluate to check GO/NO-GO."}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {isVendor && (
+                <FieldHint
+                  label="Dealer price ($)"
+                  hint="What you would pay on this ad."
+                  v={form.vendorCost}
+                  on={set("vendorCost")}
+                />
+              )}
+              {isUsedAuction && (
+                <FieldHint
+                  label="Buyer’s premium %"
+                  hint="Include CC in this number if the auction stacks it (e.g. 15% + 3.5% = 18.5%)."
+                  v={form.buyerPremiumPct}
+                  on={set("buyerPremiumPct")}
+                />
+              )}
+              <FieldHint
+                label="Inbound ship ($)"
+                hint="Shipping to you — leave blank for $0."
+                v={form.inboundShip}
+                on={set("inboundShip")}
+              />
+              {(isVendor || isUsedAuction) && (
+                <div className="col-span-2 rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-sm">
+                  <span className="text-desk-muted">Working all-in </span>
+                  <span className="num font-bold text-desk-text">{usd(previewAllIn)}</span>
+                </div>
+              )}
+            </div>
           </div>
 
-          <h2 className="text-sm font-semibold text-desk-muted">Deal rules (GO / NO-GO)</h2>
-          <p className="text-[11px] leading-snug text-desk-muted">
-            GO when <strong className="text-desk-text">GunBroker profit @ P25</strong> ≥ target (conservative).
-            Local profit shown for comparison.
-          </p>
-          <FieldHint
-            label="Target profit ($)"
-            hint="Minimum dollars you want to keep after exit fees at P25 market (default $50)."
-            v={form.targetProfit}
-            on={set("targetProfit")}
-          />
-
-          {liveEval && soldForPreview && soldForPreview.count > 0 ? (
-            <LiveProfitBox
-              profit={liveProfit!}
-              localProfit={liveEval.localNetProfit}
-              target={liveTarget}
-              gap={profitGap!}
-              go={liveEval.verdict === "GO"}
-              exitLabel="GunBroker @ P25"
-            />
-          ) : (
-            <p className="text-[11px] text-desk-muted">Run Evaluate to see live est. profit at P25.</p>
-          )}
           <details className="text-xs text-desk-muted">
-            <summary className="cursor-pointer">OA catalog IDs (auto-filled from dropdown)</summary>
-            <p className="mt-1 text-[11px]">
-              Choosing Make → Model → Caliber above fills these. You can still paste IDs from the OA console if
-              needed.
-            </p>
+            <summary className="cursor-pointer">Advanced (OA IDs / manual solds)</summary>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Field label="Model ID" v={form.gbaModelId} on={set("gbaModelId")} />
               <Field label="Caliber ID" v={form.gbaCaliberId} on={set("gbaCaliberId")} />
             </div>
-          </details>
-          <details className="text-xs text-desk-muted">
-            <summary className="cursor-pointer">Manual sold override (optional)</summary>
             <input
               className="field-input mt-2"
               value={form.soldPrices}
               onChange={set("soldPrices")}
-              placeholder="Only if live pull fails"
+              placeholder="Manual sold prices (comma-separated)"
             />
           </details>
+
           <button
             type="submit"
-            disabled={loading}
-            className="w-full rounded-md bg-desk-accent px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            disabled={loading || !form.gbaModelId || !form.gbaCaliberId}
+            className="w-full rounded-md bg-desk-accent px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
           >
             {loading
-              ? "Loading comps…"
+              ? "Loading market comps…"
               : form.gbaModelId && form.gbaCaliberId
-                ? "Evaluate (local OA comps)"
-                : "Evaluate Deal"}
+                ? `Get ${isTradeIn ? "max offer" : "max bid"} (${form.sellChannel === "local" ? "Local" : "GB"})`
+                : "Pick Make → Model → Caliber first"}
           </button>
           {loading && (
             <p className="text-center text-xs text-desk-muted">
-              Loading OA catalog + live comps. First run after restart can take 1–3 minutes — do not refresh.
+              Pulling sold comps from local OA cache (or live OA if needed)…
             </p>
           )}
           {error && <p className="text-sm text-desk-nogo">{error}</p>}
@@ -791,9 +791,16 @@ export default function DeskPage() {
 
         <section className="space-y-4">
           {!data && !loading && (
-            <div className="panel py-12 text-center text-sm text-desk-muted">
-              Enter a gun on the left and click <strong className="text-desk-text">Evaluate Deal</strong>. Live
-              comps load from GunBroker Analytics (first run may take 1–3 minutes).
+            <div className="panel space-y-3 py-10 text-center text-sm text-desk-muted">
+              <p className="text-base font-semibold text-desk-text">Find what a gun is worth</p>
+              <ol className="mx-auto max-w-md space-y-1 text-left text-xs">
+                <li>1. Pick <strong className="text-desk-text">Make → Model → Caliber</strong> from OA</li>
+                <li>
+                  2. Choose <strong className="text-desk-text">Local</strong> or{" "}
+                  <strong className="text-desk-text">GunBroker</strong> and set min profit + fees
+                </li>
+                <li>3. Get your <strong className="text-desk-text">max bid / max offer</strong> from sold comps</li>
+              </ol>
             </div>
           )}
 
@@ -818,7 +825,9 @@ export default function DeskPage() {
 
           {isVendor && insights && insights.headlines.length > 0 && (
             <div className="panel space-y-2 border-desk-accent/35 bg-desk-accent/5">
-              <p className="text-xs font-medium uppercase tracking-widest text-desk-accent">Dealer buy — decision summary</p>
+              <p className="text-xs font-medium uppercase tracking-widest text-desk-accent">
+                Dealer buy — decision summary
+              </p>
               <ul className="space-y-1.5 text-sm text-desk-text">
                 {insights.headlines.map((line, i) => (
                   <li key={i} className="flex gap-2">
@@ -827,380 +836,91 @@ export default function DeskPage() {
                   </li>
                 ))}
               </ul>
-              {insights.marketTooSoft && (
-                <p className="text-xs font-semibold text-desk-nogo">
-                  Caution: open asking comps sit close to your all-in cost.
-                </p>
-              )}
             </div>
           )}
 
-          {isDealer && renderWholesaleBlock()}
-
-          {/* OA-style market comps (primary) */}
-          <div className="comp-hero space-y-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-widest text-desk-muted">Market comps</p>
-                <h2 className="text-lg font-bold text-desk-text">{title}</h2>
-                {data?.sourceStatus?.gba && (
-                  <p className="mt-1 text-xs text-desk-muted">{data.sourceStatus.gba}</p>
-                )}
-              </div>
-              {match && (
-                <span className="rounded-full border border-desk-border bg-desk-panel2 px-3 py-1 text-xs text-desk-muted">
-                  {confidenceLabel(match.score)} · score {match.score.toFixed(0)}
-                </span>
-              )}
-              {data?.compMeta && (
-                <span
-                  className={`rounded-full border px-3 py-1 text-xs ${
-                    data.compMeta.matchTier === "exact-upc" || data.compMeta.matchTier === "exact-mpn"
-                      ? "border-desk-go/40 bg-desk-go/10 text-desk-go"
-                      : "border-desk-nogo/40 bg-desk-nogo/10 text-desk-nogo"
-                  }`}
-                >
-                  {matchTierLabel(data.compMeta.matchTier)}
-                </span>
-              )}
-            </div>
-
-            {sold && sold.count > 0 ? (
-              <>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-desk-accent">Target price (P25 sold)</p>
-                    <p className="comp-fmv num">{usd(sold.p25)}</p>
-                    <p className="text-xs text-desk-muted">
-                      Conservative anchor · median {usd(sold.median)}
-                    </p>
-                  </div>
-                  <div className="rounded-md border border-desk-border bg-desk-panel/60 p-3">
-                    <p className="text-xs uppercase text-desk-muted">Typical market (median sold)</p>
-                    <p className="num text-2xl font-bold">{usd(sold.median)}</p>
-                    <p className="mt-2 text-xs text-desk-muted">
-                      P75 {usd(sold.p75)} · band {usd(sold.p25)}–{usd(sold.median)}
-                    </p>
-                  </div>
-                  <div className="rounded-md border border-desk-border bg-desk-panel/60 p-3">
-                    <p className="text-xs uppercase text-desk-muted">Cleaned sample</p>
-                    <p className="num text-2xl font-bold">{sold.count}</p>
-                    <p className="text-xs text-desk-muted">
-                      {data?.compMeta
-                        ? `${data.compMeta.soldOutliersRemoved} high/low outliers removed`
-                        : `Low ${usd(sold.low)} · High ${usd(sold.high)}`}
-                    </p>
-                    <p className="mt-2 text-xs text-desk-muted">
-                      Asking median (complete guns) {usd(data?.asking?.median)}
-                    </p>
-                  </div>
-                </div>
-                {data?.compMeta && (
-                  <p className="text-xs text-desk-muted">
-                    {data.compMeta.decisionNote}
-                    {data.compMeta.enrichNotes.length > 0 && (
-                      <span className="block mt-1">{data.compMeta.enrichNotes.join(" ")}</span>
-                    )}
-                  </p>
-                )}
-                <p className="text-[11px] text-desk-muted">
-                  GunBroker sold comps (cleaned). Official numbers use{" "}
-                  <strong className="text-desk-text">P25 sell + GunBroker exit</strong> (conservative).
-                </p>
-                <div>
-                  <p className="mb-1 text-xs text-desk-muted">Price distribution (sold)</p>
-                  <div className="comp-range-track">
-                    <div
-                      className="comp-range-fill"
-                      style={{ left: "0%", width: `${Math.max(8, sold.p75 - sold.low > 0 ? ((sold.p75 - sold.low) / (sold.high - sold.low)) * 100 : 100)}%` }}
-                    />
-                    <div className="comp-range-marker" style={{ left: `${Math.min(96, Math.max(2, rangePct))}%` }} />
-                  </div>
-                  <div className="mt-1 flex justify-between text-[10px] text-desk-muted num">
-                    <span>{usd(sold.low)}</span>
-                    <span>{usd(sold.high)}</span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="rounded-md border border-desk-nogo/40 bg-desk-nogo/10 p-4 text-sm">
-                <p className="font-semibold text-desk-nogo">No live sold comps loaded</p>
-                <p className="mt-1 text-desk-muted">
-                  {data?.sourceStatus?.gba ??
-                    "Run Evaluate with a saved token on Import → Connections."}
-                </p>
-                <p className="mt-2 text-xs text-desk-muted">
-                  For guns that won&apos;t auto-match (e.g. Savage 1911): on{" "}
-                  <strong>hub.outdooranalytics.com/pricing</strong>, select the gun, open Console, copy{" "}
-                  <strong>modelID</strong> and <strong>caliberID</strong>, paste under &quot;OA catalog IDs&quot; on
-                  the left, then evaluate again.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* TGV-style recent sold */}
-          {soldListings.length > 0 && (
-            <div className="panel overflow-x-auto">
-              <h3 className="mb-2 text-sm font-semibold text-desk-muted">
-                Complete-gun sold comps (P25–median band) — {soldListings.length} shown
-              </h3>
-              {data?.compMeta && data.compMeta.soldNonFirearmRemoved > 0 && (
-                <p className="mb-2 text-[11px] text-desk-muted">
-                  Excluded {data.compMeta.soldNonFirearmRemoved} sold rows (parts, mags, or below gun price floor).
-                </p>
-              )}
-              <table className="w-full min-w-[520px] text-sm">
-                <thead className="text-left text-xs uppercase text-desk-muted">
-                  <tr>
-                    <th className="py-1">Price</th>
-                    {soldListings.some((r) => r.title) && <th>Title</th>}
-                    <th>Sold</th>
-                    <th>Type</th>
-                  </tr>
-                </thead>
-                <tbody className="num">
-                  {soldListings.map((row, i) => (
-                    <tr key={i} className="border-t border-desk-border">
-                      <td className="py-1.5 font-semibold text-desk-text">{usd(row.price)}</td>
-                      {soldListings.some((r) => r.title) && (
-                        <td className="max-w-[280px] truncate font-sans text-desk-muted" title={row.title}>
-                          {row.title || "—"}
-                        </td>
-                      )}
-                      <td className="font-sans text-desk-muted">{row.salesDate || "—"}</td>
-                      <td className="font-sans text-desk-muted">{row.listingType || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {askingListings.length > 0 && (
-            <div className="panel overflow-x-auto">
-              <h3 className="mb-2 text-sm font-semibold text-desk-muted">
-                Active asking — complete guns only ({askingListings.length})
-              </h3>
-              {data?.compMeta && data.compMeta.askingIncompleteRemoved > 0 && (
-                <p className="mb-2 text-[11px] text-desk-muted">
-                  Excluded {data.compMeta.askingIncompleteRemoved} asking rows (parts, receivers, mags, or junk).
-                </p>
-              )}
-              <table className="w-full min-w-[640px] text-sm">
-                <thead className="text-left text-xs uppercase text-desk-muted">
-                  <tr>
-                    <th className="py-1">Price</th>
-                    <th>Title</th>
-                    <th>Location</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {askingListings.map((row, i) => (
-                    <tr key={i} className="border-t border-desk-border">
-                      <td className="num py-1.5 font-semibold">{usd(row.price)}</td>
-                      <td className="max-w-[320px] truncate font-sans">
-                        {(() => {
-                          const listingUrl = gunBrokerListingUrl(row.itemId);
-                          return listingUrl ? (
-                            <a
-                              href={listingUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-desk-accent hover:underline"
-                              title={row.title || undefined}
-                            >
-                              {row.title || `Item ${row.itemId}`}
-                            </a>
-                          ) : (
-                            row.title || "—"
-                          );
-                        })()}
-                      </td>
-                      <td className="font-sans text-desk-muted">{row.location || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {liveEval && soldForPreview && soldForPreview.count > 0 && (
-            <LiveProfitBox
-              profit={liveProfit!}
-              localProfit={liveEval.localNetProfit}
-              target={liveTarget}
-              gap={profitGap!}
-              go={liveEval.verdict === "GO"}
-              exitLabel="GunBroker @ P25"
-              large
-            />
-          )}
-
-          {r && sold && sold.count > 0 && (
-            <ExitComparisonPanel
-              chosen={r.chosen}
-              targetProfit={r.input.targetProfit}
-              verdict={r.verdict}
-              maxBidGb={r.maxBid}
-              localMaxBid={r.localMaxBid}
-              profitGb={r.netProfit}
-              localProfit={r.localNetProfit}
-              profitUpside={r.profitUpside}
-              upsideRoute={r.upsideRoute}
-              allIn={r.allInCost}
-              hammerOverCeiling={hammerOverCeiling}
-              enteredHammer={enteredHammerOrPrice}
-              isAuction={isAuction}
-            />
-          )}
-
-          {r && (
-            <>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                <Stat label="Your all-in (OTD)" value={usd(r.allInCost)} />
-                <Stat
-                  label="Profit (GB @ P25)"
-                  value={sold && sold.count > 0 ? usd(r.netProfit) : "—"}
-                  tone={
-                    sold && sold.count > 0
-                      ? r.netProfit >= r.input.targetProfit
-                        ? "go"
-                        : "nogo"
-                      : undefined
-                  }
-                />
-                <Stat
-                  label="Profit (Local @ P25)"
-                  value={sold && sold.count > 0 ? usd(r.localNetProfit) : "—"}
-                  tone={sold && sold.count > 0 ? "go" : undefined}
-                />
-                <Stat
-                  label="Local upside"
-                  value={
-                    sold && sold.count > 0 && r.profitUpside > 0
-                      ? `+${usd(r.profitUpside)}`
-                      : "—"
-                  }
-                />
-              </div>
-
-              {isAuction && r && sold && sold.count > 0 && (
-                <>
-                  <MaxBidWaterfall chosen={r.chosen} input={r.input} />
-                  <LocalExitSummary chosen={r.chosen} input={r.input} />
-                </>
+          <details className="panel group">
+            <summary className="cursor-pointer text-sm font-semibold text-desk-text">
+              Market details
+              <span className="ml-2 text-xs font-normal text-desk-muted">
+                comps, exits, wholesale — expand if needed
+              </span>
+            </summary>
+            <div className="mt-4 space-y-4 border-t border-desk-border pt-4">
+              {data?.sourceStatus?.gba && (
+                <p className="text-xs text-desk-muted">{data.sourceStatus.gba}</p>
               )}
 
               {sold && sold.count > 0 && (
-              <div className="panel overflow-x-auto">
-                <h3 className="mb-1 text-sm font-semibold text-desk-muted">Exit scenarios</h3>
-                <p className="mb-3 text-[11px] text-desk-muted">
-                  Each row uses your all-in {usd(r.allInCost)}.{" "}
-                  <strong className="text-desk-text">GB profit / max bid</strong> are official (conservative).{" "}
-                  Local columns show upside if you sell face-to-face.
-                </p>
-                <table className="w-full min-w-[880px] text-sm">
-                  <thead className="text-left text-xs uppercase text-desk-muted">
-                    <tr>
-                      <th className="py-1">If market clears at</th>
-                      <th>Sell price</th>
-                      <th>GB net</th>
-                      <th>Local net</th>
-                      <th>GB profit</th>
-                      <th>Local profit</th>
-                      <th>GB max bid</th>
-                      <th>Local max bid</th>
-                    </tr>
-                  </thead>
-                  <tbody className="num">
-                    {r.scenarios.map((s) => (
-                      <tr
-                        key={s.label}
-                        className={`border-t border-desk-border ${
-                          s.label === "P25" ? "bg-desk-accent/5" : ""
-                        }`}
-                      >
-                        <td className="py-1.5 font-sans font-medium">{s.label}</td>
-                        <td>{usd(s.sellPrice)}</td>
-                        <td>{usd(s.routeA.net)}</td>
-                        <td>{usd(s.routeB.net)}</td>
-                        <td className={s.netProfit >= 0 ? "text-desk-go" : "text-desk-nogo"}>{usd(s.netProfit)}</td>
-                        <td className={s.localProfit >= 0 ? "text-desk-go" : "text-desk-nogo"}>
-                          {usd(s.localProfit)}
-                        </td>
-                        <td className="font-semibold">{usd(s.maxBid)}</td>
-                        <td className="text-desk-muted">{usd(s.localMaxBid)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="rounded-md border border-desk-border bg-desk-panel2 p-3">
+                    <p className="text-[10px] uppercase text-desk-muted">P25 sold</p>
+                    <p className="num text-2xl font-bold">{usd(sold.p25)}</p>
+                  </div>
+                  <div className="rounded-md border border-desk-border bg-desk-panel2 p-3">
+                    <p className="text-[10px] uppercase text-desk-muted">Median sold</p>
+                    <p className="num text-2xl font-bold">{usd(sold.median)}</p>
+                  </div>
+                  <div className="rounded-md border border-desk-border bg-desk-panel2 p-3">
+                    <p className="text-[10px] uppercase text-desk-muted">Sample</p>
+                    <p className="num text-2xl font-bold">{sold.count}</p>
+                  </div>
+                </div>
               )}
 
-              {isAuction && renderWholesaleBlock()}
-            </>
-          )}
+              {r && sold && sold.count > 0 && (
+                <ExitComparisonPanel
+                  chosen={r.chosen}
+                  targetProfit={r.input.targetProfit}
+                  verdict={r.verdict}
+                  maxBidGb={form.sellChannel === "local" ? r.chosen.maxBid : r.maxBid}
+                  localMaxBid={r.localMaxBid}
+                  profitGb={r.chosen.netProfit}
+                  localProfit={r.localNetProfit}
+                  profitUpside={r.profitUpside}
+                  upsideRoute={r.upsideRoute}
+                  allIn={r.allInCost}
+                  hammerOverCeiling={hammerOverCeiling}
+                  enteredHammer={enteredHammerOrPrice}
+                  isAuction={isAuction}
+                  sellChannel={form.sellChannel}
+                />
+              )}
+
+              {soldListings.length > 0 && (
+                <div className="overflow-x-auto">
+                  <h3 className="mb-2 text-sm font-semibold text-desk-muted">
+                    Sold comps — {soldListings.length}
+                  </h3>
+                  <table className="w-full min-w-[480px] text-sm">
+                    <thead className="text-left text-xs uppercase text-desk-muted">
+                      <tr>
+                        <th className="py-1">Price</th>
+                        <th>Sold</th>
+                        <th>Type</th>
+                      </tr>
+                    </thead>
+                    <tbody className="num">
+                      {soldListings.slice(0, 25).map((row, i) => (
+                        <tr key={i} className="border-t border-desk-border">
+                          <td className="py-1.5 font-semibold">{usd(row.price)}</td>
+                          <td className="font-sans text-desk-muted">{row.salesDate || "—"}</td>
+                          <td className="font-sans text-desk-muted">{row.listingType || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {renderWholesaleBlock()}
+            </div>
+          </details>
           </>
           )}
         </section>
       </div>
     </main>
-  );
-}
-
-function BestDealerTile(props: {
-  dealer: { vendorName: string; productLabel: string; dealerPrice: number };
-  yourAllIn: number;
-  enteredHammer: number;
-  maxBid: number | undefined;
-}) {
-  const { dealer, yourAllIn, enteredHammer, maxBid } = props;
-  // The new in-stock dealer price is a hard ceiling: never hammer above it.
-  const overFloor = yourAllIn > dealer.dealerPrice + 0.01;
-  return (
-    <div
-      className={`panel ${
-        overFloor ? "border-desk-nogo/45 bg-desk-nogo/10" : "border-desk-accent/40 bg-desk-accent/5"
-      }`}
-    >
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-desk-accent">
-            Best new-in-stock dealer
-          </p>
-          <p className="mt-1 text-sm font-semibold capitalize text-desk-text">
-            {dealer.vendorName}
-            <span className="ml-2 font-sans text-xs font-normal text-desk-muted" title={dealer.productLabel}>
-              {dealer.productLabel}
-            </span>
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="text-[10px] uppercase tracking-widest text-desk-muted">Dealer floor / hammer ceiling</p>
-          <p className="num text-3xl font-black text-desk-text">{usd(dealer.dealerPrice)}</p>
-        </div>
-      </div>
-      <p className={`mt-2 text-xs ${overFloor ? "font-semibold text-desk-nogo" : "text-desk-muted"}`}>
-        {overFloor ? (
-          <>
-            Do not bid here — your all-in {usd(yourAllIn)} already beats buying new from {dealer.vendorName} at{" "}
-            {usd(dealer.dealerPrice)}. You&apos;d overpay by {usd(yourAllIn - dealer.dealerPrice)}.
-          </>
-        ) : (
-          <>
-            You can buy this new from {dealer.vendorName} for {usd(dealer.dealerPrice)} — never let the hammer
-            (all-in) climb past that. Your all-in is {usd(yourAllIn)}.
-          </>
-        )}
-      </p>
-      {maxBid != null && Number.isFinite(maxBid) && (
-        <p className="mt-1 text-[11px] text-desk-muted">
-          Profit-based max screen bid is {usd(maxBid)}; treat the lower of that and the {usd(dealer.dealerPrice)}{" "}
-          dealer floor as your true walk-away.
-        </p>
-      )}
-    </div>
   );
 }
 
@@ -1218,6 +938,7 @@ function ExitComparisonPanel(props: {
   hammerOverCeiling: boolean;
   enteredHammer: number;
   isAuction: boolean;
+  sellChannel: "gunbroker" | "local";
 }) {
   const {
     chosen,
@@ -1227,26 +948,33 @@ function ExitComparisonPanel(props: {
     localMaxBid,
     profitGb,
     localProfit,
-    profitUpside,
     upsideRoute,
     allIn,
     hammerOverCeiling,
     enteredHammer,
     isAuction,
+    sellChannel,
   } = props;
+  const useLocal = sellChannel === "local";
+  const channelMax = useLocal ? localMaxBid : maxBidGb;
+  const channelGo = (useLocal ? localProfit : profitGb) >= targetProfit;
   const go = verdict === "GO";
-  const localGo = localProfit >= targetProfit;
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-desk-muted">
-        P25 sell price {usd(chosen.sellPrice)} from GunBroker sold comps. Official bid ceiling uses{" "}
-        <strong className="text-desk-text">GunBroker fees</strong> (conservative).
+        P25 sell {usd(chosen.sellPrice)}. Headline max bid uses{" "}
+        <strong className="text-desk-text">{useLocal ? "Local" : "GunBroker"}</strong> fees
+        (your selected channel).
       </p>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="panel border-desk-accent/40 bg-desk-accent/5">
-          <p className="text-xs font-semibold uppercase tracking-widest text-desk-accent">
-            GunBroker exit (official)
+        <div
+          className={`panel ${!useLocal ? "border-desk-accent/40 bg-desk-accent/5" : "border-desk-border"}`}
+        >
+          <p
+            className={`text-xs font-semibold uppercase tracking-widest ${!useLocal ? "text-desk-accent" : "text-desk-muted"}`}
+          >
+            GunBroker exit{!useLocal ? " (selected)" : " (alt)"}
           </p>
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
             <div>
@@ -1265,21 +993,25 @@ function ExitComparisonPanel(props: {
                 <dd className="num text-xl font-black">{usd(maxBidGb)}</dd>
               </div>
             )}
-            <div>
-              <dt className="text-desk-muted">Verdict</dt>
-              <dd className={`text-xl font-black ${go ? "text-desk-go" : "text-desk-nogo"}`}>{verdict}</dd>
-            </div>
+            {!useLocal && (
+              <div>
+                <dt className="text-desk-muted">Verdict</dt>
+                <dd className={`text-xl font-black ${go ? "text-desk-go" : "text-desk-nogo"}`}>{verdict}</dd>
+              </div>
+            )}
           </dl>
-          {isAuction && hammerOverCeiling && (
+          {!useLocal && isAuction && hammerOverCeiling && (
             <p className="mt-2 text-xs font-semibold text-desk-nogo">
-              Your hammer {usd(enteredHammer)} is above the GB ceiling {usd(maxBidGb)}.
+              Your hammer {usd(enteredHammer)} is above the channel ceiling {usd(channelMax)}.
             </p>
           )}
         </div>
 
-        <div className="panel">
-          <p className="text-xs font-semibold uppercase tracking-widest text-desk-muted">
-            Local AL exit (comparison)
+        <div className={`panel ${useLocal ? "border-desk-accent/40 bg-desk-accent/5" : "border-desk-border"}`}>
+          <p
+            className={`text-xs font-semibold uppercase tracking-widest ${useLocal ? "text-desk-accent" : "text-desk-muted"}`}
+          >
+            Local exit{useLocal ? " (selected)" : " (alt)"}
           </p>
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
             <div>
@@ -1288,141 +1020,39 @@ function ExitComparisonPanel(props: {
             </div>
             <div>
               <dt className="text-desk-muted">Est. profit</dt>
-              <dd className={`num font-bold ${localGo ? "text-desk-go" : "text-desk-text"}`}>
+              <dd className={`num font-bold ${localProfit >= targetProfit ? "text-desk-go" : "text-desk-text"}`}>
                 {usd(localProfit)}
               </dd>
             </div>
             {isAuction && (
               <div>
                 <dt className="text-desk-muted">Max screen bid</dt>
-                <dd className="num text-xl font-bold text-desk-muted">{usd(localMaxBid)}</dd>
+                <dd className="num text-xl font-bold">{usd(localMaxBid)}</dd>
               </div>
             )}
-            <div>
-              <dt className="text-desk-muted">vs GunBroker</dt>
-              <dd className="num font-semibold text-desk-go">
-                {profitUpside > 0 ? `+${usd(profitUpside)} profit` : "—"}
-              </dd>
-            </div>
+            {useLocal && (
+              <div>
+                <dt className="text-desk-muted">Verdict</dt>
+                <dd className={`text-xl font-black ${go ? "text-desk-go" : "text-desk-nogo"}`}>{verdict}</dd>
+              </div>
+            )}
           </dl>
           <p className="mt-2 text-[11px] text-desk-muted">
             {upsideRoute === "local_al"
-              ? "Local nets more at this P25 price — optional upside if you skip GunBroker fees."
-              : "GunBroker nets more at this P25 price on this gun."}
+              ? "Local nets more at this P25 — useful if you skip listing fees."
+              : "GunBroker nets more at this P25 on this gun."}
+            {channelGo ? "" : ` Selected channel is below $${targetProfit} target.`}
           </p>
         </div>
       </div>
       <p className="text-[11px] text-desk-muted">
-        All-in {usd(allIn)} · Target profit {usd(targetProfit)} · Use GB column for bidding; compare local before
-        choosing meet-up vs listing.
+        All-in {usd(allIn)} · Target {usd(targetProfit)} · Bid against the{" "}
+        <strong className="text-desk-text">{useLocal ? "Local" : "GunBroker"}</strong> column.
       </p>
     </div>
   );
 }
 
-function MaxBidWaterfall({ chosen, input }: { chosen: ScenarioResult; input: EvaluationResult["input"] }) {
-  const route = chosen.routeA;
-  const gbNet = route.net;
-  const shipLeak = input.buyerPaysOutboundShip ? 0 : route.outboundShip;
-  const cardLeak = input.buyerPaysCardFee ? 0 : route.cardFee;
-  const steps: { label: string; value: number; tone?: "pos" | "neg" | "muted" }[] = [
-    { label: "P25 sell price (market anchor)", value: chosen.sellPrice },
-    { label: "Final value fee", value: -route.finalValueFee, tone: "neg" },
-    { label: "Master FFL fee", value: -route.masterFflFee, tone: "neg" },
-    {
-      label: input.buyerPaysOutboundShip
-        ? `Outbound shipping ($${route.outboundShip.toFixed(0)} — buyer pays)`
-        : "Outbound shipping",
-      value: -shipLeak,
-      tone: shipLeak > 0 ? "neg" : "muted",
-    },
-    {
-      label: input.buyerPaysCardFee
-        ? `Card processing (${usd(route.cardFee)} — buyer pays)`
-        : "Card processing (3%)",
-      value: -cardLeak,
-      tone: cardLeak > 0 ? "neg" : "muted",
-    },
-    { label: "Listing upgrades", value: -route.listingUpgrades, tone: "neg" },
-    { label: "Net proceeds (GunBroker)", value: gbNet, tone: "pos" },
-    { label: `Target profit ($${input.targetProfit})`, value: -input.targetProfit, tone: "neg" },
-    { label: "Max all-in (premium + inbound back-solved)", value: gbNet - input.targetProfit, tone: "pos" },
-    { label: "→ Max screen bid (GB ceiling)", value: chosen.maxBid, tone: "pos" },
-  ];
-
-  return (
-    <div className="panel overflow-x-auto">
-      <h3 className="mb-2 text-sm font-semibold text-desk-muted">
-        Max screen bid — GunBroker @ P25 (conservative)
-      </h3>
-      <table className="w-full min-w-[400px] text-sm">
-        <tbody>
-          {steps.map((s) => (
-            <tr key={s.label} className="border-t border-desk-border first:border-t-0">
-              <td className="py-1.5 font-sans text-desk-muted">{s.label}</td>
-              <td
-                className={`num py-1.5 text-right font-semibold ${
-                  s.tone === "neg"
-                    ? "text-desk-nogo"
-                    : s.tone === "pos"
-                      ? "text-desk-go"
-                      : s.tone === "muted"
-                        ? "text-desk-muted"
-                        : ""
-                }`}
-              >
-                {s.tone === "muted" ? "$0" : s.value < 0 ? `−${usd(Math.abs(s.value))}` : usd(s.value)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="mt-2 text-[11px] text-desk-muted">
-        Hammer backs out buyer&apos;s premium ({input.buyerPremiumPct}%) and inbound ship ({usd(input.inboundShip)}).
-        Official ceiling uses GunBroker fees at P25. Premium {input.buyerPremiumPct}%, inbound{" "}
-        {usd(input.inboundShip)}.
-      </p>
-    </div>
-  );
-}
-
-function LocalExitSummary({ chosen, input }: { chosen: ScenarioResult; input: EvaluationResult["input"] }) {
-  const route = chosen.routeB;
-  return (
-    <div className="panel text-sm">
-      <h3 className="mb-2 text-sm font-semibold text-desk-muted">Local AL @ P25 (comparison)</h3>
-      <table className="w-full min-w-[320px]">
-        <tbody className="num">
-          <tr className="border-t border-desk-border first:border-t-0">
-            <td className="py-1.5 font-sans text-desk-muted">P25 sell price</td>
-            <td className="py-1.5 text-right font-semibold">{usd(chosen.sellPrice)}</td>
-          </tr>
-          <tr className="border-t border-desk-border">
-            <td className="py-1.5 font-sans text-desk-muted">AL tax absorbed</td>
-            <td className="py-1.5 text-right text-desk-nogo">−{usd(route.taxAbsorbed)}</td>
-          </tr>
-          <tr className="border-t border-desk-border">
-            <td className="py-1.5 font-sans text-desk-muted">Net proceeds (local)</td>
-            <td className="py-1.5 text-right font-semibold text-desk-go">{usd(route.net)}</td>
-          </tr>
-          <tr className="border-t border-desk-border">
-            <td className="py-1.5 font-sans text-desk-muted">Est. profit</td>
-            <td className="py-1.5 text-right font-semibold">{usd(chosen.localProfit)}</td>
-          </tr>
-          <tr className="border-t border-desk-border">
-            <td className="py-1.5 font-sans text-desk-muted">Max screen bid (if selling local)</td>
-            <td className="py-1.5 text-right">{usd(chosen.localMaxBid)}</td>
-          </tr>
-        </tbody>
-      </table>
-      {chosen.profitUpside > 0 && (
-        <p className="mt-2 text-xs text-desk-go">
-          +{usd(chosen.profitUpside)} more profit vs GunBroker at P25 — do not use this for conservative bidding.
-        </p>
-      )}
-    </div>
-  );
-}
 
 function Field(props: { label: string; v: string; on: (e: React.ChangeEvent<HTMLInputElement>) => void }) {
   return (
@@ -1476,48 +1106,6 @@ function FieldHint(props: {
   );
 }
 
-function LiveProfitBox(props: {
-  profit: number;
-  localProfit: number;
-  target: number;
-  gap: number;
-  go: boolean;
-  exitLabel: string;
-  large?: boolean;
-}) {
-  const { profit, localProfit, target, gap, go, exitLabel, large } = props;
-  const localGap = localProfit - target;
-  return (
-    <div
-      className={`rounded-md border ${
-        go ? "border-desk-go/45 bg-desk-go/10" : "border-desk-nogo/45 bg-desk-nogo/10"
-      } ${large ? "p-5" : "p-3"}`}
-    >
-      <p className="text-xs font-medium uppercase tracking-widest text-desk-muted">
-        Est. profit — {exitLabel} (official)
-      </p>
-      <p
-        className={`num font-black tracking-tight ${large ? "text-4xl" : "text-2xl"} ${
-          profit >= target ? "text-desk-go" : "text-desk-nogo"
-        }`}
-      >
-        {usd(profit)}
-      </p>
-      <p className="mt-1 text-xs text-desk-muted">
-        Target {usd(target)}
-        {gap >= 0 ? ` · ${usd(gap)} above floor` : ` · ${usd(Math.abs(gap))} short`}
-      </p>
-      <p className="mt-2 text-xs text-desk-muted">
-        Local @ P25: <span className="num font-semibold text-desk-text">{usd(localProfit)}</span>
-        {localProfit > profit ? ` (+${usd(localProfit - profit)} vs GB)` : ""}
-      </p>
-      <p className="mt-1 text-[10px] text-desk-muted">
-        Verdict {go ? "GO" : "NO-GO"} on GunBroker only — override anytime.
-      </p>
-    </div>
-  );
-}
-
 function Stat(props: { label: string; value: string; tone?: "go" | "nogo" }) {
   return (
     <div className="panel py-3">
@@ -1532,3 +1120,4 @@ function Stat(props: { label: string; value: string; tone?: "go" | "nogo" }) {
     </div>
   );
 }
+

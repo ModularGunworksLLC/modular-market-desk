@@ -26,6 +26,8 @@ function minimalResult(overrides: Partial<EvaluationResult> = {}): EvaluationRes
       listingUpgrades: 3,
       targetProfit: 50,
       minMarginPct: 0,
+      salesTaxRate: 0.09,
+      sellChannel: "gunbroker",
     },
     allInCost: 260,
     sold: { ...emptyStats, count: 10, median: 280, p25: 200, p75: 320 },

@@ -42,7 +42,10 @@ function evaluateScenario(
     buyerPaysOutboundShip: input.buyerPaysOutboundShip,
     buyerPaysCardFee: input.buyerPaysCardFee,
   });
-  const routeB = routeLocalAlabama({ sellPrice });
+  const routeB = routeLocalAlabama({
+    sellPrice,
+    salesTaxRate: input.salesTaxRate,
+  });
 
   const gbNet = routeA.net;
   const localNet = routeB.net;
@@ -114,7 +117,11 @@ export function evaluateDeal(
       ? evaluateScenario("P25", anchorSell, input, allIn)
       : scenarios[0] ?? evaluateScenario("P25", anchorSell, input, allIn);
 
-  const profitMaxHammer = chosen.maxBid;
+  const useLocal = input.sellChannel === "local";
+  const decisionRoute = useLocal ? ("local_al" as const) : ("gunbroker" as const);
+  const channelProfit = useLocal ? chosen.localProfit : chosen.netProfit;
+  const channelMargin = useLocal ? chosen.localMarginPct : chosen.marginPct;
+  const profitMaxHammer = useLocal ? chosen.localMaxBid : chosen.maxBid;
   const effectiveMaxHammer = effectiveHammerCeiling({
     profitMaxHammer,
     dealerFloor: opts?.dealerFloor,
@@ -124,7 +131,7 @@ export function evaluateDeal(
   });
 
   const { verdict, reasons } = decideVerdictFull({
-    netProfit: chosen.netProfit,
+    netProfit: channelProfit,
     targetProfit: input.targetProfit,
     workflow,
     allInCost: allIn,
@@ -145,13 +152,13 @@ export function evaluateDeal(
     verdictReasons: reasons,
     decisionAnchor,
     decisionSellPrice: round2(anchorSell),
-    decisionRoute: "gunbroker",
+    decisionRoute,
     upsideRoute: chosen.bestRoute,
     profitMaxHammer,
     effectiveMaxHammer,
     maxBid: effectiveMaxHammer,
-    netProfit: chosen.netProfit,
-    marginPct: chosen.marginPct,
+    netProfit: round2(channelProfit),
+    marginPct: round2(channelMargin),
     localNetProfit: chosen.localProfit,
     localMaxBid: chosen.localMaxBid,
     profitUpside: chosen.profitUpside,

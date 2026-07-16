@@ -137,6 +137,8 @@ export async function scanWholesaleDeals(opts: ScanOptions = {}): Promise<ScanSu
           buyerPaysCardFee: DEAL_DEFAULTS.buyerPaysCardFee,
           targetProfit: opts.targetProfit ?? DEAL_DEFAULTS.targetProfit,
           minMarginPct: opts.minMarginPct ?? DEAL_DEFAULTS.minMarginPct,
+          sellChannel: "gunbroker",
+          salesTaxPct: DEAL_DEFAULTS.salesTaxPct,
           autoComps: true,
         },
         { persist: false, token },

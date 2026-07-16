@@ -56,14 +56,23 @@ export function routeGunBroker(params: {
 }
 
 /**
- * Route B - Local Alabama sale (forum / pickup).
- * Shipping = 0, platform fees = 0. The local price is tax-inclusive, so we back out the
- * 9% AL sales tax that must be remitted from the proceeds:
- *   sellerGross = G / (1 + 0.09);  taxAbsorbed = G - sellerGross;  net = sellerGross
+ * Route B - Local sale (forum / pickup).
+ * Shipping = 0, platform fees = 0. The local price is tax-inclusive, so we back out
+ * sales tax remitted from proceeds:
+ *   sellerGross = G / (1 + rate);  taxAbsorbed = G - sellerGross;  net = sellerGross
+ * Default rate is AL 9% when omitted.
  */
-export function routeLocalAlabama(params: { sellPrice: number }): RouteBreakdown {
+export function routeLocalAlabama(params: {
+  sellPrice: number;
+  /** Fraction, e.g. 0.09. Defaults to AL_SALES_TAX_RATE. */
+  salesTaxRate?: number;
+}): RouteBreakdown {
   const sell = Math.max(0, params.sellPrice);
-  const sellerGross = sell / (1 + AL_SALES_TAX_RATE);
+  const rate =
+    params.salesTaxRate != null && Number.isFinite(params.salesTaxRate) && params.salesTaxRate >= 0
+      ? params.salesTaxRate
+      : AL_SALES_TAX_RATE;
+  const sellerGross = sell / (1 + rate);
   const taxAbsorbed = sell - sellerGross;
 
   return {
