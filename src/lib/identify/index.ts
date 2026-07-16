@@ -26,8 +26,12 @@ export async function identifyFirearm(req: IdentifyRequest): Promise<IdentifyRes
     try {
       return await identifyWithGemini(req);
     } catch (err) {
-      if (err instanceof IdentifyError && (err.status === 429 || err.status === 503) && openaiConfigured()) {
-        return identifyWithOpenAI(req);
+      if (err instanceof IdentifyError && (err.status === 429 || err.status === 503)) {
+        if (openaiConfigured()) return identifyWithOpenAI(req);
+        throw new IdentifyError(
+          `${err.message} OpenAI fallback is not configured (set OPENAI_API_KEY in Desk .env).`,
+          err.status,
+        );
       }
       throw err;
     }
