@@ -9,6 +9,7 @@
 
 import "server-only";
 
+import { round2 } from "@/lib/arbitrage/fees";
 import { evaluateDeal } from "@/lib/arbitrage/evaluate";
 import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import { summarize } from "@/lib/arbitrage/stats";
@@ -341,7 +342,7 @@ export async function runEvaluation(
       caliber: enriched.caliber,
       condition: body.condition,
     });
-    const money = (n: number) => Math.round(n * 100) / 100;
+    const money = (n: number) => round2(n);
     await db.insert(valuations).values({
       canonicalKey: key,
       category: body.category,

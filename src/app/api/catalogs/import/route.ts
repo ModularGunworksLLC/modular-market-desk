@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
 
 import { importCatalogCsv } from "@/lib/csv/importer";
 import { getPresetForVendor } from "@/lib/catalog-queries";
+import { errorMessage } from "@/lib/api-error";
 
 export const runtime = "nodejs";
 // Allow long-running streamed ingestion (Lightsail, not serverless).
@@ -57,6 +58,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(err) }, { status: 500 });
   }
 }

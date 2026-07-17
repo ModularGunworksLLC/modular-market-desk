@@ -4,13 +4,21 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { AtGlancePanel } from "@/components/desk/AtGlancePanel";
+import {
+  BuyerPaidFeeToggle,
+  ExitComparisonPanel,
+  Field,
+  FieldHint,
+  Stat,
+} from "@/components/desk/ExitComparisonPanel";
 import { OaCatalogPickers } from "@/components/desk/OaCatalogPickers";
 import { SerialStolenPanel } from "@/components/desk/SerialStolenPanel";
 import type { StolenCheckResult } from "@/lib/stolen/hotgunz";
 import { allInCost } from "@/lib/arbitrage/acquisition";
+import { CLIENT_DEAL_DEFAULTS } from "@/lib/arbitrage/client-defaults";
 import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import { evaluateDeal } from "@/lib/arbitrage/evaluate";
-import type { DealInput, DecisionAnchor, EvaluationResult, PriceStats, ScenarioResult } from "@/lib/arbitrage/types";
+import type { DealInput, DecisionAnchor, EvaluationResult, PriceStats } from "@/lib/arbitrage/types";
 import type { CompFilterMeta } from "@/lib/comp-filter";
 import type { AskingCompRow, SoldCompRow } from "@/lib/gba/client";
 import type { OaSelection } from "@/lib/gba/scorer";
@@ -18,6 +26,7 @@ import type { DealInsights } from "@/lib/deal-insights";
 import { buildDealInsights, DEALER_OPTIONS } from "@/lib/deal-insights";
 import { loadDealerDefaults, type DeskDealerDefaults } from "@/lib/desk-defaults";
 import type { DeskMode, UsedSubtype, Workflow } from "@/lib/desk-mode";
+import { parseMoneyField, parseMoneyFieldOrZero, usd } from "@/lib/format";
 import type { WholesaleGrid } from "@/lib/wholesale";
 
 const MODE_STORAGE_KEY = "desk-workflow";
@@ -38,30 +47,28 @@ interface ApiResponse {
   compMeta?: CompFilterMeta | null;
 }
 
-const usd = (n: number | undefined) =>
-  n == null || !Number.isFinite(n) ? "-" : n.toLocaleString("en-US", { style: "currency", currency: "USD" });
-
 export default function DeskPage() {
   const [workflow, setWorkflow] = useState<Workflow>("used");
   const [usedSubtype, setUsedSubtype] = useState<UsedSubtype>("auction");
   const [liveBid, setLiveBid] = useState("");
   const [form, setForm] = useState({
-    manufacturer: "Glock",
-    model: "19",
+    manufacturer: "",
+    model: "",
     upc: "",
     mpn: "",
-    caliber: "9mm",
+    caliber: "",
     category: "handgun",
     sourceDealer: "",
     vendorCost: "",
     inboundShip: "",
-    buyerPremiumPct: "18",
-    outboundShip: "45",
-    buyerPaysOutboundShip: true,
-    buyerPaysCardFee: true,
-    listingUpgrades: "3",
-    targetProfit: "50",
-    salesTaxPct: "9",
+    buyerPremiumPct: String(CLIENT_DEAL_DEFAULTS.buyerPremiumPct),
+    outboundShip: String(CLIENT_DEAL_DEFAULTS.outboundShip),
+    buyerPaysOutboundShip: CLIENT_DEAL_DEFAULTS.buyerPaysOutboundShip,
+    buyerPaysCardFee: CLIENT_DEAL_DEFAULTS.buyerPaysCardFee,
+    listingUpgrades: String(CLIENT_DEAL_DEFAULTS.listingUpgrades),
+    targetProfit: String(CLIENT_DEAL_DEFAULTS.targetProfit),
+    minMarginPct: String(CLIENT_DEAL_DEFAULTS.minMarginPct),
+    salesTaxPct: String(CLIENT_DEAL_DEFAULTS.salesTaxPct),
     sellChannel: "gunbroker" as "gunbroker" | "local",
     condition: "any",
     soldPrices: "",
@@ -88,6 +95,7 @@ export default function DeskPage() {
       setForm((f) => ({
         ...f,
         targetProfit: d.targetProfit,
+        minMarginPct: d.minMarginPct ?? String(CLIENT_DEAL_DEFAULTS.minMarginPct),
         salesTaxPct: d.salesTaxPct,
         outboundShip: d.outboundShip,
         listingUpgrades: d.listingUpgrades,
@@ -170,6 +178,23 @@ export default function DeskPage() {
     setError(null);
     setData(null);
     try {
+      const acquisitionRaw = isVendor ? form.vendorCost : liveBid;
+      const acquisition = parseMoneyField(acquisitionRaw);
+      if (acquisition == null || acquisition < 0) {
+        setError(isVendor ? "Enter a valid vendor cost." : "Enter a valid live bid / hammer.");
+        setLoading(false);
+        return;
+      }
+      const targetProfit = parseMoneyField(form.targetProfit);
+      const minMarginPct = parseMoneyField(form.minMarginPct);
+      const outboundShip = parseMoneyField(form.outboundShip);
+      const listingUpgrades = parseMoneyField(form.listingUpgrades);
+      if (targetProfit == null || minMarginPct == null || outboundShip == null || listingUpgrades == null) {
+        setError("Profit, margin, outbound ship, and listing fees must be valid numbers.");
+        setLoading(false);
+        return;
+      }
+
       const res = await fetch("/api/evaluate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -184,17 +209,17 @@ export default function DeskPage() {
           caliber: form.caliber,
           category: form.category,
           condition: isVendor ? "new" : isTradeIn ? "used" : form.condition,
-          targetAcquisitionCost: isVendor ? Number(form.vendorCost) || 0 : Number(liveBid) || 0,
-          inboundShip: Number(form.inboundShip) || 0,
-          buyerPremiumPct: isVendor || isTradeIn ? 0 : Number(form.buyerPremiumPct) || 0,
-          outboundShip: Number(form.outboundShip),
+          targetAcquisitionCost: acquisition,
+          inboundShip: parseMoneyFieldOrZero(form.inboundShip),
+          buyerPremiumPct: isVendor || isTradeIn ? 0 : parseMoneyFieldOrZero(form.buyerPremiumPct),
+          outboundShip,
           buyerPaysOutboundShip: form.buyerPaysOutboundShip,
           buyerPaysCardFee: form.buyerPaysCardFee,
-          listingUpgrades: Number(form.listingUpgrades),
-          targetProfit: Number(form.targetProfit),
-          minMarginPct: 0,
+          listingUpgrades,
+          targetProfit,
+          minMarginPct,
           sellChannel: form.sellChannel,
-          salesTaxPct: Number(form.salesTaxPct) || 0,
+          salesTaxPct: parseMoneyFieldOrZero(form.salesTaxPct),
           autoComps: true,
           ...(form.gbaModelId.trim() && form.gbaCaliberId.trim()
             ? {
@@ -212,8 +237,8 @@ export default function DeskPage() {
             ? {
                 soldPrices: form.soldPrices
                   .split(",")
-                  .map((s) => Number(s.trim()))
-                  .filter((n) => Number.isFinite(n) && n > 0),
+                  .map((s) => parseMoneyField(s.trim()))
+                  .filter((n): n is number => n != null && n > 0),
               }
             : {}),
         }),
@@ -263,11 +288,13 @@ export default function DeskPage() {
     });
   }, [data, form.sourceDealer, isVendor, isTradeIn]);
 
-  const buyerPremiumPct = isVendor || isTradeIn ? 0 : Number(form.buyerPremiumPct) || 0;
-  const inboundShipNum = Number(form.inboundShip) || 0;
+  const buyerPremiumPct = isVendor || isTradeIn ? 0 : parseMoneyFieldOrZero(form.buyerPremiumPct);
+  const inboundShipNum = parseMoneyFieldOrZero(form.inboundShip);
 
   const previewInput = {
-    targetAcquisitionCost: isVendor ? Number(form.vendorCost) || 0 : Number(liveBid) || 0,
+    targetAcquisitionCost: isVendor
+      ? parseMoneyFieldOrZero(form.vendorCost)
+      : parseMoneyFieldOrZero(liveBid),
     buyerPremiumPct,
     inboundShip: inboundShipNum,
   };
@@ -280,13 +307,13 @@ export default function DeskPage() {
       targetAcquisitionCost: previewInput.targetAcquisitionCost,
       inboundShip: inboundShipNum,
       buyerPremiumPct,
-      outboundShip: Number(form.outboundShip) || 0,
+      outboundShip: parseMoneyFieldOrZero(form.outboundShip),
       buyerPaysOutboundShip: form.buyerPaysOutboundShip,
       buyerPaysCardFee: form.buyerPaysCardFee,
-      listingUpgrades: Number(form.listingUpgrades) || 0,
-      targetProfit: Number(form.targetProfit) || 0,
-      minMarginPct: 0,
-      salesTaxRate: (Number(form.salesTaxPct) || 0) / 100,
+      listingUpgrades: parseMoneyFieldOrZero(form.listingUpgrades),
+      targetProfit: parseMoneyFieldOrZero(form.targetProfit),
+      minMarginPct: parseMoneyFieldOrZero(form.minMarginPct),
+      salesTaxRate: parseMoneyFieldOrZero(form.salesTaxPct) / 100,
       sellChannel: form.sellChannel,
     };
   }
@@ -315,7 +342,7 @@ export default function DeskPage() {
           })
         : null;
   const liveProfit = liveEval?.netProfit;
-  const liveTarget = liveEval?.input.targetProfit ?? (Number(form.targetProfit) || 0);
+  const liveTarget = liveEval?.input.targetProfit ?? parseMoneyFieldOrZero(form.targetProfit);
   const profitGap =
     liveProfit != null && Number.isFinite(liveProfit) ? liveProfit - liveTarget : null;
 
@@ -667,6 +694,12 @@ export default function DeskPage() {
               v={form.targetProfit}
               on={set("targetProfit")}
             />
+            <FieldHint
+              label="Min margin %"
+              hint="GO also requires profit / all-in ≥ this %. Caps max bid."
+              v={form.minMarginPct}
+              on={set("minMarginPct")}
+            />
 
             {form.sellChannel === "local" ? (
               <FieldHint
@@ -906,203 +939,6 @@ export default function DeskPage() {
         </section>
       </div>
     </main>
-  );
-}
-
-function ExitComparisonPanel(props: {
-  chosen: ScenarioResult;
-  targetProfit: number;
-  verdict: string;
-  maxBidGb: number;
-  localMaxBid: number;
-  profitGb: number;
-  localProfit: number;
-  profitUpside: number;
-  upsideRoute: string;
-  allIn: number;
-  hammerOverCeiling: boolean;
-  enteredHammer: number;
-  isAuction: boolean;
-  sellChannel: "gunbroker" | "local";
-}) {
-  const {
-    chosen,
-    targetProfit,
-    verdict,
-    maxBidGb,
-    localMaxBid,
-    profitGb,
-    localProfit,
-    upsideRoute,
-    allIn,
-    hammerOverCeiling,
-    enteredHammer,
-    isAuction,
-    sellChannel,
-  } = props;
-  const useLocal = sellChannel === "local";
-  const channelMax = useLocal ? localMaxBid : maxBidGb;
-  const channelGo = (useLocal ? localProfit : profitGb) >= targetProfit;
-  const go = verdict === "GO";
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-desk-muted">
-        P25 sell {usd(chosen.sellPrice)}. Headline max bid uses{" "}
-        <strong className="text-desk-text">{useLocal ? "Local" : "GunBroker"}</strong> fees
-        (your selected channel).
-      </p>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div
-          className={`panel ${!useLocal ? "border-desk-accent/40 bg-desk-accent/5" : "border-desk-border"}`}
-        >
-          <p
-            className={`text-xs font-semibold uppercase tracking-widest ${!useLocal ? "text-desk-accent" : "text-desk-muted"}`}
-          >
-            GunBroker exit{!useLocal ? " (selected)" : " (alt)"}
-          </p>
-          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <dt className="text-desk-muted">Net @ P25</dt>
-              <dd className="num font-bold">{usd(chosen.routeA.net)}</dd>
-            </div>
-            <div>
-              <dt className="text-desk-muted">Est. profit</dt>
-              <dd className={`num font-bold ${profitGb >= targetProfit ? "text-desk-go" : "text-desk-nogo"}`}>
-                {usd(profitGb)}
-              </dd>
-            </div>
-            {isAuction && (
-              <div>
-                <dt className="text-desk-muted">Max screen bid</dt>
-                <dd className="num text-xl font-black">{usd(maxBidGb)}</dd>
-              </div>
-            )}
-            {!useLocal && (
-              <div>
-                <dt className="text-desk-muted">Verdict</dt>
-                <dd className={`text-xl font-black ${go ? "text-desk-go" : "text-desk-nogo"}`}>{verdict}</dd>
-              </div>
-            )}
-          </dl>
-          {!useLocal && isAuction && hammerOverCeiling && (
-            <p className="mt-2 text-xs font-semibold text-desk-nogo">
-              Your hammer {usd(enteredHammer)} is above the channel ceiling {usd(channelMax)}.
-            </p>
-          )}
-        </div>
-
-        <div className={`panel ${useLocal ? "border-desk-accent/40 bg-desk-accent/5" : "border-desk-border"}`}>
-          <p
-            className={`text-xs font-semibold uppercase tracking-widest ${useLocal ? "text-desk-accent" : "text-desk-muted"}`}
-          >
-            Local exit{useLocal ? " (selected)" : " (alt)"}
-          </p>
-          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <dt className="text-desk-muted">Net @ P25</dt>
-              <dd className="num font-bold">{usd(chosen.routeB.net)}</dd>
-            </div>
-            <div>
-              <dt className="text-desk-muted">Est. profit</dt>
-              <dd className={`num font-bold ${localProfit >= targetProfit ? "text-desk-go" : "text-desk-text"}`}>
-                {usd(localProfit)}
-              </dd>
-            </div>
-            {isAuction && (
-              <div>
-                <dt className="text-desk-muted">Max screen bid</dt>
-                <dd className="num text-xl font-bold">{usd(localMaxBid)}</dd>
-              </div>
-            )}
-            {useLocal && (
-              <div>
-                <dt className="text-desk-muted">Verdict</dt>
-                <dd className={`text-xl font-black ${go ? "text-desk-go" : "text-desk-nogo"}`}>{verdict}</dd>
-              </div>
-            )}
-          </dl>
-          <p className="mt-2 text-[11px] text-desk-muted">
-            {upsideRoute === "local_al"
-              ? "Local nets more at this P25 — useful if you skip listing fees."
-              : "GunBroker nets more at this P25 on this gun."}
-            {channelGo ? "" : ` Selected channel is below $${targetProfit} target.`}
-          </p>
-        </div>
-      </div>
-      <p className="text-[11px] text-desk-muted">
-        All-in {usd(allIn)} · Target {usd(targetProfit)} · Bid against the{" "}
-        <strong className="text-desk-text">{useLocal ? "Local" : "GunBroker"}</strong> column.
-      </p>
-    </div>
-  );
-}
-
-
-function Field(props: { label: string; v: string; on: (e: React.ChangeEvent<HTMLInputElement>) => void }) {
-  return (
-    <div>
-      <label className="field-label">{props.label}</label>
-      <input className="field-input" value={props.v} onChange={props.on} />
-    </div>
-  );
-}
-
-function BuyerPaidFeeToggle(props: {
-  id: string;
-  title: string;
-  hint: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label
-      htmlFor={props.id}
-      className="flex w-full cursor-pointer items-start gap-2.5 border-b border-desk-border/60 pb-2 last:border-0 last:pb-0"
-    >
-      <input
-        id={props.id}
-        type="checkbox"
-        className="mt-0.5 h-4 w-4 shrink-0 accent-desk-accent"
-        checked={props.checked}
-        onChange={(e) => props.onChange(e.target.checked)}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium leading-snug text-desk-text">{props.title}</span>
-        <span className="mt-0.5 block text-[10px] leading-relaxed text-desk-muted">{props.hint}</span>
-      </span>
-    </label>
-  );
-}
-
-function FieldHint(props: {
-  label: string;
-  hint: string;
-  v: string;
-  on: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onBlur?: () => void;
-}) {
-  return (
-    <div>
-      <label className="field-label">{props.label}</label>
-      <input className="field-input" value={props.v} onChange={props.on} onBlur={props.onBlur} />
-      <p className="mt-0.5 text-[10px] leading-snug text-desk-muted">{props.hint}</p>
-    </div>
-  );
-}
-
-function Stat(props: { label: string; value: string; tone?: "go" | "nogo" }) {
-  return (
-    <div className="panel py-3">
-      <div className="field-label">{props.label}</div>
-      <div
-        className={`num text-lg font-bold ${
-          props.tone === "go" ? "text-desk-go" : props.tone === "nogo" ? "text-desk-nogo" : "text-desk-text"
-        }`}
-      >
-        {props.value}
-      </div>
-    </div>
   );
 }
 

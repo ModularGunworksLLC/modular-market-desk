@@ -6,6 +6,7 @@ import { maxBid } from "./maxBid";
 import { routeGunBroker, routeLocalAlabama } from "./routes";
 import { summarize } from "./stats";
 import { evaluateDeal } from "./evaluate";
+import { decideVerdict } from "./verdict";
 import type { DealInput } from "./types";
 
 describe("finalValueFee (tiered)", () => {
@@ -70,6 +71,41 @@ describe("maxBid inverts the net to a hammer ceiling", () => {
     const mb = maxBid({ bestNet: 800, targetProfit: 75, inboundShip: 25, buyerPremiumPct: 18 });
     expect(mb).toBeCloseTo(593.22, 1);
   });
+  it("applies min margin floor when tighter than profit target", () => {
+    // bestNet 800, targetProfit 50 -> fromProfit 750
+    // minMargin 15% -> fromMargin 800/1.15 ≈ 695.65 → binds
+    const mb = maxBid({
+      bestNet: 800,
+      targetProfit: 50,
+      minMarginPct: 15,
+      inboundShip: 0,
+      buyerPremiumPct: 0,
+    });
+    expect(mb).toBeCloseTo(800 / 1.15, 2);
+  });
+  it("ignores margin floor when minMarginPct is 0", () => {
+    const mb = maxBid({
+      bestNet: 800,
+      targetProfit: 75,
+      minMarginPct: 0,
+      inboundShip: 0,
+      buyerPremiumPct: 0,
+    });
+    expect(mb).toBe(725);
+  });
+});
+
+describe("decideVerdict requires profit and margin floors", () => {
+  it("NO-GO when margin below floor even if profit clears", () => {
+    expect(
+      decideVerdict({ netProfit: 100, targetProfit: 50, marginPct: 10, minMarginPct: 15 }),
+    ).toBe("NO-GO");
+  });
+  it("GO when both floors clear", () => {
+    expect(
+      decideVerdict({ netProfit: 100, targetProfit: 50, marginPct: 20, minMarginPct: 15 }),
+    ).toBe("GO");
+  });
 });
 
 describe("evaluateDeal end-to-end", () => {
@@ -88,7 +124,7 @@ describe("evaluateDeal end-to-end", () => {
   };
   const sold = summarize([700, 750, 800, 820, 850, 900]);
 
-  it("uses P25 + GunBroker for conservative decision metrics", () => {
+  it("uses P25 + sellChannel for decision metrics", () => {
     const r = evaluateDeal(input, sold);
     expect(r.allInCost).toBe(425);
     expect(r.chosen.label).toBe("P25");
@@ -100,6 +136,7 @@ describe("evaluateDeal end-to-end", () => {
       maxBid({
         bestNet: r.chosen.routeA.net,
         targetProfit: input.targetProfit,
+        minMarginPct: input.minMarginPct,
         inboundShip: input.inboundShip,
         buyerPremiumPct: input.buyerPremiumPct,
       }),
@@ -108,5 +145,12 @@ describe("evaluateDeal end-to-end", () => {
     expect(r.localNetProfit).toBe(round2(r.chosen.routeB.net - r.allInCost));
     // With buyer-paid ship/card, GunBroker net can beat local at the same sell price.
     expect(r.upsideRoute).toBe(r.chosen.bestRoute);
+  });
+
+  it("NO-GO when minMarginPct is not cleared", () => {
+    const tight: DealInput = { ...input, minMarginPct: 90, targetProfit: 1 };
+    const r = evaluateDeal(tight, sold);
+    expect(r.verdict).toBe("NO-GO");
+    expect(r.verdictReasons.some((x) => /margin/i.test(x))).toBe(true);
   });
 });

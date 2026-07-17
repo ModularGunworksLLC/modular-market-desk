@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
+import { CLIENT_DEAL_DEFAULTS } from "@/lib/arbitrage/client-defaults";
 import type { ScanResultRow, ScanSummary } from "@/lib/wholesale-scan";
 import { usd } from "@/lib/format";
 
@@ -12,7 +12,8 @@ export default function DealsPage() {
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ScanSummary | null>(null);
   const [limit, setLimit] = useState(30);
-  const [targetProfit, setTargetProfit] = useState(DEAL_DEFAULTS.targetProfit);
+  const [targetProfit, setTargetProfit] = useState(CLIENT_DEAL_DEFAULTS.targetProfit);
+  const [minMarginPct, setMinMarginPct] = useState(CLIENT_DEAL_DEFAULTS.minMarginPct);
 
   async function runScan() {
     setPending(true);
@@ -25,6 +26,7 @@ export default function DealsPage() {
           vendor: "2ndamendmentwholesale",
           limit,
           targetProfit,
+          minMarginPct,
           inboundShip: 0,
         }),
       });
@@ -81,6 +83,16 @@ export default function DealsPage() {
               min={0}
               value={targetProfit}
               onChange={(e) => setTargetProfit(Number(e.target.value))}
+            />
+          </div>
+          <div>
+            <label className="field-label">Min margin %</label>
+            <input
+              className="field-input w-24"
+              type="number"
+              min={0}
+              value={minMarginPct}
+              onChange={(e) => setMinMarginPct(Number(e.target.value))}
             />
           </div>
           <button

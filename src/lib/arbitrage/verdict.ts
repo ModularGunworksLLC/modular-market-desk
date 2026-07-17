@@ -7,6 +7,9 @@ import type { Workflow } from "@/lib/desk-mode";
 export interface VerdictInput {
   netProfit: number;
   targetProfit: number;
+  /** Margin on all-in (%). Must clear minMarginPct for GO. */
+  marginPct: number;
+  minMarginPct: number;
   workflow: Workflow;
   allInCost: number;
   dealerFloor: number | null | undefined;
@@ -21,17 +24,33 @@ export interface VerdictResult {
   reasons: string[];
 }
 
-export function decideVerdict(params: { netProfit: number; targetProfit: number }): Verdict {
-  return params.netProfit >= params.targetProfit ? "GO" : "NO-GO";
+export function decideVerdict(params: {
+  netProfit: number;
+  targetProfit: number;
+  marginPct?: number;
+  minMarginPct?: number;
+}): Verdict {
+  if (params.netProfit < params.targetProfit) return "NO-GO";
+  const minMargin = Math.max(0, params.minMarginPct ?? 0);
+  if (minMargin > 0 && (params.marginPct ?? 0) < minMargin) return "NO-GO";
+  return "GO";
 }
 
 export function decideVerdictFull(input: VerdictInput): VerdictResult {
   const reasons: string[] = [];
   let verdict: Verdict = "GO";
+  const minMargin = Math.max(0, input.minMarginPct);
 
   if (input.netProfit < input.targetProfit) {
     reasons.push(
       `Profit $${input.netProfit.toFixed(2)} is below $${input.targetProfit.toFixed(2)} target.`,
+    );
+    verdict = "NO-GO";
+  }
+
+  if (minMargin > 0 && input.marginPct < minMargin) {
+    reasons.push(
+      `Margin ${input.marginPct.toFixed(1)}% is below ${minMargin.toFixed(1)}% floor.`,
     );
     verdict = "NO-GO";
   }
@@ -62,7 +81,7 @@ export function decideVerdictFull(input: VerdictInput): VerdictResult {
   }
 
   if (verdict === "GO" && reasons.length === 0) {
-    reasons.push("Clears profit floor and sourcing rules.");
+    reasons.push("Clears profit floor, margin floor, and sourcing rules.");
   }
 
   return { verdict, reasons };

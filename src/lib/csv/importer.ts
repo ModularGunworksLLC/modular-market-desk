@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { Readable } from "node:stream";
 import type { Readable as ReadableStream } from "node:stream";
 
+import { round2 } from "@/lib/arbitrage/fees";
 import { db } from "@/lib/db";
 import { catalogItems, type CsvColumnMap, type NewCatalogItem } from "@/lib/db/schema";
 
@@ -60,12 +61,16 @@ function resolveHeaders(headers: string[], columnMap: CsvColumnMap): Partial<Rec
   return resolved;
 }
 
+/**
+ * Parse a single price cell. Takes the first currency-like number so ranges
+ * like "$12.99-$15" become 12.99 (not 12.9915 from naive digit-stripping).
+ */
 function parseMoney(value: string | undefined): number | null {
   if (!value) return null;
-  const cleaned = value.replace(/[^0-9.]/g, "");
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
+  const m = value.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function parseQty(value: string | undefined): number | null {
@@ -94,8 +99,9 @@ function rowToItem(
   };
 
   const description = cell("description") ?? "";
-  const manufacturer = cell("manufacturer") ?? description.split(" ")[0] ?? "Unknown";
-  const model = cell("model") ?? description;
+  // Prefer explicit manufacturer; never invent from the first word of a description.
+  const manufacturer = (cell("manufacturer") || "").trim() || "Unknown";
+  const model = (cell("model") || "").trim() || description;
   const dealerPrice =
     parseMoney(cell("dealerPrice")) ??
     parseMoney(cell("salePrice")) ??
@@ -117,9 +123,9 @@ function rowToItem(
     (salePrice != null && salePrice > 0 && salePrice < dealerPrice) ||
     (msrp != null && msrp > dealerPrice);
 
-  // SQLite real columns expect numbers; round to cents for clean storage.
+  // SQLite real columns expect numbers; round to cents at the write boundary.
   const money = (n: number | null | undefined): number | null =>
-    n == null ? null : Math.round(n * 100) / 100;
+    n == null ? null : round2(n);
 
   const effectiveDealer =
     salePrice != null && salePrice > 0 && salePrice < dealerPrice ? salePrice : dealerPrice;

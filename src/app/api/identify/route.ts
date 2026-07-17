@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { IdentifyError, identifyFirearm } from "@/lib/identify";
 import { persistIdentifySnapshot } from "@/lib/identify/persist";
+import { errorMessage } from "@/lib/api-error";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -43,6 +44,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (err instanceof IdentifyError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(err) }, { status: 500 });
   }
 }

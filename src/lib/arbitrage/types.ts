@@ -34,7 +34,7 @@ export interface DealInput {
   listingUpgrades: number;
   /** Profit floor in dollars for a GO verdict (flat rule). */
   targetProfit: number;
-  /** Legacy field — not used for verdict or max bid (kept for API compat). */
+  /** Minimum margin on all-in (%). GO requires marginPct >= this; also caps max bid. */
   minMarginPct: number;
   /**
    * Local sales-tax rate as a fraction (e.g. 0.09 for 9%).
@@ -91,9 +91,9 @@ export interface EvaluationResult {
   decisionAnchor: DecisionAnchor;
   /** Market anchor used for chosen scenario sell price. */
   decisionSellPrice: number;
-  /** Always gunbroker — official verdict/max bid use GB fees. */
+  /** Which exit channel drives verdict + headline max bid. Default gunbroker. */
   decisionRoute: SellRoute;
-  /** Route with higher net at decision anchor (informational). */
+  /** Higher-netting route at decision anchor (informational upside). */
   upsideRoute: SellRoute;
   /** Max hammer from profit math only (before new-floor cap). */
   profitMaxHammer: number;

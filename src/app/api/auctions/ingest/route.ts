@@ -2,6 +2,7 @@ import { z } from "zod";
 import { NextResponse } from "next/server";
 
 import { AuctionIngestError, ingestHibidAuction, lotsToBatchCsv } from "@/lib/auctions/hibid";
+import { errorMessage } from "@/lib/api-error";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -37,6 +38,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (err instanceof AuctionIngestError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(err) }, { status: 500 });
   }
 }

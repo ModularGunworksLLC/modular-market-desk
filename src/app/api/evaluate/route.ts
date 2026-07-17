@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server";
 
+import { errorMessage } from "@/lib/api-error";
 import { EvaluationError, runEvaluation } from "@/lib/evaluate-pipeline";
 import { evaluateSchema } from "@/lib/validation";
 
@@ -28,6 +29,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (err instanceof EvaluationError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(err) }, { status: 500 });
   }
 }

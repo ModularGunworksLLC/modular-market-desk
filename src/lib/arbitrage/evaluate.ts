@@ -3,9 +3,12 @@
  *
  * For each SOLD percentile scenario (P25 / Median / P75):
  *   - compute Route A (GunBroker) and Route B (Local AL) net proceeds
- *   - conservative profit / maxBid / verdict use GunBroker (Route A) only
- *   - local profit / local maxBid exposed for side-by-side comparison
- * The decision scenario is P25 (conservative). Verdict + headline numbers come from it.
+ *   - scenario.netProfit / maxBid use GunBroker; local* fields are side-by-side
+ *   - bestRoute / bestNet = higher of A vs B (informational upside)
+ *
+ * Headline verdict + max bid use the user-selected sellChannel
+ * (gunbroker → Route A, local → Route B), not auto-max.
+ * Decision anchor is P25 sold (used) or lowest ask (vendor).
  */
 
 import { allInCost as computeAllIn } from "./acquisition";
@@ -56,6 +59,7 @@ function evaluateScenario(
 
   const bidParams = {
     targetProfit: input.targetProfit,
+    minMarginPct: input.minMarginPct,
     inboundShip: input.inboundShip,
     buyerPremiumPct: input.buyerPremiumPct,
   };
@@ -133,6 +137,8 @@ export function evaluateDeal(
   const { verdict, reasons } = decideVerdictFull({
     netProfit: channelProfit,
     targetProfit: input.targetProfit,
+    marginPct: channelMargin,
+    minMarginPct: input.minMarginPct,
     workflow,
     allInCost: allIn,
     dealerFloor: opts?.dealerFloor,

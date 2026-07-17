@@ -77,7 +77,9 @@ Deduct every leak:
     masterFflFee     = 5.00                        // flat $5 Master FFL transfer document fee
     cardFee          = 0.03 * (G + outboundShip)   // 3% card processing on the TOTAL charged to buyer
     listingUpgrades  = user input, clamped to [0, 5] dollars (typical $1-$5)
-    netA = G - fvf - masterFflFee - outboundShip - cardFee - listingUpgrades
+    // When buyerPaysOutboundShip / buyerPaysCardFee are true (defaults), ship/card are NOT
+    // deducted from seller net (buyer pays those on the listing).
+    netA = G - fvf - masterFflFee - (ship unless buyerPays) - (card unless buyerPays) - listingUpgrades
 
 ### Route B - Local Alabama sale (forum / face-to-face pickup)
 No platform, no shipping. The local price is **tax-inclusive**: the seller must remit AL sales tax
@@ -90,29 +92,40 @@ out of the proceeds, so we **back the 9% tax out of gross** before netting.
 > Worked example (user's own): list/sell at $399 locally -> sellerGross = 399 / 1.09 = $366.06,
 > taxAbsorbed = $32.94. That $32.94 is paid out of the proceeds.
 
-### Profit, margin, best route (per sell scenario)
-    bestNet   = max(netA, netB)                    // pick the higher-netting exit
-    netProfit = bestNet - allInCost
-    marginPct = allInCost > 0 ? (netProfit / allInCost) * 100 : 0
+### Profit, margin, decision channel (per sell scenario)
+Scenarios always compute both routes. `bestRoute` / `bestNet` = max(netA, netB) for
+informational upside only.
+
+Headline profit / margin / max bid / GO-NO-GO use the user-selected **sellChannel**:
+    channelNet = sellChannel === "local" ? netB : netA
+    netProfit  = channelNet - allInCost
+    marginPct  = allInCost > 0 ? (netProfit / allInCost) * 100 : 0
 
 ### Max Bid (dynamic ceiling, works backward from market data)
 The highest HAMMER price that still clears BOTH the target profit and the minimum margin floor,
-evaluated at the chosen sell scenario's `bestNet`:
-    maxAllIn  = min( bestNet - targetProfit, bestNet / (1 + minMarginPct/100) )
+evaluated at the chosen sell channel's `channelNet`:
+    maxAllIn  = min( channelNet - targetProfit, channelNet / (1 + minMarginPct/100) )
     maxBid    = max( 0, (maxAllIn - inboundShip) / (1 + buyerPremiumPct/100) )
+(When minMarginPct is 0, the margin term is channelNet itself so maxAllIn = channelNet - targetProfit.)
 
 ### Verdict (definitive)
     GO     when netProfit >= targetProfit AND marginPct >= minMarginPct
+           (plus mode rules: vendor asking/wholesale, used new-floor buffer)
     NO-GO  otherwise
 (`targetProfit`, `minMarginPct` come from the request or the DEAL_* env defaults.)
 
 ### Defaults (env-overridable; see .env.example)
-    DEAL_TARGET_PROFIT=75   DEAL_MIN_MARGIN_PCT=15   DEAL_DEFAULT_BUYER_PREMIUM_PCT=18
+    DEAL_TARGET_PROFIT=50   DEAL_MIN_MARGIN_PCT=15   DEAL_DEFAULT_BUYER_PREMIUM_PCT=18
     DEAL_DEFAULT_LISTING_UPGRADE=3   DEAL_DEFAULT_OUTBOUND_SHIP=30
+
+### Desk access gate
+When `DESK_AUTH_SECRET` is set, middleware requires a session cookie (from `/login`) or
+`Authorization: Bearer <DESK_AUTH_SECRET>` on all non-public routes. When unset, auth is off (dev).
 
 ### Rounding
 Round only at output with `round2(x) = Math.round((x + Number.EPSILON) * 100) / 100`.
-Never round intermediate fee/tax terms before summing.
+Never round intermediate fee/tax terms before summing. `allInCost` is unrounded until the
+evaluate result / DB write boundary.
 
 ## 6. Firewall-safe ingestion
 

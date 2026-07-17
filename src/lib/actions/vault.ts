@@ -38,7 +38,7 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
   try {
     encrypted = encryptSecret(normalized);
   } catch (err) {
-    return { ok: false, message: `Vault key error: ${(err as Error).message}` };
+    return { ok: false, message: `Vault key error: ${err instanceof Error ? err.message : String(err)}` };
   }
 
   const expiresAt = expiresRaw ? new Date(expiresRaw) : null;
@@ -74,7 +74,7 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
     revalidatePath("/import");
     return { ok: true, message: `Saved ${label} (${kind}).` };
   } catch (err) {
-    return { ok: false, message: (err as Error).message };
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -87,7 +87,7 @@ export async function revokeConnection(id: string): Promise<ActionResult> {
     revalidatePath("/import");
     return { ok: true, message: "Connection revoked." };
   } catch (err) {
-    return { ok: false, message: (err as Error).message };
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
 }
 

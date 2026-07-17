@@ -9,10 +9,8 @@ import type { DeskMode } from "@/lib/desk-mode";
 import { vendorLabel } from "@/lib/tracked-vendors";
 import type { CompFilterMeta, CompMatchTier } from "@/lib/comp-filter";
 import { matchTierLabel } from "@/lib/comp-filter";
+import { parseMoneyFieldOrZero, usd } from "@/lib/format";
 import type { WholesaleGrid } from "@/lib/wholesale";
-
-const usd = (n: number | undefined) =>
-  n == null || !Number.isFinite(n) ? "—" : n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 function matchTierClass(tier: CompMatchTier | undefined): string {
   if (tier === "exact-upc" || tier === "exact-mpn") return "text-desk-go";
@@ -82,7 +80,7 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
 
   const isVendor = deskMode.workflow === "vendor";
   const isTradeIn = deskMode.usedSubtype === "tradein";
-  const liveHammer = Number(liveBid) || 0;
+  const liveHammer = parseMoneyFieldOrZero(liveBid);
   const exitLabel = result.input.sellChannel === "local" ? "local sale" : "GunBroker";
   const exitShort = result.input.sellChannel === "local" ? "Local" : "GB";
 

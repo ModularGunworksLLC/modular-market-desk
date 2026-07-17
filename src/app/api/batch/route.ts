@@ -63,14 +63,13 @@ const batchSchema = z.object({
       buyerPaysOutboundShip: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysOutboundShip),
       buyerPaysCardFee: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysCardFee),
       targetProfit: z.number().nonnegative().optional().default(DEAL_DEFAULTS.targetProfit),
+      minMarginPct: z.number().min(0).optional().default(DEAL_DEFAULTS.minMarginPct),
       bidIncrements: z.array(bidIncrementBandSchema).optional(),
     })
     .default({}),
 });
 
 type BatchRowInput = z.infer<typeof rowSchema>;
-
-const fmt = (n: number | null) => (n == null ? "—" : `$${n.toFixed(2)}`);
 
 export async function POST(request: Request): Promise<Response> {
   const json = await request.json().catch(() => null);
@@ -95,10 +94,6 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  console.log(
-    `[batch] start: ${rows.length} lots, token=${token ? "present" : "MISSING (comps will be skipped)"}`,
-  );
-
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -114,32 +109,22 @@ export async function POST(request: Request): Promise<Response> {
           const row = rows[idx]!;
           const result = await evaluateRow(row, defaults, token);
           completed++;
-          // Per-lot diagnostic: what resolved, how many comps, and the reason.
           if (result.error) tally.errored++;
           else if (result.soldCount === 0) tally.noComps++;
           else if (result.verdict === "GO") tally.go++;
           else tally.nogo++;
-          console.log(
-            `[batch] lot ${result.lot} "${result.label}" [${result.category}] -> ` +
-              (result.error
-                ? `ERROR: ${result.error}`
-                : `${result.soldCount} comps` +
-                  (result.soldCount > 0
-                    ? `, P25 ${fmt(result.soldP25)}, next ${fmt(result.nextBid)}, maxBid ${fmt(result.maxBid)}, ${result.verdict}`
-                    : "") +
-                  (result.dealerFloor != null ? `, dealerFloor ${fmt(result.dealerFloor)}` : "") +
-                  ` | ${result.incrementSource} | ${result.matchNote}`),
-          );
           send({ type: "result", completed, row: result });
         }
       };
 
       const workers = Array.from({ length: Math.min(CONCURRENCY, rows.length) }, () => worker());
       await Promise.all(workers);
-      console.log(
-        `[batch] done: ${completed} lots — ${tally.go} GO, ${tally.nogo} NO-GO, ${tally.noComps} no-comps, ${tally.errored} errored`,
-      );
-      send({ type: "done", completed });
+      send({
+        type: "done",
+        completed,
+        tally,
+        hasToken: Boolean(token),
+      });
       controller.close();
     },
   });
@@ -217,7 +202,7 @@ async function evaluateRow(
     buyerPaysCardFee: defaults.buyerPaysCardFee,
     listingUpgrades: defaults.listingUpgrades,
     targetProfit: defaults.targetProfit,
-    minMarginPct: 0,
+    minMarginPct: defaults.minMarginPct,
     sellChannel: "gunbroker",
     salesTaxPct: DEAL_DEFAULTS.salesTaxPct,
     autoComps: true,
@@ -272,6 +257,6 @@ async function evaluateRow(
       error: null,
     };
   } catch (err) {
-    return { ...base, error: (err as Error).message };
+    return { ...base, error: err instanceof Error ? err.message : String(err) };
   }
 }

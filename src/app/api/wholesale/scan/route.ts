@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { errorMessage } from "@/lib/api-error";
 import { scanWholesaleDeals } from "@/lib/wholesale-scan";
 
 export const runtime = "nodejs";
@@ -24,7 +25,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     body = bodySchema.parse(await request.json());
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 400 });
+    return NextResponse.json({ error: errorMessage(err) }, { status: 400 });
   }
 
   try {
@@ -37,6 +38,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     return NextResponse.json({ ok: true, ...summary });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(err) }, { status: 500 });
   }
 }

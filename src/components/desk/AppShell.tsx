@@ -35,6 +35,7 @@ function NavLink({ href, label, active }: { href: string; label: string; active:
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const isLogin = pathname === "/login";
   const [open, setOpen] = useState(false);
   const [defaults, setDefaults] = useState<DeskDealerDefaults>(defaultDealerDefaults);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -49,6 +50,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 1200);
     window.dispatchEvent(new CustomEvent("desk-defaults-changed", { detail: next }));
+  }
+
+  if (isLogin) {
+    return <>{children}</>;
   }
 
   return (
@@ -140,6 +145,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   className="field-input"
                   value={defaults.targetProfit}
                   onChange={(e) => setDefaults((d) => ({ ...d, targetProfit: e.target.value }))}
+                  onBlur={() => persist(defaults)}
+                />
+              </div>
+
+              <div>
+                <label className="field-label">Min margin %</label>
+                <input
+                  className="field-input"
+                  value={defaults.minMarginPct}
+                  onChange={(e) => setDefaults((d) => ({ ...d, minMarginPct: e.target.value }))}
                   onBlur={() => persist(defaults)}
                 />
               </div>

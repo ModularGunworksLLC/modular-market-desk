@@ -10,6 +10,7 @@ import { z } from "zod";
 import { syncChattanoogaCatalog, ChattanoogaApiError } from "@/lib/chattanooga/sync";
 import { syncTawCatalog, TawFeedError } from "@/lib/taw/feed";
 import { API_SYNC_VENDORS } from "@/lib/tracked-vendors";
+import { errorMessage } from "@/lib/api-error";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -38,7 +39,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const result = vendor === "chattanooga" ? await syncChattanoogaCatalog() : await syncTawCatalog();
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    const message = (err as Error).message;
+    const message = errorMessage(err);
     let status = 500;
     if (err instanceof TawFeedError || err instanceof ChattanoogaApiError) {
       status = err.status ?? 502;

@@ -26,15 +26,32 @@ function num(name: string, fallback: number): number {
   return Number.isFinite(v) ? v : fallback;
 }
 
+/**
+ * Server-side deal defaults (env-overridable).
+ * Do NOT import this module from client components — `process.env.DEAL_*` is not
+ * available in the browser bundle. Clients use `@/lib/arbitrage/client-defaults`.
+ */
 export const DEAL_DEFAULTS = {
   targetProfit: num("DEAL_TARGET_PROFIT", 50),
-  minMarginPct: num("DEAL_MIN_MARGIN_PCT", 0),
+  minMarginPct: num("DEAL_MIN_MARGIN_PCT", 15),
   buyerPremiumPct: num("DEAL_DEFAULT_BUYER_PREMIUM_PCT", 18),
   listingUpgrades: num("DEAL_DEFAULT_LISTING_UPGRADE", 3),
   outboundShip: num("DEAL_DEFAULT_OUTBOUND_SHIP", 30),
   /** Default local sales tax percent (Alabama). */
   salesTaxPct: num("DEAL_DEFAULT_SALES_TAX_PCT", 9),
   /** Default: buyer pays ship + card on GunBroker listings (not absorbed in net). */
+  buyerPaysOutboundShip: true,
+  buyerPaysCardFee: true,
+} as const;
+
+/** Keep in sync with CLIENT_DEAL_DEFAULTS in client-defaults.ts. */
+export const DEAL_DEFAULT_FALLBACKS = {
+  targetProfit: 50,
+  minMarginPct: 15,
+  buyerPremiumPct: 18,
+  listingUpgrades: 3,
+  outboundShip: 30,
+  salesTaxPct: 9,
   buyerPaysOutboundShip: true,
   buyerPaysCardFee: true,
 } as const;

@@ -2,14 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
+import { CLIENT_DEAL_DEFAULTS } from "@/lib/arbitrage/client-defaults";
 import { DEFAULT_BID_INCREMENTS, type BidIncrementBand } from "@/lib/auctions/bid-increments";
 import { parseBatchSheet, type BatchRow } from "@/lib/batch/parse";
 import type { BatchResultRow, BatchStreamEvent } from "@/lib/batch/types";
 import { loadDealerDefaults } from "@/lib/desk-defaults";
-
-const usd = (n: number | null | undefined) =>
-  n == null || !Number.isFinite(n) ? "—" : n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+import { parseMoneyFieldOrZero, usd } from "@/lib/format";
 
 type SortKey = "lot" | "headroom" | "netProfit" | "maxBid" | "soldCount";
 
@@ -22,11 +20,12 @@ const SAMPLE = `Lot,Title,Current Bid,Buyer Premium
 export default function BatchPage() {
   const [text, setText] = useState("");
   const [defaults, setDefaults] = useState({
-    targetProfit: String(DEAL_DEFAULTS.targetProfit),
-    buyerPremiumPct: String(DEAL_DEFAULTS.buyerPremiumPct),
+    targetProfit: String(CLIENT_DEAL_DEFAULTS.targetProfit),
+    minMarginPct: String(CLIENT_DEAL_DEFAULTS.minMarginPct),
+    buyerPremiumPct: String(CLIENT_DEAL_DEFAULTS.buyerPremiumPct),
     outboundShip: "",
     inboundShip: "0",
-    listingUpgrades: String(DEAL_DEFAULTS.listingUpgrades),
+    listingUpgrades: String(CLIENT_DEAL_DEFAULTS.listingUpgrades),
     condition: "any" as "new" | "used" | "any",
     buyerPaysOutboundShip: true,
     buyerPaysCardFee: true,
@@ -56,14 +55,23 @@ export default function BatchPage() {
     setDefaults((prev) => ({
       ...prev,
       targetProfit: d.targetProfit || prev.targetProfit,
+      minMarginPct: d.minMarginPct || prev.minMarginPct,
       buyerPremiumPct: d.buyerPremiumPct || prev.buyerPremiumPct,
       bidIncrements: d.bidIncrements?.length ? d.bidIncrements : prev.bidIncrements,
     }));
     const onDefaults = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { bidIncrements?: BidIncrementBand[] } | undefined;
-      if (detail?.bidIncrements?.length) {
-        setDefaults((prev) => ({ ...prev, bidIncrements: detail.bidIncrements! }));
-      }
+      const detail = (e as CustomEvent).detail as {
+        bidIncrements?: BidIncrementBand[];
+        targetProfit?: string;
+        minMarginPct?: string;
+      } | undefined;
+      if (!detail) return;
+      setDefaults((prev) => ({
+        ...prev,
+        ...(detail.bidIncrements?.length ? { bidIncrements: detail.bidIncrements } : {}),
+        ...(detail.targetProfit ? { targetProfit: detail.targetProfit } : {}),
+        ...(detail.minMarginPct ? { minMarginPct: detail.minMarginPct } : {}),
+      }));
     };
     window.addEventListener("desk-defaults-changed", onDefaults);
     return () => window.removeEventListener("desk-defaults-changed", onDefaults);
@@ -198,16 +206,17 @@ export default function BatchPage() {
           })),
           defaults: {
             condition: defaults.condition,
-            buyerPremiumPct: Number(defaults.buyerPremiumPct) || 0,
-            inboundShip: Number(defaults.inboundShip) || 0,
+            buyerPremiumPct: parseMoneyFieldOrZero(defaults.buyerPremiumPct),
+            inboundShip: parseMoneyFieldOrZero(defaults.inboundShip),
             outboundShip:
               defaults.outboundShip.trim() === ""
                 ? undefined
-                : Number(defaults.outboundShip) || 0,
-            listingUpgrades: Number(defaults.listingUpgrades) || 0,
+                : parseMoneyFieldOrZero(defaults.outboundShip),
+            listingUpgrades: parseMoneyFieldOrZero(defaults.listingUpgrades),
             buyerPaysOutboundShip: defaults.buyerPaysOutboundShip,
             buyerPaysCardFee: defaults.buyerPaysCardFee,
-            targetProfit: Number(defaults.targetProfit) || 0,
+            targetProfit: parseMoneyFieldOrZero(defaults.targetProfit),
+            minMarginPct: parseMoneyFieldOrZero(defaults.minMarginPct),
             bidIncrements: defaults.bidIncrements,
           },
         }),
@@ -414,6 +423,7 @@ export default function BatchPage() {
           <h2 className="pt-1 text-sm font-semibold text-desk-muted">Defaults applied to every lot</h2>
           <div className="grid grid-cols-2 gap-3">
             <NumField label="Target profit ($)" v={defaults.targetProfit} on={setD("targetProfit")} />
+            <NumField label="Min margin %" v={defaults.minMarginPct} on={setD("minMarginPct")} />
             <NumField label="Buyer premium %" v={defaults.buyerPremiumPct} on={setD("buyerPremiumPct")} />
             <NumField label="Inbound ship ($)" v={defaults.inboundShip} on={setD("inboundShip")} />
             <NumField

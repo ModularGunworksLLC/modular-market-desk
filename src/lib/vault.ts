@@ -34,9 +34,13 @@ export function normalizeVaultSecret(secret: string): string {
   return s;
 }
 
-/** Remove bearer tokens from strings before surfacing to clients or logs. */
+/** Remove bearer tokens / JWTs / long secrets from strings before surfacing to clients or logs. */
 export function redactSecrets(text: string): string {
-  return text.replace(/Bearer\s+eyJ[^\s"]+/gi, "Bearer [redacted]");
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, "Bearer [redacted]")
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted-jwt]")
+    .replace(/(api[_-]?sid|api[_-]?token|session|cookie)\s*[:=]\s*["']?[^\s"',;]+/gi, "$1=[redacted]")
+    .replace(/\b[A-Za-z0-9_-]{40,}\b/g, "[redacted-token]");
 }
 
 export function decryptSecret(payload: string): string {
