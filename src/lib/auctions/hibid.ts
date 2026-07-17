@@ -31,7 +31,48 @@ function classifyTitle(title: string): AuctionLot["kind"] {
   return "other";
 }
 
+type LotBidMeta = {
+  requiredBid: number | null;
+  bidIncrementAmount: number | null;
+  highBid: number | null;
+};
+
+/** Pull per-lot required_bid / bid_increment_amount from embedded HiBid Apollo JSON. */
+function extractLotBidMetaFromHtml(html: string): Map<string, LotBidMeta> {
+  const map = new Map<string, LotBidMeta>();
+  const re = /"lot_number"\s*:\s*"?(\d+)"?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const lot = m[1];
+    if (!lot) continue;
+    const slice = html.slice(m.index, m.index + 3500);
+    const reqM = slice.match(/"required_bid"\s*:\s*([\d.]+)/);
+    const incM = slice.match(/"bid_increment_amount"\s*:\s*([\d.]+)/);
+    const highM =
+      slice.match(/"high_bid"\s*:\s*([\d.]+)/) ||
+      slice.match(/"winning_bid_amount"\s*:\s*([\d.]+)/) ||
+      slice.match(/"current_bid"\s*:\s*([\d.]+)/);
+    const requiredBid = reqM?.[1] ? Number(reqM[1]) : null;
+    const bidIncrementAmount = incM?.[1] ? Number(incM[1]) : null;
+    const highBid = highM?.[1] ? Number(highM[1]) : null;
+    const prev = map.get(lot);
+    map.set(lot, {
+      requiredBid:
+        requiredBid != null && Number.isFinite(requiredBid)
+          ? requiredBid
+          : (prev?.requiredBid ?? null),
+      bidIncrementAmount:
+        bidIncrementAmount != null && Number.isFinite(bidIncrementAmount)
+          ? bidIncrementAmount
+          : (prev?.bidIncrementAmount ?? null),
+      highBid: highBid != null && Number.isFinite(highBid) ? highBid : (prev?.highBid ?? null),
+    });
+  }
+  return map;
+}
+
 function extractLotsFromHtml(html: string, baseUrl: string): AuctionLot[] {
+  const bidMeta = extractLotBidMetaFromHtml(html);
   const lots: AuctionLot[] = [];
   const cardRe = /data-lotnumber="(\d+)"[\s\S]*?<\/div><\/div><\/div>/g;
   let block: RegExpExecArray | null;
@@ -68,10 +109,14 @@ function extractLotsFromHtml(html: string, baseUrl: string): AuctionLot[] {
       }
     }
 
+    const meta = bidMeta.get(lot);
+    const cardBid = bidM?.[1] ? parseFloat(bidM[1].replace(/,/g, "")) : null;
     lots.push({
       lot,
       title,
-      currentBid: bidM?.[1] ? parseFloat(bidM[1].replace(/,/g, "")) : null,
+      currentBid: cardBid ?? meta?.highBid ?? null,
+      requiredBid: meta?.requiredBid ?? null,
+      bidIncrementAmount: meta?.bidIncrementAmount ?? null,
       bidCount: bidsM?.[1] ? parseInt(bidsM[1], 10) : 0,
       imageUrls: [...new Set(imageUrls)].slice(0, 6),
       kind: classifyTitle(title),
@@ -155,6 +200,9 @@ export async function ingestHibidAuction(
 
   const firearmLots = all.filter((l) => l.kind === "firearm");
   const skipped = all.length - firearmLots.length;
+  const hasListingIncrements = all.some(
+    (l) => (l.requiredBid != null && l.requiredBid > 0) || (l.bidIncrementAmount != null && l.bidIncrementAmount > 0),
+  );
 
   return {
     auctionUrl: base.toString(),
@@ -163,6 +211,7 @@ export async function ingestHibidAuction(
     firearmLots,
     skipped,
     warnings,
+    hasListingIncrements,
   };
 }
 
@@ -171,11 +220,13 @@ export function lotsToBatchCsv(
   lots: AuctionLot[],
   buyerPremiumPct = 15,
 ): string {
-  const header = "Lot,Title,Current Bid,Buyer Premium";
+  const header = "Lot,Title,Current Bid,Required Bid,Bid Increment,Buyer Premium";
   const lines = lots.map((l) => {
     const title = `"${l.title.replace(/"/g, '""')}"`;
     const bid = l.currentBid == null ? "" : String(l.currentBid);
-    return `${l.lot},${title},${bid},${buyerPremiumPct}`;
+    const required = l.requiredBid == null ? "" : String(l.requiredBid);
+    const inc = l.bidIncrementAmount == null ? "" : String(l.bidIncrementAmount);
+    return `${l.lot},${title},${bid},${required},${inc},${buyerPremiumPct}`;
   });
   return [header, ...lines].join("\n");
 }

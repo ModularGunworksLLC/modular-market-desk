@@ -6,10 +6,15 @@ export interface BatchResultRow {
   label: string;
   category: string;
   currentBid: number | null;
+  /** Next legal hammer (listing required_bid or schedule). */
+  nextBid: number | null;
+  /** Max Bid floored to a legal increment step. */
+  walkAwayBid: number | null;
   verdict: "GO" | "NO-GO" | null;
   maxBid: number | null;
-  /** Lower of profit-based max bid and the new dealer floor — the true walk-away. */
+  /** Lower of profit-based max bid and the new dealer floor — the true walk-away ceiling. */
   walkAway: number | null;
+  /** Profit at nextBid (actionable), not current bid. */
   netProfit: number | null;
   localProfit: number | null;
   soldCount: number;
@@ -17,7 +22,9 @@ export interface BatchResultRow {
   soldMedian: number | null;
   dealerFloor: number | null;
   bestDealer: string | null;
+  /** maxBid − nextBid (room after the raise you must make). */
   headroom: number | null;
+  incrementSource: "listing" | "settings";
   matchNote: string;
   matchScore: number | null;
   /** Outdoor Analytics catalog hit used for sold/asking comps (when auto-matched). */
@@ -32,6 +39,6 @@ export interface BatchResultRow {
 }
 
 export type BatchStreamEvent =
-  | { type: "meta"; total: number; hasToken: boolean }
+  | { type: "meta"; total: number; hasToken: boolean; incrementSourceHint?: string }
   | { type: "result"; completed: number; row: BatchResultRow }
   | { type: "done"; completed: number };

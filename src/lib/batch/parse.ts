@@ -20,6 +20,10 @@ export interface BatchRow {
   upc: string;
   category: string;
   currentBid: number | null;
+  /** Listing next required hammer (HiBid), when known. */
+  requiredBid: number | null;
+  /** Listing bid increment at this price level, when known. */
+  bidIncrementAmount: number | null;
   buyerPremiumPct: number | null;
   /** The raw title blob, when present — surfaced for analyst review. */
   rawTitle: string;
@@ -43,6 +47,8 @@ type Field =
   | "upc"
   | "category"
   | "currentBid"
+  | "requiredBid"
+  | "bidIncrementAmount"
   | "buyerPremiumPct";
 
 const HEADER_ALIASES: Record<Field, string[]> = {
@@ -94,6 +100,14 @@ const HEADER_ALIASES: Record<Field, string[]> = {
     "estimatelow",
     "hammer",
     "amount",
+  ],
+  requiredBid: ["requiredbid", "nextbid", "minnextbid", "minimumnextbid", "minimumbid"],
+  bidIncrementAmount: [
+    "bidincrement",
+    "bidincrementamount",
+    "increment",
+    "incrementamount",
+    "bidstep",
   ],
   buyerPremiumPct: ["buyerspremium", "buyerpremium", "premium", "bp", "bppct", "premiumpct"],
 };
@@ -660,6 +674,8 @@ export function parseBatchSheet(
     }
 
     const currentBid = parseMoney(get("currentBid"));
+    const requiredBid = parseMoney(get("requiredBid"));
+    const bidIncrementAmount = parseMoney(get("bidIncrementAmount"));
     const buyerPremiumPct = parsePct(get("buyerPremiumPct")) ?? opts?.defaultBuyerPremiumPct ?? null;
     const unresolved = !manufacturer.trim() || !model.trim();
 
@@ -672,6 +688,8 @@ export function parseBatchSheet(
       upc: get("upc").replace(/[^0-9]/g, ""),
       category,
       currentBid,
+      requiredBid,
+      bidIncrementAmount,
       buyerPremiumPct,
       rawTitle: rawTitle || modelCell,
       unresolved,

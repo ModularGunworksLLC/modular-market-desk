@@ -13,6 +13,12 @@ import { z } from "zod";
 
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
 import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
+import {
+  computeNextBid,
+  normalizeBidIncrements,
+  walkAwayLegalBid,
+  type BidIncrementBand,
+} from "@/lib/auctions/bid-increments";
 import { getMarketToken } from "@/lib/connections";
 import type { BatchResultRow } from "@/lib/batch/types";
 import { runEvaluation } from "@/lib/evaluate-pipeline";
@@ -33,9 +39,16 @@ const rowSchema = z.object({
   category: z.string().optional().default("handgun"),
   upc: z.string().optional().default(""),
   currentBid: z.number().nonnegative().nullable().optional(),
+  requiredBid: z.number().nonnegative().nullable().optional(),
+  bidIncrementAmount: z.number().positive().nullable().optional(),
   buyerPremiumPct: z.number().min(0).max(100).nullable().optional(),
   /** Per-lot inbound ship override (e.g. handgun 2-day vs rifle ground). */
   inboundShip: z.number().nonnegative().nullable().optional(),
+});
+
+const bidIncrementBandSchema = z.object({
+  upTo: z.number().positive(),
+  increment: z.number().positive(),
 });
 
 const batchSchema = z.object({
@@ -50,6 +63,7 @@ const batchSchema = z.object({
       buyerPaysOutboundShip: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysOutboundShip),
       buyerPaysCardFee: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysCardFee),
       targetProfit: z.number().nonnegative().optional().default(DEAL_DEFAULTS.targetProfit),
+      bidIncrements: z.array(bidIncrementBandSchema).optional(),
     })
     .default({}),
 });
@@ -111,10 +125,10 @@ export async function POST(request: Request): Promise<Response> {
                 ? `ERROR: ${result.error}`
                 : `${result.soldCount} comps` +
                   (result.soldCount > 0
-                    ? `, P25 ${fmt(result.soldP25)}, maxBid ${fmt(result.maxBid)}, ${result.verdict}`
+                    ? `, P25 ${fmt(result.soldP25)}, next ${fmt(result.nextBid)}, maxBid ${fmt(result.maxBid)}, ${result.verdict}`
                     : "") +
                   (result.dealerFloor != null ? `, dealerFloor ${fmt(result.dealerFloor)}` : "") +
-                  ` | ${result.matchNote}`),
+                  ` | ${result.incrementSource} | ${result.matchNote}`),
           );
           send({ type: "result", completed, row: result });
         }
@@ -145,12 +159,24 @@ async function evaluateRow(
   token: string | null,
 ): Promise<BatchResultRow> {
   const label = `${row.manufacturer} ${row.model}${row.caliber ? ` ${row.caliber}` : ""}`.trim();
+  const schedule: BidIncrementBand[] = normalizeBidIncrements(defaults.bidIncrements);
+  const listingHints = {
+    requiredBid: row.requiredBid ?? null,
+    incrementAmount: row.bidIncrementAmount ?? null,
+  };
+  const usedListing =
+    (listingHints.requiredBid != null && listingHints.requiredBid > 0) ||
+    (listingHints.incrementAmount != null && listingHints.incrementAmount > 0);
+  const nextBid = computeNextBid(row.currentBid ?? null, schedule, listingHints);
+
   const base: BatchResultRow = {
     rowNumber: row.rowNumber,
     lot: row.lot,
     label,
     category: row.category,
     currentBid: row.currentBid ?? null,
+    nextBid,
+    walkAwayBid: null,
     verdict: null,
     maxBid: null,
     walkAway: null,
@@ -162,11 +188,15 @@ async function evaluateRow(
     dealerFloor: null,
     bestDealer: null,
     headroom: null,
+    incrementSource: usedListing ? "listing" : "settings",
     matchNote: "",
     matchScore: null,
     oaCatalog: null,
     error: null,
   };
+
+  // Evaluate economics at the NEXT legal hammer — that's the actionable bid.
+  const actionHammer = nextBid ?? row.currentBid ?? 0;
 
   const body: EvaluateRequest = {
     workflow: "used",
@@ -179,9 +209,7 @@ async function evaluateRow(
     caliber: row.caliber,
     category: row.category,
     condition: defaults.condition,
-    // A buy-sheet starts from the current bid as the working hammer; 0 still yields
-    // a valid Max Bid (the ceiling is independent of the entered hammer).
-    targetAcquisitionCost: row.currentBid ?? 0,
+    targetAcquisitionCost: actionHammer,
     inboundShip: row.inboundShip ?? defaults.inboundShip,
     buyerPremiumPct: row.buyerPremiumPct ?? defaults.buyerPremiumPct,
     outboundShip: defaults.outboundShip ?? defaultOutboundShip(row.category),
@@ -204,14 +232,24 @@ async function evaluateRow(
       maxBid != null && dealerFloor != null
         ? Math.min(maxBid, dealerFloor)
         : (maxBid ?? dealerFloor);
+    const walkAwayBid = walkAwayLegalBid(walkAway, schedule, listingHints);
+
+    let verdict: "GO" | "NO-GO" | null = sold.count > 0 ? out.result.verdict : null;
+    // Even if profit at nextBid clears, nextBid must not exceed Max Bid ceiling.
+    if (verdict === "GO" && nextBid != null && maxBid != null && nextBid > maxBid + 0.01) {
+      verdict = "NO-GO";
+    }
+
     const headroom =
-      walkAway != null && row.currentBid != null ? Math.round((walkAway - row.currentBid) * 100) / 100 : null;
+      maxBid != null && nextBid != null ? Math.round((maxBid - nextBid) * 100) / 100 : null;
 
     return {
       ...base,
-      verdict: sold.count > 0 ? out.result.verdict : null,
+      verdict,
       maxBid,
       walkAway,
+      walkAwayBid,
+      nextBid,
       netProfit: sold.count > 0 ? out.result.netProfit : null,
       localProfit: sold.count > 0 ? out.result.localNetProfit : null,
       soldCount: sold.count,

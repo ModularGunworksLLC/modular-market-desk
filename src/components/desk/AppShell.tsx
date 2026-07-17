@@ -185,6 +185,91 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 />
               </div>
 
+              <div>
+                <label className="field-label">Auction bid increments (fallback)</label>
+                <p className="mb-2 text-[11px] text-desk-muted">
+                  Used when a batch CSV has no listing next-bid. Auction URL ingest prefers HiBid{" "}
+                  <span className="text-desk-text">required bid</span> from the listing.
+                </p>
+                <div className="space-y-2 rounded-md border border-desk-border bg-desk-panel2 p-2">
+                  <div className="grid grid-cols-[1fr_1fr_auto] gap-2 text-[10px] uppercase text-desk-muted">
+                    <span>Current bid under ($)</span>
+                    <span>Raise by ($)</span>
+                    <span />
+                  </div>
+                  {defaults.bidIncrements.map((band, idx) => (
+                    <div key={idx} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                      <input
+                        className="field-input py-1.5 text-sm"
+                        inputMode="decimal"
+                        value={String(band.upTo)}
+                        onChange={(e) => {
+                          const upTo = Number(e.target.value);
+                          setDefaults((d) => {
+                            const bidIncrements = d.bidIncrements.map((b, i) =>
+                              i === idx ? { ...b, upTo: Number.isFinite(upTo) ? upTo : b.upTo } : b,
+                            );
+                            const next = { ...d, bidIncrements };
+                            saveDealerDefaults(next);
+                            window.dispatchEvent(new CustomEvent("desk-defaults-changed", { detail: next }));
+                            return next;
+                          });
+                        }}
+                      />
+                      <input
+                        className="field-input py-1.5 text-sm"
+                        inputMode="decimal"
+                        value={String(band.increment)}
+                        onChange={(e) => {
+                          const increment = Number(e.target.value);
+                          setDefaults((d) => {
+                            const bidIncrements = d.bidIncrements.map((b, i) =>
+                              i === idx
+                                ? { ...b, increment: Number.isFinite(increment) ? increment : b.increment }
+                                : b,
+                            );
+                            const next = { ...d, bidIncrements };
+                            saveDealerDefaults(next);
+                            window.dispatchEvent(new CustomEvent("desk-defaults-changed", { detail: next }));
+                            return next;
+                          });
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="rounded-md px-2 text-xs text-desk-muted hover:text-desk-nogo"
+                        disabled={defaults.bidIncrements.length <= 1}
+                        onClick={() => {
+                          const bidIncrements = defaults.bidIncrements.filter((_, i) => i !== idx);
+                          persist({ ...defaults, bidIncrements });
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="text-xs text-desk-accent hover:underline"
+                    onClick={() => {
+                      const last = defaults.bidIncrements[defaults.bidIncrements.length - 1];
+                      persist({
+                        ...defaults,
+                        bidIncrements: [
+                          ...defaults.bidIncrements,
+                          {
+                            upTo: (last?.upTo ?? 1000) * 2,
+                            increment: (last?.increment ?? 25) * 2,
+                          },
+                        ],
+                      });
+                    }}
+                  >
+                    + Add band
+                  </button>
+                </div>
+              </div>
+
               <label className="flex items-start gap-2 text-xs text-desk-text">
                 <input
                   type="checkbox"

@@ -1,6 +1,11 @@
 /** Dealer defaults persisted in localStorage for Gun Value Desk. */
 
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
+import {
+  DEFAULT_BID_INCREMENTS,
+  normalizeBidIncrements,
+  type BidIncrementBand,
+} from "@/lib/auctions/bid-increments";
 
 export const DESK_DEFAULTS_KEY = "desk-dealer-defaults-v1";
 
@@ -13,6 +18,8 @@ export type DeskDealerDefaults = {
   buyerPaysOutboundShip: boolean;
   buyerPaysCardFee: boolean;
   sellChannel: "gunbroker" | "local";
+  /** Fallback auction increment schedule when listing does not supply next bid. */
+  bidIncrements: BidIncrementBand[];
 };
 
 export function defaultDealerDefaults(): DeskDealerDefaults {
@@ -25,6 +32,7 @@ export function defaultDealerDefaults(): DeskDealerDefaults {
     buyerPaysOutboundShip: DEAL_DEFAULTS.buyerPaysOutboundShip,
     buyerPaysCardFee: DEAL_DEFAULTS.buyerPaysCardFee,
     sellChannel: "gunbroker",
+    bidIncrements: DEFAULT_BID_INCREMENTS.map((b) => ({ ...b })),
   };
 }
 
@@ -34,7 +42,11 @@ export function loadDealerDefaults(): DeskDealerDefaults {
     const raw = localStorage.getItem(DESK_DEFAULTS_KEY);
     if (!raw) return defaultDealerDefaults();
     const parsed = JSON.parse(raw) as Partial<DeskDealerDefaults>;
-    return { ...defaultDealerDefaults(), ...parsed };
+    return {
+      ...defaultDealerDefaults(),
+      ...parsed,
+      bidIncrements: normalizeBidIncrements(parsed.bidIncrements),
+    };
   } catch {
     return defaultDealerDefaults();
   }
@@ -42,5 +54,11 @@ export function loadDealerDefaults(): DeskDealerDefaults {
 
 export function saveDealerDefaults(next: DeskDealerDefaults): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(DESK_DEFAULTS_KEY, JSON.stringify(next));
+  localStorage.setItem(
+    DESK_DEFAULTS_KEY,
+    JSON.stringify({
+      ...next,
+      bidIncrements: normalizeBidIncrements(next.bidIncrements),
+    }),
+  );
 }

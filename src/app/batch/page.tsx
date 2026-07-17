@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
+import { DEFAULT_BID_INCREMENTS, type BidIncrementBand } from "@/lib/auctions/bid-increments";
 import { parseBatchSheet, type BatchRow } from "@/lib/batch/parse";
 import type { BatchResultRow, BatchStreamEvent } from "@/lib/batch/types";
+import { loadDealerDefaults } from "@/lib/desk-defaults";
 
 const usd = (n: number | null | undefined) =>
   n == null || !Number.isFinite(n) ? "—" : n.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -28,6 +30,7 @@ export default function BatchPage() {
     condition: "any" as "new" | "used" | "any",
     buyerPaysOutboundShip: true,
     buyerPaysCardFee: true,
+    bidIncrements: DEFAULT_BID_INCREMENTS.map((b) => ({ ...b })),
   });
   const [results, setResults] = useState<Map<number, BatchResultRow>>(new Map());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -35,6 +38,7 @@ export default function BatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [onlyGo, setOnlyGo] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("headroom");
+  const [incrementHint, setIncrementHint] = useState<string | null>(null);
   const [fileStatus, setFileStatus] = useState<{
     kind: "idle" | "loading" | "ok" | "error";
     message: string;
@@ -46,6 +50,24 @@ export default function BatchPage() {
   );
   const [auctionBusy, setAuctionBusy] = useState(false);
   const [auctionMsg, setAuctionMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const d = loadDealerDefaults();
+    setDefaults((prev) => ({
+      ...prev,
+      targetProfit: d.targetProfit || prev.targetProfit,
+      buyerPremiumPct: d.buyerPremiumPct || prev.buyerPremiumPct,
+      bidIncrements: d.bidIncrements?.length ? d.bidIncrements : prev.bidIncrements,
+    }));
+    const onDefaults = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { bidIncrements?: BidIncrementBand[] } | undefined;
+      if (detail?.bidIncrements?.length) {
+        setDefaults((prev) => ({ ...prev, bidIncrements: detail.bidIncrements! }));
+      }
+    };
+    window.addEventListener("desk-defaults-changed", onDefaults);
+    return () => window.removeEventListener("desk-defaults-changed", onDefaults);
+  }, []);
 
   async function ingestAuction() {
     const url = auctionUrl.trim();
@@ -69,6 +91,9 @@ export default function BatchPage() {
       setAuctionMsg(
         `Loaded ${json.sheetLots?.length ?? 0} firearm lots` +
           (json.skipped ? ` (${json.skipped} non-firearm skipped)` : "") +
+          (json.hasListingIncrements
+            ? " · Listing next-bid / increments captured from HiBid"
+            : " · No listing increments found — Settings schedule will be used") +
           (json.warnings?.length ? ` · ${json.warnings.join(" ")}` : "") +
           " · Titles parse heuristically — fix Make/Model in the sheet if needed, then Run batch",
       );
@@ -151,6 +176,7 @@ export default function BatchPage() {
     setError(null);
     setResults(new Map());
     setProgress({ done: 0, total: evaluable.length });
+    setIncrementHint(null);
 
     try {
       const res = await fetch("/api/batch", {
@@ -166,6 +192,8 @@ export default function BatchPage() {
             category: r.category,
             upc: r.upc,
             currentBid: r.currentBid,
+            requiredBid: r.requiredBid,
+            bidIncrementAmount: r.bidIncrementAmount,
             buyerPremiumPct: r.buyerPremiumPct,
           })),
           defaults: {
@@ -180,6 +208,7 @@ export default function BatchPage() {
             buyerPaysOutboundShip: defaults.buyerPaysOutboundShip,
             buyerPaysCardFee: defaults.buyerPaysCardFee,
             targetProfit: Number(defaults.targetProfit) || 0,
+            bidIncrements: defaults.bidIncrements,
           },
         }),
       });
@@ -210,6 +239,12 @@ export default function BatchPage() {
               return m;
             });
             setProgress({ done: evt.completed, total: evaluable.length });
+            setIncrementHint((prev) => {
+              if (prev) return prev;
+              return evt.row.incrementSource === "listing"
+                ? "Increments: from auction listing (required bid / step)"
+                : "Increments: Settings fallback schedule";
+            });
           }
         }
       }
@@ -482,17 +517,18 @@ export default function BatchPage() {
                     </label>
                   </div>
                 </div>
-                <table className="w-full min-w-[920px] text-sm">
+                <table className="w-full min-w-[1080px] text-sm">
                   <thead className="text-left text-xs uppercase text-desk-muted">
                     <tr>
                       <th className="py-1">Lot</th>
                       <th>Item</th>
                       <th>Verdict</th>
-                      <th className="text-right">Current bid</th>
+                      <th className="text-right">Current</th>
+                      <th className="text-right">Next bid</th>
                       <th className="text-right">Max bid</th>
-                      <th className="text-right">Walk-away</th>
+                      <th className="text-right">Walk-away bid</th>
                       <th className="text-right">Headroom</th>
-                      <th className="text-right">Profit @P25</th>
+                      <th className="text-right">Profit @ next</th>
                       <th className="text-right">Dealer floor</th>
                       <th className="text-right">Comps</th>
                     </tr>
@@ -518,6 +554,7 @@ export default function BatchPage() {
                             title={r.error ?? r.matchNote}
                           >
                             {r.error ? `error: ${r.error}` : r.matchNote || "—"}
+                            {r.incrementSource ? ` · ${r.incrementSource}` : ""}
                           </div>
                         </td>
                         <td>
@@ -538,8 +575,9 @@ export default function BatchPage() {
                           )}
                         </td>
                         <td className="text-right">{usd(r.currentBid)}</td>
-                        <td className="text-right font-semibold">{usd(r.maxBid)}</td>
-                        <td className="text-right font-semibold">{usd(r.walkAway)}</td>
+                        <td className="text-right font-semibold">{usd(r.nextBid)}</td>
+                        <td className="text-right">{usd(r.maxBid)}</td>
+                        <td className="text-right font-semibold">{usd(r.walkAwayBid ?? r.walkAway)}</td>
                         <td
                           className={`text-right font-semibold ${
                             r.headroom == null ? "text-desk-muted" : r.headroom >= 0 ? "text-desk-go" : "text-desk-nogo"
@@ -557,8 +595,10 @@ export default function BatchPage() {
                   </tbody>
                 </table>
                 <p className="mt-3 text-[11px] text-desk-muted">
-                  <strong className="text-desk-text">Walk-away</strong> = the lower of the profit-based Max Bid and
-                  the new in-stock dealer floor — never bid above it. Headroom = walk-away − current bid.
+                  {incrementHint ? <span className="text-desk-text">{incrementHint}. </span> : null}
+                  <strong className="text-desk-text">GO</strong> means the <em>next</em> legal bid still clears
+                  profit and stays ≤ Max Bid. Headroom = Max Bid − next bid. Walk-away bid = Max Bid floored to a
+                  legal step.
                 </p>
               </div>
             </>
