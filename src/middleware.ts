@@ -9,7 +9,7 @@ import {
 /** Public paths when desk auth is enabled. */
 const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/logout", "/api/auth/status"];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   if (!deskAuthEnabled()) {
     return NextResponse.next();
   }
@@ -30,7 +30,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const ok = authorizeDeskRequest({
+  const ok = await authorizeDeskRequest({
     cookieToken: request.cookies.get(DESK_AUTH_COOKIE)?.value,
     authorizationHeader: request.headers.get("authorization"),
   });

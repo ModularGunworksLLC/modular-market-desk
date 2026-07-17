@@ -1,11 +1,12 @@
 /**
  * Desk access gate — shared-secret cookie / Authorization header.
  * When DESK_AUTH_SECRET is unset/empty, auth is disabled (local dev).
+ *
+ * Uses Web Crypto only so this module is safe in Edge middleware and Node.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
-
 export const DESK_AUTH_COOKIE = "desk_session";
+const SESSION_MSG = "modular-market-desk-v1";
 
 export function deskAuthSecret(): string | null {
   const raw = process.env.DESK_AUTH_SECRET?.trim();
@@ -16,44 +17,69 @@ export function deskAuthEnabled(): boolean {
   return deskAuthSecret() != null;
 }
 
-/** HMAC session token derived from the shared secret (not the raw secret in the cookie). */
-export function mintDeskSessionToken(secret: string): string {
-  return createHmac("sha256", secret).update("modular-market-desk-v1").digest("hex");
+function toHex(buf: ArrayBuffer): string {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function sessionTokenValid(token: string | undefined | null, secret: string): boolean {
-  if (!token) return false;
-  const expected = mintDeskSessionToken(secret);
-  try {
-    const a = Buffer.from(token);
-    const b = Buffer.from(expected);
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
-  } catch {
-    return false;
+async function hmacHex(secret: string, message: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return toHex(sig);
+}
+
+/** HMAC session token derived from the shared secret (not the raw secret in the cookie). */
+export async function mintDeskSessionToken(secret: string): Promise<string> {
+  return hmacHex(secret, SESSION_MSG);
+}
+
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
+  return diff === 0;
+}
+
+export async function sessionTokenValid(
+  token: string | undefined | null,
+  secret: string,
+): Promise<boolean> {
+  if (!token) return false;
+  const expected = await mintDeskSessionToken(secret);
+  return timingSafeEqualHex(token, expected);
+}
+
+function secretsMatch(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 /** Accept cookie session OR `Authorization: Bearer <DESK_AUTH_SECRET>` (for scripts). */
-export function authorizeDeskRequest(opts: {
+export async function authorizeDeskRequest(opts: {
   cookieToken?: string | null;
   authorizationHeader?: string | null;
-}): boolean {
+}): Promise<boolean> {
   const secret = deskAuthSecret();
   if (!secret) return true;
 
-  if (sessionTokenValid(opts.cookieToken, secret)) return true;
+  if (await sessionTokenValid(opts.cookieToken, secret)) return true;
 
   const auth = opts.authorizationHeader?.trim() ?? "";
   if (auth.toLowerCase().startsWith("bearer ")) {
     const presented = auth.slice(7).trim();
-    try {
-      const a = Buffer.from(presented);
-      const b = Buffer.from(secret);
-      if (a.length === b.length && timingSafeEqual(a, b)) return true;
-    } catch {
-      /* fall through */
-    }
+    if (secretsMatch(presented, secret)) return true;
   }
   return false;
 }

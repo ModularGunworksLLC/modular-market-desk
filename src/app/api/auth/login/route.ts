@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 import {
@@ -16,14 +15,12 @@ const bodySchema = z.object({
 });
 
 function secretsMatch(a: string, b: string): boolean {
-  try {
-    const ba = Buffer.from(a);
-    const bb = Buffer.from(b);
-    if (ba.length !== bb.length) return false;
-    return timingSafeEqual(ba, bb);
-  } catch {
-    return false;
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
+  return diff === 0;
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -43,7 +40,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid desk secret." }, { status: 401 });
   }
 
-  const token = mintDeskSessionToken(expected);
+  const token = await mintDeskSessionToken(expected);
   const res = NextResponse.json({ ok: true, authRequired: true });
   res.cookies.set(DESK_AUTH_COOKIE, token, {
     httpOnly: true,
