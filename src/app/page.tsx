@@ -816,6 +816,7 @@ export default function DeskPage() {
               wholesale={data.wholesale}
               insights={insights}
               compMeta={data.compMeta}
+              sourceNote={data.sourceStatus?.gba ?? null}
               liveBid={liveBid}
               onLiveBidChange={setLiveBid}
               buyerPremiumPct={buyerPremiumPct}
@@ -847,26 +848,10 @@ export default function DeskPage() {
               </span>
             </summary>
             <div className="mt-4 space-y-4 border-t border-desk-border pt-4">
-              {data?.sourceStatus?.gba && (
-                <p className="text-xs text-desk-muted">{data.sourceStatus.gba}</p>
-              )}
-
-              {sold && sold.count > 0 && (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="rounded-md border border-desk-border bg-desk-panel2 p-3">
-                    <p className="text-[10px] uppercase text-desk-muted">P25 sold</p>
-                    <p className="num text-2xl font-bold">{usd(sold.p25)}</p>
-                  </div>
-                  <div className="rounded-md border border-desk-border bg-desk-panel2 p-3">
-                    <p className="text-[10px] uppercase text-desk-muted">Median sold</p>
-                    <p className="num text-2xl font-bold">{usd(sold.median)}</p>
-                  </div>
-                  <div className="rounded-md border border-desk-border bg-desk-panel2 p-3">
-                    <p className="text-[10px] uppercase text-desk-muted">Sample</p>
-                    <p className="num text-2xl font-bold">{sold.count}</p>
-                  </div>
-                </div>
-              )}
+              <p className="text-xs text-desk-muted">
+                Fee breakdown, sold comps table, and wholesale grid. Clearing band and net @ P25 are on the Result
+                card above.
+              </p>
 
               {r && sold && sold.count > 0 && (
                 <ExitComparisonPanel
