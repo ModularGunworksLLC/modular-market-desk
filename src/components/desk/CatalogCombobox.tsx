@@ -76,7 +76,7 @@ export function CatalogCombobox({ label, items, value, onChange, placeholder, di
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-md border border-desk-border bg-desk-panel shadow-lg"
+          className="desk-scroll absolute z-30 mt-1 max-h-64 min-w-full w-max max-w-[min(100vw-2rem,22rem)] overflow-y-auto overflow-x-hidden rounded-md border border-desk-border bg-desk-panel2 py-1 shadow-xl"
         >
           {filtered.map((item) => (
             <li key={item.id}>
@@ -84,8 +84,9 @@ export function CatalogCombobox({ label, items, value, onChange, placeholder, di
                 type="button"
                 role="option"
                 aria-selected={item.id === value}
-                className={`flex w-full items-baseline justify-between px-3 py-2 text-left text-sm hover:bg-desk-accent/15 ${
-                  item.id === value ? "bg-desk-accent/10 text-desk-text" : "text-desk-text"
+                title={item.hint ? `${item.name} — ${item.hint}` : item.name}
+                className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm leading-snug hover:bg-desk-accent/20 ${
+                  item.id === value ? "bg-desk-accent/15 text-desk-text" : "text-desk-text"
                 }`}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
@@ -94,15 +95,17 @@ export function CatalogCombobox({ label, items, value, onChange, placeholder, di
                   setOpen(false);
                 }}
               >
-                <span>{item.name}</span>
-                {item.hint && <span className="ml-2 text-[10px] text-desk-muted">{item.hint}</span>}
+                <span className="min-w-0 flex-1 truncate normal-case tracking-normal">{item.name}</span>
+                {item.hint && (
+                  <span className="shrink-0 text-[10px] tabular-nums text-desk-muted">{item.hint}</span>
+                )}
               </button>
             </li>
           ))}
         </ul>
       )}
       {open && !disabled && query.trim() && filtered.length === 0 && (
-        <p className="absolute z-30 mt-1 w-full rounded-md border border-desk-border bg-desk-panel px-3 py-2 text-xs text-desk-muted">
+        <p className="absolute z-30 mt-1 w-full rounded-md border border-desk-border bg-desk-panel2 px-3 py-2.5 text-xs text-desk-muted shadow-xl">
           No matches
         </p>
       )}

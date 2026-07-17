@@ -41,4 +41,24 @@ body {
   .comp-range-marker {
     @apply absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-desk-accent;
   }
+  /* Thin themed scrollbars for catalog dropdowns */
+  .desk-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: theme("colors.desk.border") theme("colors.desk.panel2");
+  }
+  .desk-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .desk-scroll::-webkit-scrollbar-track {
+    background: theme("colors.desk.panel2");
+    border-radius: 4px;
+  }
+  .desk-scroll::-webkit-scrollbar-thumb {
+    background: theme("colors.desk.border");
+    border-radius: 4px;
+  }
+  .desk-scroll::-webkit-scrollbar-thumb:hover {
+    background: theme("colors.desk.muted");
+  }
 }
