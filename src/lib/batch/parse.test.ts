@@ -61,7 +61,7 @@ describe("parseBatchSheet", () => {
     const csv = ["Lot,Title,Bid", "9,,50"].join("\n");
     const res = parseBatchSheet(csv);
     expect(res.rows[0]!.unresolved).toBe(true);
-    expect(res.warnings.some((w) => w.includes("skipped"))).toBe(true);
+    expect(res.warnings.some((w) => /skipped|could not be resolved/i.test(w))).toBe(true);
   });
 
   it("warns when no identity column is present", () => {

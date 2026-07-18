@@ -9,13 +9,21 @@ export type BidIncrementBand = {
   increment: number;
 };
 
-/** Sensible FFL-auction default when the listing does not supply a schedule / next bid. */
+/** Pearce / HiBid-style FFL auction schedule when the listing does not supply next bid. */
 export const DEFAULT_BID_INCREMENTS: BidIncrementBand[] = [
+  { upTo: 25, increment: 1 },
   { upTo: 100, increment: 5 },
-  { upTo: 300, increment: 10 },
-  { upTo: 500, increment: 25 },
-  { upTo: 1000, increment: 50 },
-  { upTo: 1_000_000, increment: 100 },
+  { upTo: 1_000, increment: 25 },
+  { upTo: 2_500, increment: 50 },
+  { upTo: 10_000, increment: 100 },
+  { upTo: 25_000, increment: 250 },
+  { upTo: 50_000, increment: 500 },
+  { upTo: 100_000, increment: 1_000 },
+  { upTo: 125_000, increment: 2_500 },
+  { upTo: 200_000, increment: 5_000 },
+  { upTo: 500_000, increment: 10_000 },
+  { upTo: 1_000_000, increment: 25_000 },
+  { upTo: 1_000_000_000, increment: 25_000 },
 ];
 
 export function normalizeBidIncrements(raw: unknown): BidIncrementBand[] {

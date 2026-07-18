@@ -15,6 +15,13 @@
       "when": 1784160000000,
       "tag": "0001_oa_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784300000000,
+      "tag": "0002_web_comps",
+      "breakpoints": true
     }
   ]
 }

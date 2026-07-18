@@ -381,6 +381,91 @@ export const oaSoldComps = sqliteTable(
   }),
 );
 
+/**
+ * Web (Tavily) price observations — cited listing snippets stored locally.
+ * Used when OA has no sold comps; never trains an LLM.
+ */
+export const WEB_PRICE_CONFIDENCE = ["low", "medium", "high"] as const;
+export type WebPriceConfidence = (typeof WEB_PRICE_CONFIDENCE)[number];
+
+/** Observation kind: sold ground truth vs street ask vs local/regional ask. */
+export const PRICE_OBS_KINDS = ["sold", "ask", "local_ask", "regional_ask"] as const;
+export type PriceObsKind = (typeof PRICE_OBS_KINDS)[number];
+export const PRICE_OBS_GEOS = ["AL", "SE", "national", "unknown"] as const;
+export type PriceObsGeo = (typeof PRICE_OBS_GEOS)[number];
+
+export const webPriceObservations = sqliteTable(
+  "web_price_observations",
+  {
+    id: id(),
+    canonicalKey: text("canonical_key").notNull(),
+    manufacturer: text("manufacturer").notNull(),
+    model: text("model").notNull(),
+    caliber: text("caliber").notNull().default(""),
+    variant: text("variant").notNull().default(""),
+    upc: text("upc"),
+    mpn: text("mpn"),
+    price: real("price").notNull(),
+    listingTitle: text("listing_title").notNull().default(""),
+    sourceUrl: text("source_url").notNull(),
+    sourceDomain: text("source_domain").notNull(),
+    query: text("query").notNull().default(""),
+    provider: text("provider").notNull().default("tavily"),
+    /** Site adapter id, e.g. gunsalabama, gunsinternational, tavily */
+    source: text("source").notNull().default("tavily"),
+    kind: text("kind").notNull().default("ask"),
+    geo: text("geo").notNull().default("national"),
+    observedAt: integer("observed_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    keyIdx: index("web_price_obs_key_idx").on(t.canonicalKey),
+    domainIdx: index("web_price_obs_domain_idx").on(t.sourceDomain),
+    sourceIdx: index("web_price_obs_source_idx").on(t.source),
+    uniq: uniqueIndex("web_price_obs_uniq").on(t.canonicalKey, t.sourceUrl, t.price),
+  }),
+);
+
+/** Weekly (or on-demand) market data bank sync runs. */
+export const marketSyncRuns = sqliteTable("market_sync_runs", {
+  id: id(),
+  status: text("status").notNull(), // running | ok | error
+  startedAt: integer("started_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  finishedAt: integer("finished_at", { mode: "timestamp" }),
+  error: text("error"),
+  meta: text("meta", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+});
+
+/** Aggregated web price stats per identity — evaluate fallback when confidence is high. */
+export const webPriceStats = sqliteTable(
+  "web_price_stats",
+  {
+    canonicalKey: text("canonical_key").primaryKey(),
+    manufacturer: text("manufacturer").notNull(),
+    model: text("model").notNull(),
+    caliber: text("caliber").notNull().default(""),
+    count: integer("count").notNull().default(0),
+    domainCount: integer("domain_count").notNull().default(0),
+    low: real("low"),
+    p25: real("p25"),
+    median: real("median"),
+    p75: real("p75"),
+    high: real("high"),
+    confidence: text("confidence", { enum: WEB_PRICE_CONFIDENCE }).notNull().default("low"),
+    sampleUrls: text("sample_urls", { mode: "json" }).$type<string[]>().notNull().default([]),
+    sampleDomains: text("sample_domains", { mode: "json" }).$type<string[]>().notNull().default([]),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    confIdx: index("web_price_stats_conf_idx").on(t.confidence),
+  }),
+);
+
 /* --------------------------------------------------------- inferred types */
 
 export type Connection = typeof connections.$inferSelect;
@@ -398,3 +483,7 @@ export type NewOaCatalogRow = typeof oaCatalog.$inferInsert;
 export type OaSyncRun = typeof oaSyncRuns.$inferSelect;
 export type OaMarketStat = typeof oaMarketStats.$inferSelect;
 export type OaSoldComp = typeof oaSoldComps.$inferSelect;
+export type WebPriceObservation = typeof webPriceObservations.$inferSelect;
+export type NewWebPriceObservation = typeof webPriceObservations.$inferInsert;
+export type WebPriceStat = typeof webPriceStats.$inferSelect;
+export type MarketSyncRun = typeof marketSyncRuns.$inferSelect;

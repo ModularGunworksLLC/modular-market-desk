@@ -10,6 +10,12 @@
  * data-driven approach used by the distributor CSV importer.
  */
 
+import {
+  classifyLotTitle,
+  lotKindLabel,
+  type LotKind,
+} from "@/lib/auctions/lot-kind";
+
 export interface BatchRow {
   /** 1-based source row (excludes the header). */
   rowNumber: number;
@@ -29,6 +35,10 @@ export interface BatchRow {
   rawTitle: string;
   /** True when manufacturer/model could not be resolved (row is skipped). */
   unresolved: boolean;
+  /** Title-kind gate: ammo/accessory/etc. are excluded from firearm pricing. */
+  lotKind: LotKind;
+  /** True when title is not a complete firearm (ammo, mag, gear). */
+  excludeFromPricing: boolean;
 }
 
 export interface ParseBatchResult {
@@ -677,7 +687,10 @@ export function parseBatchSheet(
     const requiredBid = parseMoney(get("requiredBid"));
     const bidIncrementAmount = parseMoney(get("bidIncrementAmount"));
     const buyerPremiumPct = parsePct(get("buyerPremiumPct")) ?? opts?.defaultBuyerPremiumPct ?? null;
-    const unresolved = !manufacturer.trim() || !model.trim();
+    const titleForKind = (rawTitle || `${manufacturer} ${model} ${caliber}`).trim();
+    const lotKind = classifyLotTitle(titleForKind);
+    const excludeFromPricing = lotKind !== "firearm";
+    const unresolved = !manufacturer.trim() || !model.trim() || excludeFromPricing;
 
     rows.push({
       rowNumber: i,
@@ -693,12 +706,27 @@ export function parseBatchSheet(
       buyerPremiumPct,
       rawTitle: rawTitle || modelCell,
       unresolved,
+      lotKind,
+      excludeFromPricing,
     });
   }
 
-  const unresolvedCount = rows.filter((r) => r.unresolved).length;
+  const unresolvedCount = rows.filter((r) => !r.manufacturer.trim() || !r.model.trim()).length;
+  const excludedCount = rows.filter((r) => r.excludeFromPricing).length;
   if (unresolvedCount > 0) {
     warnings.push(`${unresolvedCount} row(s) could not be resolved to a make/model and will be skipped.`);
+  }
+  if (excludedCount > 0) {
+    const byKind = new Map<string, number>();
+    for (const r of rows) {
+      if (!r.excludeFromPricing) continue;
+      const label = lotKindLabel(r.lotKind);
+      byKind.set(label, (byKind.get(label) ?? 0) + 1);
+    }
+    const parts = [...byKind.entries()].map(([k, n]) => `${n} ${k}`);
+    warnings.push(
+      `${excludedCount} non-firearm lot(s) excluded from pricing (${parts.join(", ")}).`,
+    );
   }
 
   return { rows, mapping, warnings };

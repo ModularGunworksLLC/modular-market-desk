@@ -1,4 +1,4 @@
-CREATE TABLE `oa_catalog` (
+CREATE TABLE IF NOT EXISTS `oa_catalog` (
 	`id` text PRIMARY KEY NOT NULL,
 	`condition` text NOT NULL,
 	`manufacturer_id` integer NOT NULL,
@@ -11,15 +11,15 @@ CREATE TABLE `oa_catalog` (
 	`synced_at` integer DEFAULT (unixepoch()) NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `oa_catalog_uniq` ON `oa_catalog` (`condition`,`model_id`,`caliber_id`);
+CREATE UNIQUE INDEX IF NOT EXISTS `oa_catalog_uniq` ON `oa_catalog` (`condition`,`model_id`,`caliber_id`);
 --> statement-breakpoint
-CREATE INDEX `oa_catalog_mfr_idx` ON `oa_catalog` (`manufacturer`);
+CREATE INDEX IF NOT EXISTS `oa_catalog_mfr_idx` ON `oa_catalog` (`manufacturer`);
 --> statement-breakpoint
-CREATE INDEX `oa_catalog_model_idx` ON `oa_catalog` (`manufacturer`,`model`);
+CREATE INDEX IF NOT EXISTS `oa_catalog_model_idx` ON `oa_catalog` (`manufacturer`,`model`);
 --> statement-breakpoint
-CREATE INDEX `oa_catalog_ids_idx` ON `oa_catalog` (`model_id`,`caliber_id`);
+CREATE INDEX IF NOT EXISTS `oa_catalog_ids_idx` ON `oa_catalog` (`model_id`,`caliber_id`);
 --> statement-breakpoint
-CREATE TABLE `oa_sync_runs` (
+CREATE TABLE IF NOT EXISTS `oa_sync_runs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text DEFAULT 'catalog' NOT NULL,
 	`status` text NOT NULL,

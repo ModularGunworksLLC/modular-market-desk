@@ -44,6 +44,7 @@ cd $RemoteDir
 sed -i 's|file:/app/data/desk.db|file:./data/desk.db|' .env 2>/dev/null || true
 npm install
 npm run build
+npx tsx scripts/apply-web-comps-migration.ts || true
 chmod +x deploy/start-standalone.sh
 ./deploy/start-standalone.sh
 sudo cp deploy/market-desk.service /etc/systemd/system/market-desk.service

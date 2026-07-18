@@ -11,6 +11,7 @@ import { intFmt, timeAgo, usd } from "@/lib/format";
 import { CatalogSync } from "./CatalogSync";
 import { CatalogUploader } from "./CatalogUploader";
 import { ConnectionVault } from "./ConnectionVault";
+import { MarketDataBankSync } from "./MarketDataBankSync";
 import { OaCatalogSync } from "./OaCatalogSync";
 import { PresetPanel } from "./PresetPanel";
 
@@ -103,6 +104,9 @@ export default async function ImportDashboard() {
 
         {/* Outdoor Analytics full brand/model catalog */}
         <OaCatalogSync />
+
+        {/* Weekly market data bank (OA + street asks) */}
+        <MarketDataBankSync />
       </div>
     </main>
   );

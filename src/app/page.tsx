@@ -28,6 +28,7 @@ import { loadDealerDefaults, type DeskDealerDefaults } from "@/lib/desk-defaults
 import type { DeskMode, UsedSubtype, Workflow } from "@/lib/desk-mode";
 import { parseMoneyField, parseMoneyFieldOrZero, usd } from "@/lib/format";
 import type { WholesaleGrid } from "@/lib/wholesale";
+import type { WebCompsSummary } from "@/lib/web-comps/types";
 
 const MODE_STORAGE_KEY = "desk-workflow";
 const SUBTYPE_STORAGE_KEY = "desk-used-subtype";
@@ -45,6 +46,8 @@ interface ApiResponse {
   soldListings?: SoldCompRow[];
   askingListings?: AskingCompRow[];
   compMeta?: CompFilterMeta | null;
+  webComps?: WebCompsSummary | null;
+  matchWarnings?: string[];
 }
 
 export default function DeskPage() {
@@ -78,6 +81,8 @@ export default function DeskPage() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichNote, setEnrichNote] = useState<string | null>(null);
   const [vaultOk, setVaultOk] = useState<boolean | null>(null);
   const [serial, setSerial] = useState("");
   const [stolen, setStolen] = useState<StolenCheckResult | null>(null);
@@ -250,6 +255,49 @@ export default function DeskPage() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function enrichWebComps(immediate = false) {
+    if (!form.manufacturer.trim() || !form.model.trim()) {
+      setEnrichNote("Enter manufacturer and model first.");
+      return;
+    }
+    setEnriching(true);
+    setEnrichNote(null);
+    try {
+      const res = await fetch("/api/web-comps/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          manufacturer: form.manufacturer,
+          model: form.model,
+          caliber: form.caliber || undefined,
+          upc: form.upc || undefined,
+          mpn: form.mpn || undefined,
+          category: form.category,
+          immediate,
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || "Enrich failed");
+      if (immediate) {
+        setEnrichNote(
+          payload.ok
+            ? `Web enrich done — ${payload.inserted ?? 0} new obs, confidence ${payload.stats?.confidence ?? "n/a"}. Re-evaluate to use.`
+            : payload.error || "Enrich failed",
+        );
+      } else {
+        setEnrichNote(
+          payload.queued
+            ? "Queued for web enrich (drip ~15s). Re-evaluate after it finishes."
+            : `Not queued: ${(payload.reason as string)?.replace(/_/g, " ") ?? "skipped"}`,
+        );
+      }
+    } catch (err) {
+      setEnrichNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEnriching(false);
     }
   }
 
@@ -839,7 +887,7 @@ export default function DeskPage() {
 
           {data && (
           <>
-          {r && (isVendor || (sold && sold.count > 0)) && (
+          {r && (isVendor || sold != null) && (
             <AtGlancePanel
               title={title}
               deskMode={responseDeskMode}
@@ -850,11 +898,60 @@ export default function DeskPage() {
               insights={insights}
               compMeta={data.compMeta}
               sourceNote={data.sourceStatus?.gba ?? null}
+              webComps={data.webComps}
               liveBid={liveBid}
               onLiveBidChange={setLiveBid}
               buyerPremiumPct={buyerPremiumPct}
               inboundShip={inboundShipNum}
             />
+          )}
+
+          {data.webComps?.source === "insufficient" && (
+            <div className="panel space-y-2 border-desk-warn/40 bg-desk-warn/5">
+              <p className="text-sm text-desk-text">
+                No OA solds and web confidence is too low for Max Bid. Enrich pulls street prices into local SQLite
+                (Tavily drip).
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-desk-border bg-desk-panel2 px-3 py-1.5 text-xs font-medium text-desk-text disabled:opacity-50"
+                  disabled={enriching}
+                  onClick={() => void enrichWebComps(false)}
+                >
+                  {enriching ? "Enriching…" : "Queue web enrich"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-desk-accent/40 bg-desk-accent/10 px-3 py-1.5 text-xs font-medium text-desk-accent disabled:opacity-50"
+                  disabled={enriching}
+                  onClick={() => void enrichWebComps(true)}
+                >
+                  Enrich now
+                </button>
+              </div>
+              {enrichNote && <p className="text-xs text-desk-muted">{enrichNote}</p>}
+              {data.sourceStatus?.web && (
+                <p className="text-xs text-desk-muted">{data.sourceStatus.web}</p>
+              )}
+            </div>
+          )}
+
+          {data.sourceStatus?.web && data.webComps?.source === "oa" && data.webComps.agreement && (
+            <p className="text-xs text-desk-muted">{data.sourceStatus.web}</p>
+          )}
+
+          {data.matchWarnings && data.matchWarnings.length > 0 && (
+            <div className="panel space-y-1 border-desk-nogo/40 bg-desk-nogo/5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-desk-nogo">
+                Match warnings
+              </p>
+              <ul className="space-y-1 text-xs text-desk-nogo">
+                {data.matchWarnings.map((w, i) => (
+                  <li key={i}>• {w}</li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {isVendor && insights && insights.headlines.length > 0 && (

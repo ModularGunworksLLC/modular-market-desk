@@ -11,12 +11,36 @@ import type { CompFilterMeta, CompMatchTier } from "@/lib/comp-filter";
 import { matchTierLabel } from "@/lib/comp-filter";
 import { parseMoneyFieldOrZero, usd } from "@/lib/format";
 import type { WholesaleGrid } from "@/lib/wholesale";
+import type { WebCompsSummary } from "@/lib/web-comps/types";
 
 function matchTierClass(tier: CompMatchTier | undefined): string {
   if (tier === "exact-upc" || tier === "exact-mpn") return "text-desk-go";
   if (tier === "thin") return "text-desk-warn";
   if (tier === "family") return "text-desk-warn";
   return "text-desk-muted";
+}
+
+function compsBadge(webComps?: WebCompsSummary | null): { label: string; className: string } {
+  if (!webComps || webComps.source === "none") {
+    return { label: "Market comps", className: "text-desk-muted" };
+  }
+  if (webComps.divergence === "cooling") {
+    return { label: "Cooling — asks under solds", className: "text-desk-nogo" };
+  }
+  if (webComps.divergence === "asks_rich") {
+    return { label: "Asks rich — solds still rule", className: "text-desk-warn" };
+  }
+  if (webComps.source === "insufficient") {
+    return { label: "Insufficient solds", className: "text-desk-nogo" };
+  }
+  // OA primary
+  if (webComps.agreement === "agrees" || webComps.divergence === "ok") {
+    return { label: "OA solds · street OK", className: "text-desk-go" };
+  }
+  if (webComps.agreement === "web_higher" || webComps.agreement === "web_lower") {
+    return { label: "OA solds · street disagrees", className: "text-desk-warn" };
+  }
+  return { label: "OA solds", className: "text-desk-go" };
 }
 
 function liquidityLabel(soldCount: number): { text: string; hot: boolean } {
@@ -26,12 +50,17 @@ function liquidityLabel(soldCount: number): { text: string; hot: boolean } {
   return { text: "Very few sold comps — high uncertainty", hot: false };
 }
 
-function shortSourceLine(sourceStatus?: string | null, soldCount?: number): string {
+function shortSourceLine(sourceStatus?: string | null, soldCount?: number, webComps?: WebCompsSummary | null): string {
+  if (webComps?.divergence === "cooling" && webComps.median != null) {
+    return `Cooling · street asks ~$${Math.round(webComps.median)} under sold FMV`;
+  }
+  if (webComps?.source === "insufficient") {
+    return webComps.note || "No OA solds — street asks advisory only";
+  }
   const raw = (sourceStatus ?? "").trim();
   if (!raw) {
     return soldCount != null && soldCount > 0 ? `OA solds · n=${soldCount}` : "Market comps";
   }
-  // Prefer a short, dealer-readable line.
   if (/local cache/i.test(raw) || /Local OA/i.test(raw)) {
     const n = soldCount != null ? ` · n=${soldCount}` : "";
     return `OA local solds${n}`;
@@ -55,6 +84,7 @@ export interface AtGlancePanelProps {
   compMeta?: CompFilterMeta | null;
   /** e.g. sourceStatus.gba from evaluate response */
   sourceNote?: string | null;
+  webComps?: WebCompsSummary | null;
   liveBid: string;
   onLiveBidChange: (v: string) => void;
   buyerPremiumPct: number;
@@ -72,6 +102,7 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
     insights,
     compMeta,
     sourceNote,
+    webComps,
     liveBid,
     onLiveBidChange,
     buyerPremiumPct,
@@ -127,14 +158,21 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
   const vendorLine = insights?.cheapestInStockDealer;
   const topVendors = insights?.topVendorDeals ?? [];
   const liq = liquidityLabel(sold.count);
-  const trust = shortSourceLine(sourceNote, sold.count);
+  const trust = shortSourceLine(sourceNote, sold.count, webComps);
+  const badge = compsBadge(webComps);
   const matchLabel = compMeta ? matchTierLabel(compMeta.matchTier) : null;
 
   const goReasons: string[] = [];
   if (!isVendor && viable && sold.count > 0) {
-    goReasons.push(
-      `Clears $${result.input.targetProfit} min profit at conservative sold (P25) via ${exitShort}.`,
-    );
+    if (webComps?.divergence === "cooling") {
+      goReasons.push(
+        `Clears $${result.input.targetProfit} min profit at Cooling-capped P25 via ${exitShort} (street asks under sold FMV).`,
+      );
+    } else {
+      goReasons.push(
+        `Clears $${result.input.targetProfit} min profit at conservative sold (P25) via ${exitShort}.`,
+      );
+    }
     if (sold.count < 8) goReasons.push(`Only ${sold.count} sold comps — treat Max Bid as cautious.`);
     else goReasons.push(`${sold.count} sold comps in the decision set.`);
   }
@@ -172,6 +210,8 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
             <p className="text-xs font-medium uppercase tracking-widest text-desk-muted">Result</p>
             <h2 className="text-lg font-bold text-desk-text">{title}</h2>
             <p className="mt-1 text-xs text-desk-muted">
+              <span className={`font-semibold ${badge.className}`}>{badge.label}</span>
+              {" · "}
               {trust}
               {matchLabel ? (
                 <>
@@ -180,6 +220,26 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
                 </>
               ) : null}
             </p>
+            {webComps?.agreement === "web_higher" && (
+              <p className="mt-1 text-xs text-desk-warn">
+                Street/web asks run above GB solds — Max Bid still uses OA.
+              </p>
+            )}
+            {webComps?.agreement === "web_lower" && (
+              <p className="mt-1 text-xs text-desk-nogo">
+                Web below OA solds — re-check Make/Model/Caliber. Money still uses OA.
+              </p>
+            )}
+            {webComps?.source === "web" && webComps.sampleDomains.length > 0 && (
+              <details className="mt-1 text-xs text-desk-muted">
+                <summary className="cursor-pointer">Web sources ({webComps.domainCount} domains)</summary>
+                <ul className="mt-1 list-inside list-disc">
+                  {webComps.sampleDomains.slice(0, 6).map((d) => (
+                    <li key={d}>{d}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </div>
           <span
             className={`rounded-full px-4 py-1.5 text-sm font-black ${
@@ -204,6 +264,26 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
               Walk-away via {exitLabel} — do not exceed this {isTradeIn ? "cash offer" : "hammer"}. Fees for that
               exit are already in this number.
             </p>
+            {sold.count > 0 && sold.median > 0 && (
+              <div className="mt-3 rounded-md border border-desk-accent/40 bg-desk-accent/10 px-3 py-3">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-accent">
+                  Assessed market value
+                </p>
+                <p className="num text-3xl font-black text-desk-text">{usd(sold.median)}</p>
+                <p className="mt-1 text-xs text-desk-muted">
+                  {webComps?.source === "web"
+                    ? `What the tool thinks this sells for (web street median${
+                        webComps.domainCount > 0
+                          ? ` · ${webComps.domainCount} domain${webComps.domainCount === 1 ? "" : "s"}`
+                          : ""
+                      } · n=${sold.count}) — before fees`
+                    : `What the tool thinks this sells for (OA sold median · n=${sold.count}) — before fees`}
+                </p>
+                <p className="mt-1 text-xs text-desk-muted">
+                  Max Bid / Walk-away below are after fees from conservative P25, not this number.
+                </p>
+              </div>
+            )}
             {maxBidAllIn != null && sold.count > 0 && (
               <p className="mt-1 text-xs text-desk-muted">
                 All-in at Max Bid (premium + inbound): {usd(maxBidAllIn)}
@@ -232,8 +312,8 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
         {/* Sold band */}
         {!isVendor && sold.count > 0 && (
           <div className="mt-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-desk-muted">
-              Sold clearing band ({sold.count} comps)
+            <p className="text-xs uppercase tracking-widest text-desk-muted">
+              {webComps?.source === "web" ? "Web clearing band" : "Sold clearing band"} ({sold.count} comps)
             </p>
             <dl className="mt-2 grid grid-cols-3 gap-2 text-sm">
               <div className="rounded-md border border-desk-border bg-desk-panel2/80 px-2 py-2">

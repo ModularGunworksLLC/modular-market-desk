@@ -8,8 +8,42 @@ import { parseBatchSheet, type BatchRow } from "@/lib/batch/parse";
 import type { BatchResultRow, BatchStreamEvent } from "@/lib/batch/types";
 import { loadDealerDefaults } from "@/lib/desk-defaults";
 import { parseMoneyFieldOrZero, usd } from "@/lib/format";
+import type { WebEnrichPhase } from "@/lib/web-comps/types";
 
 type SortKey = "lot" | "headroom" | "netProfit" | "maxBid" | "soldCount";
+
+function webEnrichBadge(phase: WebEnrichPhase | undefined | null): {
+  label: string;
+  className: string;
+  title: string;
+} {
+  switch (phase) {
+    case "oa":
+      return { label: "OA", className: "text-desk-go", title: "Using Outdoor Analytics solds" };
+    case "web":
+      return { label: "Web ✓", className: "text-desk-accent", title: "Web-validated comps applied to Max Bid" };
+    case "queued":
+      return { label: "Queued…", className: "text-desk-warn", title: "Waiting in Tavily drip queue" };
+    case "running":
+      return { label: "Enriching…", className: "text-desk-warn", title: "Tavily enrich in progress now" };
+    case "ready":
+      return {
+        label: "Ready",
+        className: "text-desk-accent",
+        title: "High-conf web comps ready — applying to sheet automatically",
+      };
+    case "weak":
+      return {
+        label: "Weak",
+        className: "text-desk-muted",
+        title: "Enrich finished but confidence too low for Max Bid",
+      };
+    case "skipped":
+      return { label: "Skipped", className: "text-desk-muted", title: "Not queued (daily budget or skipped)" };
+    default:
+      return { label: "—", className: "text-desk-muted", title: "" };
+  }
+}
 
 const SAMPLE = `Lot,Title,Current Bid,Buyer Premium
 101,Glock 19 Gen5 9mm,420,18
@@ -22,11 +56,13 @@ export default function BatchPage() {
   const [defaults, setDefaults] = useState({
     targetProfit: String(CLIENT_DEAL_DEFAULTS.targetProfit),
     minMarginPct: String(CLIENT_DEAL_DEFAULTS.minMarginPct),
-    buyerPremiumPct: String(CLIENT_DEAL_DEFAULTS.buyerPremiumPct),
+    buyerPremiumPct: "",
     outboundShip: "",
     inboundShip: "0",
     listingUpgrades: String(CLIENT_DEAL_DEFAULTS.listingUpgrades),
     condition: "any" as "new" | "used" | "any",
+    sellChannel: "local" as "gunbroker" | "local",
+    salesTaxPct: String(CLIENT_DEAL_DEFAULTS.salesTaxPct),
     buyerPaysOutboundShip: true,
     buyerPaysCardFee: true,
     bidIncrements: DEFAULT_BID_INCREMENTS.map((b) => ({ ...b })),
@@ -49,6 +85,28 @@ export default function BatchPage() {
   );
   const [auctionBusy, setAuctionBusy] = useState(false);
   const [auctionMsg, setAuctionMsg] = useState<string | null>(null);
+  const [webQueueBanner, setWebQueueBanner] = useState<string | null>(null);
+  const lastRunRef = useRef<{
+    rowsByNumber: Map<
+      number,
+      {
+        rowNumber: number;
+        lot: string;
+        manufacturer: string;
+        model: string;
+        caliber: string;
+        category: string;
+        upc: string;
+        currentBid: number | null;
+        requiredBid: number | null;
+        bidIncrementAmount: number | null;
+        buyerPremiumPct: number | null;
+      }
+    >;
+    defaults: Record<string, unknown>;
+  } | null>(null);
+  const reevalInFlight = useRef<Set<number>>(new Set());
+  const appliedReadyKeys = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const d = loadDealerDefaults();
@@ -56,7 +114,8 @@ export default function BatchPage() {
       ...prev,
       targetProfit: d.targetProfit || prev.targetProfit,
       minMarginPct: d.minMarginPct || prev.minMarginPct,
-      buyerPremiumPct: d.buyerPremiumPct || prev.buyerPremiumPct,
+      // Do not overwrite sheet BP with global Settings — auction BP is per-event.
+      sellChannel: d.sellChannel === "gunbroker" ? "gunbroker" : prev.sellChannel,
       bidIncrements: d.bidIncrements?.length ? d.bidIncrements : prev.bidIncrements,
     }));
     const onDefaults = (e: Event) => {
@@ -76,6 +135,185 @@ export default function BatchPage() {
     window.addEventListener("desk-defaults-changed", onDefaults);
     return () => window.removeEventListener("desk-defaults-changed", onDefaults);
   }, []);
+
+  // Poll web-enrich status; when Ready, auto re-eval and patch the sheet.
+  const pendingEnrichKeys = useMemo(() => {
+    const keys = Array.from(results.values())
+      .map((r) => r.webEnrich)
+      .filter(
+        (w): w is NonNullable<BatchResultRow["webEnrich"]> =>
+          !!w?.canonicalKey &&
+          (w.phase === "queued" || w.phase === "running" || w.phase === "ready"),
+      )
+      .map((w) => w.canonicalKey!);
+    return [...new Set(keys)].sort();
+  }, [results]);
+
+  const pendingEnrichKey = pendingEnrichKeys.join("|");
+
+  useEffect(() => {
+    // Also poll when we have Ready rows awaiting apply (in case apply failed once).
+    const watchKeys = [
+      ...pendingEnrichKeys,
+      ...Array.from(results.values())
+        .filter((r) => r.webEnrich?.phase === "ready" && r.webEnrich.canonicalKey)
+        .map((r) => r.webEnrich!.canonicalKey!),
+    ];
+    const uniqueWatch = [...new Set(watchKeys)];
+    if (uniqueWatch.length === 0 && pendingEnrichKeys.length === 0) {
+      setWebQueueBanner(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function applyReadyRows(rowNumbers: number[]) {
+      const run = lastRunRef.current;
+      if (!run || rowNumbers.length === 0) return;
+      const toSend = rowNumbers
+        .filter((n) => !reevalInFlight.current.has(n))
+        .map((n) => run.rowsByNumber.get(n))
+        .filter((r): r is NonNullable<typeof r> => !!r);
+      if (toSend.length === 0) return;
+
+      for (const r of toSend) reevalInFlight.current.add(r.rowNumber);
+      setWebQueueBanner(
+        (prev) => `${prev ? `${prev} · ` : ""}Applying web comps to ${toSend.length} lot(s)…`,
+      );
+
+      try {
+        const res = await fetch("/api/batch/reeval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: toSend, defaults: run.defaults }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || cancelled) return;
+        const patched = (json?.rows ?? []) as BatchResultRow[];
+        if (patched.length === 0) return;
+
+        setResults((prev) => {
+          const next = new Map(prev);
+          for (const row of patched) {
+            next.set(row.rowNumber, row);
+            const key = row.webEnrich?.canonicalKey;
+            if (key) appliedReadyKeys.current.add(key);
+          }
+          return next;
+        });
+        setWebQueueBanner(
+          `Applied web comps to ${patched.length} lot(s) — Max Bid / GO updated on the sheet`,
+        );
+      } catch {
+        /* ignore; next poll may retry Ready rows */
+      } finally {
+        for (const r of toSend) reevalInFlight.current.delete(r.rowNumber);
+      }
+    }
+
+    const tick = async () => {
+      try {
+        const keysToPoll =
+          uniqueWatch.length > 0
+            ? uniqueWatch
+            : pendingEnrichKeys;
+        if (keysToPoll.length === 0) return;
+
+        const res = await fetch("/api/web-comps/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keys: keysToPoll }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || cancelled || !json?.keys) return;
+
+        const q = json.queue as {
+          depth?: number;
+          processedToday?: number;
+          maxPerDay?: number;
+          running?: boolean;
+        } | null;
+        if (q && (q.depth || q.running)) {
+          setWebQueueBanner(
+            `Web enrich: ${q.depth ?? 0} queued · ${q.processedToday ?? 0}/${q.maxPerDay ?? 50} today` +
+              (q.running ? " · running" : ""),
+          );
+        }
+
+        const readyRowNums: number[] = [];
+
+        setResults((prev) => {
+          const next = new Map(prev);
+          let changed = false;
+          for (const [rowNum, row] of next) {
+            const key = row.webEnrich?.canonicalKey;
+            if (!key) continue;
+            if (row.webEnrich?.phase === "oa" || row.webEnrich?.phase === "web") continue;
+            const st = json.keys[key] as
+              | {
+                  phase: WebEnrichPhase;
+                  confidence: NonNullable<BatchResultRow["webEnrich"]>["confidence"];
+                  count: number;
+                  domainCount: number;
+                  median: number | null;
+                }
+              | undefined;
+            if (!st) continue;
+            const phase =
+              st.phase === "ready" ||
+              st.phase === "weak" ||
+              st.phase === "running" ||
+              st.phase === "queued"
+                ? st.phase
+                : (row.webEnrich?.phase ?? st.phase);
+
+            if (
+              (phase === "ready" || (st.confidence === "high" && st.count >= 3)) &&
+              !appliedReadyKeys.current.has(key) &&
+              !reevalInFlight.current.has(rowNum)
+            ) {
+              readyRowNums.push(rowNum);
+            }
+
+            if (
+              phase === row.webEnrich?.phase &&
+              st.count === row.webEnrich?.count &&
+              st.confidence === row.webEnrich?.confidence
+            ) {
+              continue;
+            }
+            next.set(rowNum, {
+              ...row,
+              webEnrich: {
+                phase,
+                canonicalKey: key,
+                confidence: st.confidence,
+                count: st.count,
+                domainCount: st.domainCount,
+                median: st.median,
+              },
+            });
+            changed = true;
+          }
+          return changed ? next : prev;
+        });
+
+        if (readyRowNums.length > 0) {
+          void applyReadyRows([...new Set(readyRowNums)]);
+        }
+      } catch {
+        /* ignore poll errors */
+      }
+    };
+
+    void tick();
+    const id = window.setInterval(() => void tick(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-subscribe when pending key set changes
+  }, [pendingEnrichKey]);
 
   async function ingestAuction() {
     const url = auctionUrl.trim();
@@ -185,40 +423,56 @@ export default function BatchPage() {
     setResults(new Map());
     setProgress({ done: 0, total: evaluable.length });
     setIncrementHint(null);
+    setWebQueueBanner(null);
+    appliedReadyKeys.current.clear();
+    reevalInFlight.current.clear();
+
+    const payloadRows = evaluable.map((r: BatchRow) => ({
+      rowNumber: r.rowNumber,
+      lot: r.lot,
+      manufacturer: r.manufacturer,
+      model: r.model,
+      caliber: r.caliber,
+      category: r.category,
+      upc: r.upc,
+      currentBid: r.currentBid,
+      requiredBid: r.requiredBid,
+      bidIncrementAmount: r.bidIncrementAmount,
+      buyerPremiumPct: r.buyerPremiumPct,
+    }));
+    if (defaults.buyerPremiumPct.trim() === "") {
+      setError("Enter this auction’s buyer premium % before running.");
+      return;
+    }
+    const payloadDefaults = {
+      condition: defaults.condition,
+      buyerPremiumPct: parseMoneyFieldOrZero(defaults.buyerPremiumPct),
+      inboundShip: parseMoneyFieldOrZero(defaults.inboundShip),
+      outboundShip:
+        defaults.outboundShip.trim() === ""
+          ? undefined
+          : parseMoneyFieldOrZero(defaults.outboundShip),
+      listingUpgrades: parseMoneyFieldOrZero(defaults.listingUpgrades),
+      buyerPaysOutboundShip: defaults.buyerPaysOutboundShip,
+      buyerPaysCardFee: defaults.buyerPaysCardFee,
+      targetProfit: parseMoneyFieldOrZero(defaults.targetProfit),
+      minMarginPct: parseMoneyFieldOrZero(defaults.minMarginPct),
+      sellChannel: defaults.sellChannel,
+      salesTaxPct: parseMoneyFieldOrZero(defaults.salesTaxPct),
+      bidIncrements: defaults.bidIncrements,
+    };
+    lastRunRef.current = {
+      rowsByNumber: new Map(payloadRows.map((r) => [r.rowNumber, r])),
+      defaults: payloadDefaults,
+    };
 
     try {
       const res = await fetch("/api/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rows: evaluable.map((r: BatchRow) => ({
-            rowNumber: r.rowNumber,
-            lot: r.lot,
-            manufacturer: r.manufacturer,
-            model: r.model,
-            caliber: r.caliber,
-            category: r.category,
-            upc: r.upc,
-            currentBid: r.currentBid,
-            requiredBid: r.requiredBid,
-            bidIncrementAmount: r.bidIncrementAmount,
-            buyerPremiumPct: r.buyerPremiumPct,
-          })),
-          defaults: {
-            condition: defaults.condition,
-            buyerPremiumPct: parseMoneyFieldOrZero(defaults.buyerPremiumPct),
-            inboundShip: parseMoneyFieldOrZero(defaults.inboundShip),
-            outboundShip:
-              defaults.outboundShip.trim() === ""
-                ? undefined
-                : parseMoneyFieldOrZero(defaults.outboundShip),
-            listingUpgrades: parseMoneyFieldOrZero(defaults.listingUpgrades),
-            buyerPaysOutboundShip: defaults.buyerPaysOutboundShip,
-            buyerPaysCardFee: defaults.buyerPaysCardFee,
-            targetProfit: parseMoneyFieldOrZero(defaults.targetProfit),
-            minMarginPct: parseMoneyFieldOrZero(defaults.minMarginPct),
-            bidIncrements: defaults.bidIncrements,
-          },
+          rows: payloadRows,
+          defaults: payloadDefaults,
         }),
       });
 
@@ -281,7 +535,14 @@ export default function BatchPage() {
     const go = all.filter((r) => r.verdict === "GO");
     const totalHeadroom = go.reduce((s, r) => s + (r.headroom ?? 0), 0);
     const noComps = all.filter((r) => r.soldCount === 0).length;
-    return { evaluated: all.length, go: go.length, totalHeadroom, noComps };
+    const webQueued = all.filter(
+      (r) => r.webEnrich?.phase === "queued" || r.webEnrich?.phase === "running",
+    ).length;
+    const webReady = all.filter((r) => r.webEnrich?.phase === "ready").length;
+    const webDone = all.filter(
+      (r) => r.webEnrich?.phase === "web" || r.webEnrich?.phase === "weak",
+    ).length;
+    return { evaluated: all.length, go: go.length, totalHeadroom, noComps, webQueued, webReady, webDone };
   }, [results]);
 
   const setD = (k: keyof typeof defaults) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -420,19 +681,62 @@ export default function BatchPage() {
             </div>
           )}
 
-          <h2 className="pt-1 text-sm font-semibold text-desk-muted">Defaults applied to every lot</h2>
+          <h2 className="pt-1 text-sm font-semibold text-desk-muted">This auction</h2>
+          <div className="rounded-md border border-desk-accent/40 bg-desk-accent/5 p-3">
+            <div className="grid grid-cols-2 gap-3">
+              <NumField
+                label="Buyer premium % (this auction)"
+                v={defaults.buyerPremiumPct}
+                on={setD("buyerPremiumPct")}
+                placeholder="e.g. 13 or 15"
+              />
+              <div>
+                <label className="field-label">Exit channel</label>
+                <select
+                  className="field-input"
+                  value={defaults.sellChannel}
+                  onChange={(e) =>
+                    setDefaults((d) => ({
+                      ...d,
+                      sellChannel: e.target.value as "gunbroker" | "local",
+                    }))
+                  }
+                >
+                  <option value="local">Local (AL tax)</option>
+                  <option value="gunbroker">GunBroker</option>
+                </select>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-desk-muted">
+              BP is per auction house — required. All-in = hammer × (1+BP%) + inbound (dealer inbound usually $0).
+              Active:{" "}
+              <span className="font-semibold text-desk-text">
+                BP {defaults.buyerPremiumPct.trim() || "?"}% ·{" "}
+                {defaults.sellChannel === "local" ? "Local exit" : "GunBroker exit"}
+              </span>
+            </p>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <NumField label="Target profit ($)" v={defaults.targetProfit} on={setD("targetProfit")} />
             <NumField label="Min margin %" v={defaults.minMarginPct} on={setD("minMarginPct")} />
-            <NumField label="Buyer premium %" v={defaults.buyerPremiumPct} on={setD("buyerPremiumPct")} />
             <NumField label="Inbound ship ($)" v={defaults.inboundShip} on={setD("inboundShip")} />
-            <NumField
-              label="Outbound ship ($)"
-              v={defaults.outboundShip}
-              on={setD("outboundShip")}
-              placeholder="Auto: 45 pistol / 60 rifle"
-            />
-            <NumField label="Listing upgrades ($)" v={defaults.listingUpgrades} on={setD("listingUpgrades")} />
+            {defaults.sellChannel === "local" ? (
+              <NumField label="Sales tax %" v={defaults.salesTaxPct} on={setD("salesTaxPct")} />
+            ) : (
+              <NumField
+                label="Outbound ship ($)"
+                v={defaults.outboundShip}
+                on={setD("outboundShip")}
+                placeholder="Auto: 45 pistol / 60 rifle"
+              />
+            )}
+            {defaults.sellChannel === "gunbroker" && (
+              <NumField
+                label="Listing upgrades ($)"
+                v={defaults.listingUpgrades}
+                on={setD("listingUpgrades")}
+              />
+            )}
             <div>
               <label className="field-label">Condition (comps)</label>
               <select
@@ -449,7 +753,7 @@ export default function BatchPage() {
             </div>
           </div>
           <p className="text-[11px] text-desk-muted">
-            Per-row Buyer Premium / Current Bid from the CSV override these. Buyer pays ship + card by default.
+            Per-row Current Bid from the CSV/auction ingest. GO / Max / Profit use the exit channel above.
           </p>
 
           <button
@@ -491,12 +795,28 @@ export default function BatchPage() {
 
           {results.size > 0 && (
             <>
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                 <SummaryStat label="Lots evaluated" value={String(summary.evaluated)} />
                 <SummaryStat label="GO lots" value={String(summary.go)} tone="go" />
                 <SummaryStat label="Total headroom (GO)" value={usd(summary.totalHeadroom)} tone="go" />
                 <SummaryStat label="No comps found" value={String(summary.noComps)} tone={summary.noComps ? "nogo" : undefined} />
+                <SummaryStat
+                  label="Web enriching"
+                  value={String(summary.webQueued)}
+                  tone={summary.webQueued ? "warn" : undefined}
+                />
+                <SummaryStat
+                  label="Web ready / applying"
+                  value={String(summary.webReady)}
+                  tone={summary.webReady ? "go" : undefined}
+                />
               </div>
+
+              {webQueueBanner && (
+                <p className="rounded-md border border-desk-warn/40 bg-desk-warn/10 px-3 py-2 text-xs text-desk-text">
+                  {webQueueBanner}
+                </p>
+              )}
 
               <div className="panel overflow-x-auto">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -527,24 +847,48 @@ export default function BatchPage() {
                     </label>
                   </div>
                 </div>
-                <table className="w-full min-w-[1080px] text-sm">
+                <table className="w-full min-w-[1480px] text-sm">
                   <thead className="text-left text-xs uppercase text-desk-muted">
                     <tr>
                       <th className="py-1">Lot</th>
                       <th>Item</th>
                       <th>Verdict</th>
+                      <th>Trust</th>
+                      <th className="text-right">Market med</th>
+                      <th className="text-right">Decision P25</th>
                       <th className="text-right">Current</th>
-                      <th className="text-right">Next bid</th>
+                      <th className="text-right">Next</th>
+                      <th className="text-right">All-in@next</th>
                       <th className="text-right">Max bid</th>
-                      <th className="text-right">Walk-away bid</th>
+                      <th className="text-right">Walk</th>
                       <th className="text-right">Headroom</th>
-                      <th className="text-right">Profit @ next</th>
+                      <th className="text-right">Profit@next</th>
                       <th className="text-right">Dealer floor</th>
                       <th className="text-right">Comps</th>
                     </tr>
                   </thead>
                   <tbody className="num">
-                    {rows.map((r) => (
+                    {rows.map((r) => {
+                      const webBadge = webEnrichBadge(r.webEnrich?.phase);
+                      const marketValue = r.estimatedGrossResale ?? r.soldMedian ?? null;
+                      const marketNote = r.grossResaleNote ?? undefined;
+                      const trustLabel =
+                        r.divergence === "cooling"
+                          ? "Cooling"
+                          : r.divergence === "asks_rich"
+                            ? "Asks rich"
+                            : r.divergence === "ok"
+                              ? "OK"
+                              : webBadge.label;
+                      const trustClass =
+                        r.divergence === "cooling"
+                          ? "text-desk-nogo"
+                          : r.divergence === "asks_rich"
+                            ? "text-desk-warn"
+                            : r.divergence === "ok"
+                              ? "text-desk-go"
+                              : webBadge.className;
+                      return (
                       <tr
                         key={r.rowNumber}
                         className={`border-t border-desk-border ${
@@ -552,7 +896,7 @@ export default function BatchPage() {
                         }`}
                       >
                         <td className="py-1.5 font-sans">{r.lot}</td>
-                        <td className="max-w-[280px] font-sans">
+                        <td className="max-w-[260px] font-sans">
                           <div className="truncate" title={r.label}>
                             {r.label}
                             {r.bestDealer && (
@@ -565,7 +909,19 @@ export default function BatchPage() {
                           >
                             {r.error ? `error: ${r.error}` : r.matchNote || "—"}
                             {r.incrementSource ? ` · ${r.incrementSource}` : ""}
+                            {r.askMedian != null ? ` · asks ~$${Math.round(r.askMedian)}` : ""}
                           </div>
+                          {r.matchWarnings?.length > 0 && (
+                            <div
+                              className="mt-0.5 truncate text-[10px] font-medium text-desk-nogo"
+                              title={r.matchWarnings.join(" · ")}
+                            >
+                              ⚠ {r.matchWarnings[0]}
+                              {r.matchWarnings.length > 1
+                                ? ` (+${r.matchWarnings.length - 1})`
+                                : ""}
+                            </div>
+                          )}
                         </td>
                         <td>
                           {r.error ? (
@@ -584,8 +940,36 @@ export default function BatchPage() {
                             </span>
                           )}
                         </td>
+                        <td className="font-sans">
+                          <span className={`text-[11px] font-semibold ${trustClass}`} title={webBadge.title}>
+                            {trustLabel}
+                          </span>
+                        </td>
+                        <td className="text-right" title={marketNote}>
+                          {marketValue != null ? (
+                            <div>
+                              <div className="num font-semibold text-desk-text">{usd(marketValue)}</div>
+                              <div className="text-[10px] font-sans text-desk-muted">OA med</div>
+                            </div>
+                          ) : (
+                            <span className="text-desk-muted">—</span>
+                          )}
+                        </td>
+                        <td className="text-right">
+                          {r.decisionP25 != null ? (
+                            <div>
+                              <div className="num font-semibold">{usd(r.decisionP25)}</div>
+                              <div className="text-[10px] font-sans text-desk-muted">sold P25</div>
+                            </div>
+                          ) : (
+                            <span className="text-desk-muted">—</span>
+                          )}
+                        </td>
                         <td className="text-right">{usd(r.currentBid)}</td>
                         <td className="text-right font-semibold">{usd(r.nextBid)}</td>
+                        <td className="text-right" title={`BP ${r.buyerPremiumPct}%`}>
+                          {usd(r.allInAtNext)}
+                        </td>
                         <td className="text-right">{usd(r.maxBid)}</td>
                         <td className="text-right font-semibold">{usd(r.walkAwayBid ?? r.walkAway)}</td>
                         <td
@@ -597,18 +981,24 @@ export default function BatchPage() {
                         </td>
                         <td className={`text-right ${r.netProfit != null && r.netProfit >= 0 ? "text-desk-go" : "text-desk-nogo"}`}>
                           {usd(r.netProfit)}
+                          <div className="text-[10px] font-sans text-desk-muted">
+                            {r.sellChannel === "local" ? "local" : "GB"}
+                          </div>
                         </td>
                         <td className="text-right">{usd(r.dealerFloor)}</td>
                         <td className="text-right text-desk-muted">{r.soldCount || "—"}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 <p className="mt-3 text-[11px] text-desk-muted">
                   {incrementHint ? <span className="text-desk-text">{incrementHint}. </span> : null}
-                  <strong className="text-desk-text">GO</strong> means the <em>next</em> legal bid still clears
-                  profit and stays ≤ Max Bid. Headroom = Max Bid − next bid. Walk-away bid = Max Bid floored to a
-                  legal step.
+                  <strong className="text-desk-text">GO</strong> uses <em>next</em> bid + this auction&apos;s BP
+                  and your exit channel. <strong className="text-desk-text">Market med</strong> = OA sold
+                  median (context). <strong className="text-desk-text">Decision P25</strong> drives Max Bid
+                  (capped when Trust = Cooling). All-in@next = next × (1+BP%) + inbound. Street asks never
+                  replace solds — they sanity-check them.
                 </p>
               </div>
             </>
@@ -654,13 +1044,19 @@ function NumField(props: {
   );
 }
 
-function SummaryStat(props: { label: string; value: string; tone?: "go" | "nogo" }) {
+function SummaryStat(props: { label: string; value: string; tone?: "go" | "nogo" | "warn" }) {
   return (
     <div className="panel py-3">
       <div className="field-label">{props.label}</div>
       <div
         className={`num text-lg font-bold ${
-          props.tone === "go" ? "text-desk-go" : props.tone === "nogo" ? "text-desk-nogo" : "text-desk-text"
+          props.tone === "go"
+            ? "text-desk-go"
+            : props.tone === "nogo"
+              ? "text-desk-nogo"
+              : props.tone === "warn"
+                ? "text-desk-warn"
+                : "text-desk-text"
         }`}
       >
         {props.value}

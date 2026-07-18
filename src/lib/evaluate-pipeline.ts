@@ -28,8 +28,20 @@ import { GbaApiClient, GbaApiError, type AskingCompRow, type SoldCompRow } from 
 import type { OaSelection } from "@/lib/gba/scorer";
 import { loadLocalMarket } from "@/lib/oa/local-comps";
 import { loadDepsAndResolve } from "@/lib/oa/resolve-local";
+import { loadSoldWindowStats, pickFreshSoldStats } from "@/lib/oa/sold-windows";
 import type { EvaluateRequest } from "@/lib/validation";
 import { crossReferenceWholesale, type WholesaleGrid } from "@/lib/wholesale";
+import {
+  applyCoolingCapToSold,
+  assessAskSoldDivergence,
+  compareOaToWeb,
+  webCanonicalKey,
+} from "@/lib/web-comps/aggregate";
+import { loadWebPriceStats } from "@/lib/web-comps/ingest";
+import { enqueueWebEnrich } from "@/lib/web-comps/queue";
+import type { WebCompsSummary } from "@/lib/web-comps/types";
+import { assessMatchSuspicion } from "@/lib/match-suspicion";
+import { classifyLotTitle, lotKindLabel } from "@/lib/auctions/lot-kind";
 
 export interface EvaluationOutput {
   deskMode: DeskMode;
@@ -43,6 +55,10 @@ export interface EvaluationOutput {
   soldListings: SoldCompRow[];
   askingListings: AskingCompRow[];
   compMeta: CompFilterMeta | null;
+  /** OA / web / insufficient badge payload for the desk UI. */
+  webComps: WebCompsSummary;
+  /** Identity / OA↔web disparity warnings (advisory). */
+  matchWarnings: string[];
   /** @deprecated use deskMode */
   acquisitionMode?: "auction" | "dealer";
 }
@@ -121,6 +137,74 @@ export async function runEvaluation(
     workflow: deskMode.workflow,
     enrichNotes: enriched.notes,
   };
+
+  const titleBlob = [enriched.manufacturer, enriched.model, enriched.caliber, body.upc]
+    .filter(Boolean)
+    .join(" ");
+  const lotKind = classifyLotTitle(titleBlob);
+  const matchWarnings: string[] = [];
+
+  // Hard gate: ammo / mags / gear never enter OA sold → Max Bid math.
+  if (lotKind !== "firearm") {
+    const label = lotKindLabel(lotKind);
+    sourceStatus.gba = `excluded — title classified as ${label} (not a complete firearm)`;
+    matchWarnings.push(
+      `Excluded from firearm pricing: title looks like ${label}. Fix the lot title or remove from buy-sheet.`,
+    );
+    const emptyWeb: WebCompsSummary = {
+      source: "insufficient",
+      confidence: null,
+      count: 0,
+      domainCount: 0,
+      median: null,
+      sampleUrls: [],
+      sampleDomains: [],
+      note: sourceStatus.gba,
+      agreement: null,
+      divergence: null,
+      enrichPhase: "skipped",
+    };
+    const wholesale = await crossReferenceWholesale({
+      upc: enriched.upc,
+      manufacturer: enriched.manufacturer,
+      model: enriched.model,
+      caliber: enriched.caliber,
+      category: body.category,
+      targetAcquisitionCost: body.targetAcquisitionCost,
+    });
+    sourceStatus.wholesale = `${wholesale.firearmMatches.length} firearms (${wholesale.matchMode})`;
+    const result = evaluateDeal(input, summarize([]), {
+      decisionAnchor: "p25-sold",
+      dealerFloor: wholesale.cheapestInStockFirearm,
+      workflow: deskMode.workflow,
+      wholesaleCheaperExists: wholesale.cheaperThanTarget,
+      askingCount: 0,
+    });
+    const insights = buildDealInsights({
+      modeId,
+      result,
+      sold: summarize([]),
+      asking: summarize([]),
+      wholesale,
+      sourceDealer: body.sourceDealer,
+    });
+    return {
+      deskMode,
+      modeId,
+      result,
+      asking: summarize([]),
+      wholesale,
+      insights,
+      sourceStatus,
+      catalogMatch: null,
+      soldListings: [],
+      askingListings: [],
+      compMeta: null,
+      webComps: emptyWeb,
+      matchWarnings,
+      acquisitionMode: deskMode.workflow === "vendor" ? "dealer" : "auction",
+    };
+  }
 
   // --- Avenue 1: market comps (local OA cache first, then live API) ---
   if (body.gba) {
@@ -291,6 +375,149 @@ export async function runEvaluation(
     sourceStatus.comps = compMeta.decisionNote;
   }
 
+  // Prefer recent sold windows from the local bank when sample size allows.
+  if (sold.count > 0) {
+    const leaf =
+      body.gba != null
+        ? {
+            condition: body.gba.condition === "New" ? "NEW" : "USED",
+            modelId: body.gba.modelId,
+            caliberId: body.gba.caliberId,
+          }
+        : catalogMatch != null
+          ? {
+              condition: catalogMatch.conditionParam === "New" ? "NEW" : "USED",
+              modelId: catalogMatch.modelId,
+              caliberId: catalogMatch.caliberId,
+            }
+          : null;
+    if (leaf) {
+      try {
+        const windows = await loadSoldWindowStats(leaf);
+        const picked = pickFreshSoldStats(windows);
+        if (picked.window !== "all" && picked.sold.count >= 5) {
+          sold = picked.sold;
+          sourceStatus.soldWindow = `${picked.window} sold window n=${picked.sold.count}`;
+        }
+      } catch {
+        /* keep all-time sold */
+      }
+    }
+  }
+
+  // --- Street asks: advisory + Cooling sanity vs OA solds. Never replace solds. ---
+  const webIdentity = {
+    manufacturer: enriched.manufacturer,
+    model: enriched.model,
+    caliber: enriched.caliber || undefined,
+    upc: enriched.upc || undefined,
+    mpn: enriched.mpn || undefined,
+    category: body.category,
+  };
+  const webKey = webCanonicalKey(webIdentity);
+  const webStatsRow = await loadWebPriceStats(webKey);
+
+  let webComps: WebCompsSummary = {
+    source: "none",
+    confidence: null,
+    count: 0,
+    domainCount: 0,
+    median: null,
+    sampleUrls: [],
+    sampleDomains: [],
+    note: "",
+    agreement: null,
+    divergence: null,
+    canonicalKey: webKey,
+    enrichPhase: "idle",
+  };
+
+  if (webStatsRow && webStatsRow.median != null && webStatsRow.count > 0) {
+    webComps.confidence = webStatsRow.confidence;
+    webComps.count = webStatsRow.count;
+    webComps.domainCount = webStatsRow.domainCount;
+    webComps.median = webStatsRow.median;
+    webComps.sampleUrls = webStatsRow.sampleUrls ?? [];
+    webComps.sampleDomains = webStatsRow.sampleDomains ?? [];
+  }
+
+  if (sold.count > 0) {
+    webComps.source = "oa";
+    webComps.enrichPhase = "oa";
+    webComps.note = "OA solds drive money math";
+    if (webComps.median != null && webComps.count > 0) {
+      webComps.agreement = compareOaToWeb(sold.median, webComps.median);
+      webComps.divergence = assessAskSoldDivergence({
+        soldAnchor: sold.p25 > 0 ? sold.p25 : sold.median,
+        askMedian: webComps.median,
+        askCount: webComps.count,
+      });
+      const webMed = webComps.median.toFixed(0);
+      if (webComps.divergence === "cooling") {
+        sourceStatus.web = `Cooling — street asks ($${webMed}) under sold FMV; Max Bid capped toward asks`;
+        sold = applyCoolingCapToSold(sold, webComps.median);
+        webComps.note = sourceStatus.web;
+      } else if (webComps.divergence === "asks_rich") {
+        sourceStatus.web = `Asks rich (street $${webMed}) — money still uses OA solds`;
+        webComps.note = sourceStatus.web;
+      } else if (webComps.agreement === "agrees") {
+        sourceStatus.web = `Street asks agree (median $${webMed}, ${webComps.domainCount} domains)`;
+        webComps.note = sourceStatus.web;
+      } else if (webComps.agreement === "web_higher") {
+        sourceStatus.web = `Street asks above OA solds ($${webMed}) — money still uses OA`;
+        webComps.note = sourceStatus.web;
+      } else if (webComps.agreement === "web_lower") {
+        sourceStatus.web = `Street asks below OA ($${webMed}) — money still uses OA`;
+        webComps.note = sourceStatus.web;
+      }
+    }
+  } else {
+    // Asks never become solds — queue enrich / show street-only advisory.
+    const enq = await enqueueWebEnrich(webIdentity);
+    let enrichPhase: WebCompsSummary["enrichPhase"] = "skipped";
+    if (enq.queued || enq.reason === "already_queued") enrichPhase = "queued";
+    else if (enq.reason === "already_fresh_high") enrichPhase = "ready";
+    else if (webComps.count >= 3) enrichPhase = "weak";
+    else enrichPhase = "skipped";
+
+    webComps.source = "insufficient";
+    webComps.enrichPhase = enrichPhase;
+    webComps.divergence = "thin";
+    webComps.note =
+      webComps.count > 0
+        ? `Street asks only (n=${webComps.count}) — not solds; no OA Max Bid`
+        : enq.queued
+          ? "No OA solds — queued street-ask enrich"
+          : `No OA solds — ${enq.reason.replace(/_/g, " ")}`;
+    sourceStatus.web = webComps.note;
+  }
+
+  // Suspicious OA identity: lot bid/cost vs OA median, and OA↔web disagreement.
+  const suspicion = assessMatchSuspicion({
+    bidOrCost: body.targetAcquisitionCost,
+    oaMedian: sold.count > 0 ? sold.median : null,
+    oaCount: sold.count,
+    webMedian: webComps.median,
+    webAgreement: webComps.agreement,
+  });
+  if (suspicion.suspicious) {
+    matchWarnings.push(...suspicion.warnings);
+    sourceStatus.matchWarning = suspicion.warnings[0] ?? "Suspicious OA match";
+    // Queue web enrich for validation when OA looks wrong but we have no web yet.
+    if (sold.count > 0 && webComps.source === "oa" && (webComps.confidence == null || webComps.count < 3)) {
+      const enq = await enqueueWebEnrich(webIdentity);
+      if (enq.queued || enq.reason === "already_queued") {
+        matchWarnings.push("Web enrich queued to validate this OA match");
+        sourceStatus.web = sourceStatus.web
+          ? `${sourceStatus.web} · enrich queued for validation`
+          : "enrich queued for validation";
+        if (webComps.enrichPhase === "oa") {
+          webComps.enrichPhase = "queued";
+        }
+      }
+    }
+  }
+
   // --- Avenue 2: wholesale cross-reference ---
   const wholesale = await crossReferenceWholesale({
     upc: enriched.upc,
@@ -390,6 +617,8 @@ export async function runEvaluation(
     soldListings,
     askingListings,
     compMeta,
+    webComps,
+    matchWarnings,
     acquisitionMode: legacyAcquisitionMode,
   };
 }

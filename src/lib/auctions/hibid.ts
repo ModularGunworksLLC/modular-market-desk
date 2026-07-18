@@ -4,12 +4,7 @@
  */
 
 import type { AuctionIngestResult, AuctionLot } from "@/lib/auctions/types";
-
-const NON_FIREARM_RE =
-  /\b(ammo|ammunition|cartridge|rounds?|box of|knife|knives|blade|bow|arrow|holster only|magazine only|scope only|optic only|binocular|spotting|tent|camping|apparel|shirt|hat|memorabilia|advertising|shipping information|auction information)\b/i;
-
-const FIREARM_HINT_RE =
-  /\b(pistol|revolver|rifle|shotgun|carbine|handgun|firearm|glock|sig|ruger|smith|wesson|colt|remington|winchester|mossberg|benelli|beretta|cz|canik|taurus|kel-?tec|springfield|fn |hk |heckler|marlin|savage|browning|dpms|ar-?15|ak-?47|1911|sks|lever|bolt-action|semi-?auto)\b/i;
+import { classifyLotTitle } from "@/lib/auctions/lot-kind";
 
 export class AuctionIngestError extends Error {
   constructor(
@@ -22,13 +17,10 @@ export class AuctionIngestError extends Error {
 }
 
 function classifyTitle(title: string): AuctionLot["kind"] {
-  if (/\b(ammo|ammunition|cartridge|rounds?)\b/i.test(title)) return "ammo";
-  if (/\b(knife|knives|blade)\b/i.test(title) && !FIREARM_HINT_RE.test(title)) return "knife";
-  if (NON_FIREARM_RE.test(title) && !FIREARM_HINT_RE.test(title)) return "other";
-  if (FIREARM_HINT_RE.test(title)) return "firearm";
-  // Default lots on a gun auction with serial language → firearm
-  if (/\b(SN|S\/N|Serial)\b/i.test(title)) return "firearm";
-  return "other";
+  const kind = classifyLotTitle(title);
+  // AuctionLot kind has no "accessory" — map to other for ingest metadata.
+  if (kind === "accessory") return "other";
+  return kind;
 }
 
 type LotBidMeta = {

@@ -25,6 +25,8 @@ describe("bid increments", () => {
   it("falls back to settings schedule", () => {
     expect(computeNextBid(350, DEFAULT_BID_INCREMENTS, null)).toBe(375);
     expect(computeNextBid(90, DEFAULT_BID_INCREMENTS, null)).toBe(95);
+    expect(computeNextBid(20, DEFAULT_BID_INCREMENTS, null)).toBe(21);
+    expect(computeNextBid(1000, DEFAULT_BID_INCREMENTS, null)).toBe(1050);
   });
 
   it("floors max bid to a legal walk-away step", () => {
