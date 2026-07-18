@@ -97,6 +97,7 @@ export default function BatchPage() {
         caliber: string;
         category: string;
         upc: string;
+        lotTitle: string;
         currentBid: number | null;
         requiredBid: number | null;
         bidIncrementAmount: number | null;
@@ -435,6 +436,7 @@ export default function BatchPage() {
       caliber: r.caliber,
       category: r.category,
       upc: r.upc,
+      lotTitle: r.rawTitle || "",
       currentBid: r.currentBid,
       requiredBid: r.requiredBid,
       bidIncrementAmount: r.bidIncrementAmount,

@@ -138,10 +138,11 @@ export async function runEvaluation(
     enrichNotes: enriched.notes,
   };
 
-  const titleBlob = [enriched.manufacturer, enriched.model, enriched.caliber, body.upc]
+  // Prefer original auction title when present — parsed make/model often drops "Rifle/Pistol".
+  const titleBlob = [body.lotTitle, enriched.manufacturer, enriched.model, enriched.caliber, body.upc]
     .filter(Boolean)
     .join(" ");
-  const lotKind = classifyLotTitle(titleBlob);
+  const lotKind = classifyLotTitle(titleBlob, { category: body.category });
   const matchWarnings: string[] = [];
 
   // Hard gate: ammo / mags / gear never enter OA sold → Max Bid math.

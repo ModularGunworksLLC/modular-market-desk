@@ -688,7 +688,7 @@ export function parseBatchSheet(
     const bidIncrementAmount = parseMoney(get("bidIncrementAmount"));
     const buyerPremiumPct = parsePct(get("buyerPremiumPct")) ?? opts?.defaultBuyerPremiumPct ?? null;
     const titleForKind = (rawTitle || `${manufacturer} ${model} ${caliber}`).trim();
-    const lotKind = classifyLotTitle(titleForKind);
+    const lotKind = classifyLotTitle(titleForKind, { category });
     const excludeFromPricing = lotKind !== "firearm";
     const unresolved = !manufacturer.trim() || !model.trim() || excludeFromPricing;
 

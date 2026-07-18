@@ -25,9 +25,12 @@ const FIREARM_TYPE_RE =
 
 /** Brands that appear on both guns and ammo — never alone enough to classify as firearm. */
 const BRAND_HINT_RE =
-  /\b(?:glock|sig(?:\s*sauer)?|ruger|smith|wesson|s&w|colt|remington|winchester|mossberg|benelli|beretta|canik|taurus|kel-?tec|springfield|marlin|savage|browning|dpms|fn|hk|heckler|walther|kimber|daniel\s*defense|palmetto|psa|aero|anderson|radical)\b/i;
+  /\b(?:glock|sig(?:\s*sauer)?|ruger|smith|wesson|s&w|colt|remington|winchester|mossberg|benelli|beretta|canik|taurus|kel-?tec|springfield|marlin|henry|savage|browning|dpms|fn|hk|heckler|walther|kimber|daniel\s*defense|palmetto|psa|aero|anderson|radical|tikka|howa|bergara|weatherby|cz|tisas|rock\s*island|heritage|charter|hi-?point|norinco|intrac|benelli|franchi)\b/i;
 
-export function classifyLotTitle(title: string): LotKind {
+export function classifyLotTitle(
+  title: string,
+  opts?: { category?: string },
+): LotKind {
   const t = title.trim();
   if (!t) return "other";
 
@@ -47,12 +50,18 @@ export function classifyLotTitle(title: string): LotKind {
 
   if (BRAND_HINT_RE.test(t)) return "firearm";
 
+  // Batch often strips "Rifle/Pistol" into category — honor that so Henry Golden Boy etc. still price.
+  const cat = (opts?.category ?? "").trim().toLowerCase();
+  if (cat === "rifle" || cat === "handgun" || cat === "pistol" || cat === "shotgun" || cat === "firearm") {
+    return "firearm";
+  }
+
   return "other";
 }
 
 /** True when the lot should enter the firearm Max Bid / OA pipeline. */
-export function isFirearmPricingLot(title: string): boolean {
-  return classifyLotTitle(title) === "firearm";
+export function isFirearmPricingLot(title: string, opts?: { category?: string }): boolean {
+  return classifyLotTitle(title, opts) === "firearm";
 }
 
 export function lotKindLabel(kind: LotKind): string {

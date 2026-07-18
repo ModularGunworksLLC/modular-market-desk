@@ -24,6 +24,8 @@ export const batchRowSchema = z.object({
   caliber: z.string().optional().default(""),
   category: z.string().optional().default("handgun"),
   upc: z.string().optional().default(""),
+  /** Full auction title for lot-kind + OA resolve context. */
+  lotTitle: z.string().optional().default(""),
   currentBid: z.number().nonnegative().nullable().optional(),
   requiredBid: z.number().nonnegative().nullable().optional(),
   bidIncrementAmount: z.number().positive().nullable().optional(),
@@ -133,6 +135,7 @@ export async function evaluateBatchRow(
     mpn: "",
     caliber: row.caliber,
     category: row.category,
+    lotTitle: row.lotTitle || label,
     condition: defaults.condition,
     targetAcquisitionCost: actionHammer,
     inboundShip,

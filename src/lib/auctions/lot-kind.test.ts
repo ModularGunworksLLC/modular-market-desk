@@ -39,6 +39,10 @@ describe("classifyLotTitle — firearms", () => {
     expect(classifyLotTitle("Springfield Saint AR-15 5.56 Rifle SN 12345")).toBe("firearm");
     expect(classifyLotTitle("Remington 870 Express 12ga Pump Shotgun")).toBe("firearm");
     expect(classifyLotTitle("Winchester Model 70 Bolt Action .30-06")).toBe("firearm");
+    expect(classifyLotTitle("Henry Golden Boy 22 LR")).toBe("firearm");
+    expect(classifyLotTitle("Henry H004BSA Golden Boy 22 S/L/LR", { category: "rifle" })).toBe(
+      "firearm",
+    );
   });
 
   it("isFirearmPricingLot matches classifier", () => {

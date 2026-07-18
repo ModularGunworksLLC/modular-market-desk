@@ -20,6 +20,8 @@ export const evaluateSchema = z.object({
   caliber: z.string().optional().default(""),
   category: z.string().optional().default("handgun"),
   condition: z.enum(["new", "used", "any"]).optional().default("any"),
+  /** Original auction title — used for lot-kind gate (make/model often drop "Rifle"). */
+  lotTitle: z.string().optional().default(""),
 
   // buy-side inputs — optional for comp-only evaluate; live bid check uses this when set
   targetAcquisitionCost: z.number().nonnegative().optional().default(0),
