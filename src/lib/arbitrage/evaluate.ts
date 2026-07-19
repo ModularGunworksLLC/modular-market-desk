@@ -3,12 +3,11 @@
  *
  * For each SOLD percentile scenario (P25 / Median / P75):
  *   - compute Route A (GunBroker) and Route B (Local AL) net proceeds
- *   - scenario.netProfit / maxBid use GunBroker; local* fields are side-by-side
- *   - bestRoute / bestNet = higher of A vs B (informational upside)
+ *   - scenario.maxBid / localMaxBid are profit-only hammers per route
  *
- * Headline verdict + max bid use the user-selected sellChannel
- * (gunbroker → Route A, local → Route B), not auto-max.
- * Decision anchor is P25 sold (used) or lowest ask (vendor).
+ * Both exits are always finalized on `result.exits` (new-floor + GO/NO-GO).
+ * Selected sellChannel still drives the legacy headline fields for callers
+ * that have not moved to dual-exit UI.
  */
 
 import { allInCost as computeAllIn } from "./acquisition";
@@ -20,6 +19,7 @@ import type {
   DealInput,
   DecisionAnchor,
   EvaluationResult,
+  ExitDecision,
   PriceStats,
   ScenarioLabel,
   ScenarioResult,
@@ -93,6 +93,45 @@ export interface EvaluateDealOptions {
   cheapestWholesalePrice?: number | null;
 }
 
+function buildExitDecision(params: {
+  profitMaxBid: number;
+  netProfit: number;
+  marginPct: number;
+  input: DealInput;
+  allIn: number;
+  opts?: EvaluateDealOptions;
+  workflow: "used" | "vendor";
+}): ExitDecision {
+  const maxBidEff = effectiveHammerCeiling({
+    profitMaxHammer: params.profitMaxBid,
+    dealerFloor: params.opts?.dealerFloor,
+    inboundShip: params.input.inboundShip,
+    buyerPremiumPct: params.input.buyerPremiumPct,
+    applyNewFloor: params.workflow === "used",
+  });
+  const { verdict, reasons } = decideVerdictFull({
+    netProfit: params.netProfit,
+    targetProfit: params.input.targetProfit,
+    marginPct: params.marginPct,
+    minMarginPct: params.input.minMarginPct,
+    workflow: params.workflow,
+    allInCost: params.allIn,
+    dealerFloor: params.opts?.dealerFloor,
+    wholesaleCheaperExists: params.opts?.wholesaleCheaperExists ?? false,
+    askingCount: params.opts?.askingCount ?? 0,
+    cheapestWholesaleVendor: params.opts?.cheapestWholesaleVendor,
+    cheapestWholesalePrice: params.opts?.cheapestWholesalePrice,
+  });
+  return {
+    maxBid: maxBidEff,
+    profitMaxBid: round2(Math.max(0, params.profitMaxBid)),
+    netProfit: round2(params.netProfit),
+    marginPct: round2(params.marginPct),
+    verdict,
+    verdictReasons: reasons,
+  };
+}
+
 export function evaluateDeal(
   input: DealInput,
   sold: PriceStats,
@@ -121,32 +160,28 @@ export function evaluateDeal(
       ? evaluateScenario("P25", anchorSell, input, allIn)
       : scenarios[0] ?? evaluateScenario("P25", anchorSell, input, allIn);
 
-  const useLocal = input.sellChannel === "local";
-  const decisionRoute = useLocal ? ("local_al" as const) : ("gunbroker" as const);
-  const channelProfit = useLocal ? chosen.localProfit : chosen.netProfit;
-  const channelMargin = useLocal ? chosen.localMarginPct : chosen.marginPct;
-  const profitMaxHammer = useLocal ? chosen.localMaxBid : chosen.maxBid;
-  const effectiveMaxHammer = effectiveHammerCeiling({
-    profitMaxHammer,
-    dealerFloor: opts?.dealerFloor,
-    inboundShip: input.inboundShip,
-    buyerPremiumPct: input.buyerPremiumPct,
-    applyNewFloor: workflow === "used",
+  const gunbroker = buildExitDecision({
+    profitMaxBid: chosen.maxBid,
+    netProfit: chosen.netProfit,
+    marginPct: chosen.marginPct,
+    input,
+    allIn,
+    opts,
+    workflow,
+  });
+  const local = buildExitDecision({
+    profitMaxBid: chosen.localMaxBid,
+    netProfit: chosen.localProfit,
+    marginPct: chosen.localMarginPct,
+    input,
+    allIn,
+    opts,
+    workflow,
   });
 
-  const { verdict, reasons } = decideVerdictFull({
-    netProfit: channelProfit,
-    targetProfit: input.targetProfit,
-    marginPct: channelMargin,
-    minMarginPct: input.minMarginPct,
-    workflow,
-    allInCost: allIn,
-    dealerFloor: opts?.dealerFloor,
-    wholesaleCheaperExists: opts?.wholesaleCheaperExists ?? false,
-    askingCount: opts?.askingCount ?? 0,
-    cheapestWholesaleVendor: opts?.cheapestWholesaleVendor,
-    cheapestWholesalePrice: opts?.cheapestWholesalePrice,
-  });
+  const useLocal = input.sellChannel === "local";
+  const selected = useLocal ? local : gunbroker;
+  const decisionRoute = useLocal ? ("local_al" as const) : ("gunbroker" as const);
 
   return {
     input,
@@ -154,19 +189,20 @@ export function evaluateDeal(
     sold,
     scenarios,
     chosen,
-    verdict,
-    verdictReasons: reasons,
+    exits: { gunbroker, local },
+    verdict: selected.verdict,
+    verdictReasons: selected.verdictReasons,
     decisionAnchor,
     decisionSellPrice: round2(anchorSell),
     decisionRoute,
     upsideRoute: chosen.bestRoute,
-    profitMaxHammer,
-    effectiveMaxHammer,
-    maxBid: effectiveMaxHammer,
-    netProfit: round2(channelProfit),
-    marginPct: round2(channelMargin),
-    localNetProfit: chosen.localProfit,
-    localMaxBid: chosen.localMaxBid,
+    profitMaxHammer: selected.profitMaxBid,
+    effectiveMaxHammer: selected.maxBid,
+    maxBid: selected.maxBid,
+    netProfit: selected.netProfit,
+    marginPct: selected.marginPct,
+    localNetProfit: local.netProfit,
+    localMaxBid: local.maxBid,
     profitUpside: chosen.profitUpside,
   };
 }

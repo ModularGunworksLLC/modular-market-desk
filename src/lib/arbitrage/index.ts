@@ -9,3 +9,9 @@ export { allInCost } from "./acquisition";
 export { maxBid } from "./maxBid";
 export { decideVerdict } from "./verdict";
 export { evaluateDeal } from "./evaluate";
+export {
+  NEW_FLOOR_BUFFER,
+  formatNewDealerWarning,
+  violatesNewFloor,
+  effectiveHammerCeiling,
+} from "./new-floor";

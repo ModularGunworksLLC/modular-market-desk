@@ -1,20 +1,13 @@
 /**
- * HiBid-style auction lot ingest (Pearce / bids.*.com).
+ * HiBid-style auction lot ingest (Pearce / Fowler / bids.*.com).
  * Uses public HTML list pages with pagination — no browser session.
  */
 
-import type { AuctionIngestResult, AuctionLot } from "@/lib/auctions/types";
+import { AuctionIngestError, type AuctionIngestResult, type AuctionLot } from "@/lib/auctions/types";
 import { classifyLotTitle } from "@/lib/auctions/lot-kind";
 
-export class AuctionIngestError extends Error {
-  constructor(
-    message: string,
-    readonly status = 400,
-  ) {
-    super(message);
-    this.name = "AuctionIngestError";
-  }
-}
+export { AuctionIngestError } from "@/lib/auctions/types";
+export { lotsToBatchCsv } from "@/lib/auctions/csv";
 
 function classifyTitle(title: string): AuctionLot["kind"] {
   const kind = classifyLotTitle(title);
@@ -199,26 +192,11 @@ export async function ingestHibidAuction(
   return {
     auctionUrl: base.toString(),
     host: base.host,
+    platform: "hibid",
     lots: all,
     firearmLots,
     skipped,
     warnings,
     hasListingIncrements,
   };
-}
-
-/** Convert firearm lots to batch CSV text for /api/batch paste compatibility. */
-export function lotsToBatchCsv(
-  lots: AuctionLot[],
-  buyerPremiumPct = 15,
-): string {
-  const header = "Lot,Title,Current Bid,Required Bid,Bid Increment,Buyer Premium";
-  const lines = lots.map((l) => {
-    const title = `"${l.title.replace(/"/g, '""')}"`;
-    const bid = l.currentBid == null ? "" : String(l.currentBid);
-    const required = l.requiredBid == null ? "" : String(l.requiredBid);
-    const inc = l.bidIncrementAmount == null ? "" : String(l.bidIncrementAmount);
-    return `${l.lot},${title},${bid},${required},${inc},${buyerPremiumPct}`;
-  });
-  return [header, ...lines].join("\n");
 }

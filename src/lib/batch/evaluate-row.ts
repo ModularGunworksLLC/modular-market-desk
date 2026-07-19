@@ -1,11 +1,13 @@
 /**
  * Single-lot batch evaluation (shared by /api/batch stream + /api/batch/reeval).
+ * Always computes Local + GunBroker Max Bid / GO from one OA evaluation.
  */
 
 import { z } from "zod";
 
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
 import { round2 } from "@/lib/arbitrage/fees";
+import { formatNewDealerWarning } from "@/lib/arbitrage/new-floor";
 import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import {
   computeNextBid,
@@ -14,6 +16,7 @@ import {
 } from "@/lib/auctions/bid-increments";
 import type { BatchResultRow } from "@/lib/batch/types";
 import { runEvaluation } from "@/lib/evaluate-pipeline";
+import { vendorLabel } from "@/lib/tracked-vendors";
 import type { EvaluateRequest } from "@/lib/validation";
 
 export const batchRowSchema = z.object({
@@ -49,6 +52,7 @@ export const batchDefaultsSchema = z
     buyerPaysCardFee: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysCardFee),
     targetProfit: z.number().nonnegative().optional().default(DEAL_DEFAULTS.targetProfit),
     minMarginPct: z.number().min(0).optional().default(DEAL_DEFAULTS.minMarginPct),
+    /** Kept for API compat; dual-exit always returns both channels. */
     sellChannel: z.enum(["gunbroker", "local"]).optional().default("local"),
     salesTaxPct: z.number().min(0).max(100).optional().default(DEAL_DEFAULTS.salesTaxPct),
     bidIncrements: z.array(batchBidIncrementBandSchema).optional(),
@@ -57,6 +61,16 @@ export const batchDefaultsSchema = z
 
 export type BatchRowInput = z.infer<typeof batchRowSchema>;
 export type BatchDefaultsInput = z.infer<typeof batchDefaultsSchema>;
+
+function channelGoAtNext(
+  verdict: "GO" | "NO-GO",
+  maxBid: number | null,
+  nextBid: number | null,
+): "GO" | "NO-GO" {
+  if (maxBid == null) return "NO-GO";
+  if (nextBid != null && nextBid > maxBid + 0.01) return "NO-GO";
+  return verdict;
+}
 
 export async function evaluateBatchRow(
   row: BatchRowInput,
@@ -78,9 +92,7 @@ export async function evaluateBatchRow(
   const sellChannel = defaults.sellChannel ?? "local";
 
   const allInAtNext =
-    nextBid != null
-      ? round2(nextBid * (1 + buyerPremiumPct / 100) + inboundShip)
-      : null;
+    nextBid != null ? round2(nextBid * (1 + buyerPremiumPct / 100) + inboundShip) : null;
   const allInAtCurrent =
     row.currentBid != null
       ? round2(row.currentBid * (1 + buyerPremiumPct / 100) + inboundShip)
@@ -99,8 +111,14 @@ export async function evaluateBatchRow(
     sellChannel,
     walkAwayBid: null,
     verdict: null,
+    verdictLocal: null,
+    verdictGb: null,
     maxBid: null,
+    maxBidLocal: null,
+    maxBidGb: null,
     walkAway: null,
+    netProfitLocal: null,
+    netProfitGb: null,
     netProfit: null,
     localProfit: null,
     soldCount: 0,
@@ -113,6 +131,7 @@ export async function evaluateBatchRow(
     divergence: null,
     dealerFloor: null,
     bestDealer: null,
+    newDealerWarning: null,
     headroom: null,
     incrementSource: usedListing ? "listing" : "settings",
     matchNote: "",
@@ -155,17 +174,35 @@ export async function evaluateBatchRow(
     const out = await runEvaluation(body, { persist: true, token });
     const sold = out.result.sold;
     const dealerFloor = out.wholesale.cheapestInStockFirearm;
-    const maxBid = sold.count > 0 ? out.result.maxBid : null;
+    const bestDealerName = out.insights.cheapestInStockDealer?.vendorName ?? null;
+
+    const maxBidLocal = sold.count > 0 ? out.result.exits.local.maxBid : null;
+    const maxBidGb = sold.count > 0 ? out.result.exits.gunbroker.maxBid : null;
+    const maxBid =
+      maxBidLocal != null || maxBidGb != null
+        ? Math.max(maxBidLocal ?? 0, maxBidGb ?? 0)
+        : null;
+
     const walkAway =
       maxBid != null && dealerFloor != null
         ? Math.min(maxBid, dealerFloor)
         : (maxBid ?? dealerFloor);
     const walkAwayBid = walkAwayLegalBid(walkAway, schedule, listingHints);
 
-    let verdict: "GO" | "NO-GO" | null = sold.count > 0 ? out.result.verdict : null;
-    if (verdict === "GO" && nextBid != null && maxBid != null && nextBid > maxBid + 0.01) {
-      verdict = "NO-GO";
-    }
+    const verdictLocal =
+      sold.count > 0
+        ? channelGoAtNext(out.result.exits.local.verdict, maxBidLocal, nextBid)
+        : null;
+    const verdictGb =
+      sold.count > 0
+        ? channelGoAtNext(out.result.exits.gunbroker.verdict, maxBidGb, nextBid)
+        : null;
+    const verdict =
+      verdictLocal === "GO" || verdictGb === "GO"
+        ? "GO"
+        : verdictLocal != null || verdictGb != null
+          ? "NO-GO"
+          : null;
 
     const headroom =
       maxBid != null && nextBid != null ? Math.round((maxBid - nextBid) * 100) / 100 : null;
@@ -175,11 +212,7 @@ export async function evaluateBatchRow(
     if (sold.count > 0 && sold.median > 0) {
       estimatedGrossResale = Math.round(sold.median * 100) / 100;
       grossResaleNote = `OA sold median · n=${sold.count}`;
-      if (
-        out.webComps?.median != null &&
-        out.webComps.median > 0 &&
-        out.webComps.count > 0
-      ) {
+      if (out.webComps?.median != null && out.webComps.median > 0 && out.webComps.count > 0) {
         const d = out.webComps.domainCount;
         grossResaleNote += ` · street asks ~$${Math.round(out.webComps.median)}${
           d > 0 ? ` (${d} domains)` : ""
@@ -187,22 +220,31 @@ export async function evaluateBatchRow(
       }
     }
 
-    const channelProfit =
-      sold.count > 0
-        ? sellChannel === "local"
-          ? out.result.localNetProfit
-          : out.result.netProfit
+    const newDealerWarning =
+      allInAtNext != null
+        ? formatNewDealerWarning({
+            allInCost: allInAtNext,
+            dealerFloor,
+            vendorLabel: bestDealerName ? vendorLabel(bestDealerName) : "a distributor",
+            allInContext: "at next",
+          })
         : null;
 
     return {
       ...base,
       verdict,
+      verdictLocal,
+      verdictGb,
       maxBid,
+      maxBidLocal,
+      maxBidGb,
       walkAway,
       walkAwayBid,
       nextBid,
-      netProfit: channelProfit,
-      localProfit: sold.count > 0 ? out.result.localNetProfit : null,
+      netProfitLocal: sold.count > 0 ? out.result.exits.local.netProfit : null,
+      netProfitGb: sold.count > 0 ? out.result.exits.gunbroker.netProfit : null,
+      netProfit: sold.count > 0 ? out.result.exits.local.netProfit : null,
+      localProfit: sold.count > 0 ? out.result.exits.local.netProfit : null,
       soldCount: sold.count,
       soldP25: sold.count > 0 ? sold.p25 : null,
       soldMedian: sold.count > 0 ? sold.median : null,
@@ -212,14 +254,11 @@ export async function evaluateBatchRow(
       askMedian: out.webComps?.median ?? null,
       divergence: out.webComps?.divergence ?? null,
       dealerFloor,
-      bestDealer: out.insights.cheapestInStockDealer?.vendorName ?? null,
+      bestDealer: bestDealerName,
+      newDealerWarning,
       headroom,
       matchNote:
-        [
-          out.sourceStatus.gba,
-          out.sourceStatus.web,
-          out.sourceStatus.matchWarning,
-        ]
+        [out.sourceStatus.gba, out.sourceStatus.web, out.sourceStatus.matchWarning]
           .filter(Boolean)
           .join(" · ") || "no comps",
       matchScore: out.catalogMatch?.score ?? null,

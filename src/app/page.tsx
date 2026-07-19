@@ -16,8 +16,10 @@ import { SerialStolenPanel } from "@/components/desk/SerialStolenPanel";
 import type { StolenCheckResult } from "@/lib/stolen/hotgunz";
 import { allInCost } from "@/lib/arbitrage/acquisition";
 import { CLIENT_DEAL_DEFAULTS } from "@/lib/arbitrage/client-defaults";
+import { formatNewDealerWarning } from "@/lib/arbitrage/new-floor";
 import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import { evaluateDeal } from "@/lib/arbitrage/evaluate";
+import { vendorLabel } from "@/lib/tracked-vendors";
 import type { DealInput, DecisionAnchor, EvaluationResult, PriceStats } from "@/lib/arbitrage/types";
 import type { CompFilterMeta } from "@/lib/comp-filter";
 import type { AskingCompRow, SoldCompRow } from "@/lib/gba/client";
@@ -183,12 +185,25 @@ export default function DeskPage() {
     setError(null);
     setData(null);
     try {
-      const acquisitionRaw = isVendor ? form.vendorCost : liveBid;
-      const acquisition = parseMoneyField(acquisitionRaw);
-      if (acquisition == null || acquisition < 0) {
-        setError(isVendor ? "Enter a valid vendor cost." : "Enter a valid live bid / hammer.");
-        setLoading(false);
-        return;
+      // Used/auction: Max Bids come from sold comps — hammer is optional (check GO after).
+      // Vendor: dealer price is required.
+      let acquisition = 0;
+      if (isVendor) {
+        const vendorCost = parseMoneyField(form.vendorCost);
+        if (vendorCost == null || vendorCost < 0) {
+          setError("Enter a valid vendor cost.");
+          setLoading(false);
+          return;
+        }
+        acquisition = vendorCost;
+      } else {
+        const hammer = parseMoneyField(liveBid);
+        if (hammer != null && hammer < 0) {
+          setError("Hammer / live bid cannot be negative.");
+          setLoading(false);
+          return;
+        }
+        acquisition = hammer ?? 0;
       }
       const targetProfit = parseMoneyField(form.targetProfit);
       const minMarginPct = parseMoneyField(form.minMarginPct);
@@ -400,6 +415,16 @@ export default function DeskPage() {
 
   function renderWholesaleBlock() {
     const floor = insights?.cheapestInStock ?? data?.wholesale.cheapestInStockFirearm;
+    const usedVsNew =
+      !isDealer && r
+        ? formatNewDealerWarning({
+            allInCost: r.allInCost,
+            dealerFloor: floor,
+            vendorLabel: insights?.cheapestInStockDealer
+              ? vendorLabel(insights.cheapestInStockDealer.vendorName)
+              : null,
+          })
+        : null;
     return (
       <div className="panel overflow-x-auto">
         <h3 className="mb-2 text-sm font-semibold text-desk-muted">
@@ -410,6 +435,11 @@ export default function DeskPage() {
             Matched by brand / model / caliber (no UPC — normal for auction buys).
           </p>
         )}
+        {usedVsNew ? (
+          <p className="mb-3 rounded-md border border-desk-nogo/50 bg-desk-nogo/15 px-3 py-2 text-sm font-semibold text-desk-nogo">
+            {usedVsNew}
+          </p>
+        ) : null}
         {floor != null && (
           <div className="mb-3 rounded-md border border-desk-accent/30 bg-desk-accent/10 px-3 py-2 text-sm">
             <span className="font-semibold text-desk-accent">
@@ -496,7 +526,9 @@ export default function DeskPage() {
 
       <div className="mb-4">
         <h1 className="text-lg font-semibold tracking-tight text-desk-text">Evaluate</h1>
-        <p className="text-xs text-desk-muted">Identify → Local or GB → max bid from sold comps.</p>
+        <p className="text-xs text-desk-muted">
+          Identify → Local + GB max bids from sold comps → optional live bid to check GO.
+        </p>
       </div>
 
       <div className="panel mb-4 space-y-3">
@@ -696,49 +728,16 @@ export default function DeskPage() {
             )}
           </div>
 
-          <div className="border-t border-desk-border pt-3">
-            <h2 className="text-sm font-semibold text-desk-text">2. How will you sell it?</h2>
-            <p className="mt-0.5 mb-2 text-[11px] text-desk-muted">
-              Max bid / GO-NO-GO use this channel’s fees only.
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, sellChannel: "local" }))}
-                className={`rounded-md border px-3 py-2.5 text-left text-xs transition ${
-                  form.sellChannel === "local"
-                    ? "border-desk-accent bg-desk-accent/15 text-desk-text"
-                    : "border-desk-border text-desk-muted hover:border-desk-muted"
-                }`}
-              >
-                <span className="block font-semibold">Local</span>
-                <span className="mt-0.5 block text-[10px] opacity-80">In-store / pickup · sales tax</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, sellChannel: "gunbroker" }))}
-                className={`rounded-md border px-3 py-2.5 text-left text-xs transition ${
-                  form.sellChannel === "gunbroker"
-                    ? "border-desk-accent bg-desk-accent/15 text-desk-text"
-                    : "border-desk-border text-desk-muted hover:border-desk-muted"
-                }`}
-              >
-                <span className="block font-semibold">GunBroker</span>
-                <span className="mt-0.5 block text-[10px] opacity-80">Ship · listing · card fees</span>
-              </button>
-            </div>
-          </div>
-
           <div className="border-t border-desk-border pt-3 space-y-3">
             <div>
-              <h2 className="text-sm font-semibold text-desk-text">3. Your money rules</h2>
+              <h2 className="text-sm font-semibold text-desk-text">2. Money rules (both exits)</h2>
               <p className="mt-0.5 text-[11px] text-desk-muted">
-                Minimum profit you need after exit fees (at conservative P25 sold).
+                Every evaluate returns Local AL and GunBroker Max Bid / GO side-by-side. Set fees for both.
               </p>
             </div>
             <FieldHint
               label="Min profit ($)"
-              hint="GO when channel profit at P25 ≥ this amount."
+              hint="GO when that exit’s profit at P25 ≥ this amount."
               v={form.targetProfit}
               on={set("targetProfit")}
             />
@@ -749,60 +748,61 @@ export default function DeskPage() {
               on={set("minMarginPct")}
             />
 
-            {form.sellChannel === "local" ? (
-              <FieldHint
-                label="Sales tax %"
-                hint="Backed out of the local sell price (e.g. 9 for Alabama)."
-                v={form.salesTaxPct}
-                on={set("salesTaxPct")}
-              />
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <FieldHint
-                    label="Outbound ship ($)"
-                    hint="Listing ship charge (buyer pays if checked below)."
-                    v={form.outboundShip}
-                    on={set("outboundShip")}
-                  />
-                  <FieldHint
-                    label="Listing fees ($)"
-                    hint="GunBroker listing upgrades — always deducted from your net."
-                    v={form.listingUpgrades}
-                    on={set("listingUpgrades")}
-                  />
-                </div>
-                <div className="flex flex-col gap-2 rounded-md border border-desk-border bg-desk-panel2 p-3">
-                  <BuyerPaidFeeToggle
-                    id="buyer-pays-ship"
-                    title="Buyer pays outbound shipping"
-                    hint="Ship not deducted from max bid / net."
-                    checked={form.buyerPaysOutboundShip}
-                    onChange={(checked) => setForm((f) => ({ ...f, buyerPaysOutboundShip: checked }))}
-                  />
-                  <BuyerPaidFeeToggle
-                    id="buyer-pays-card"
-                    title="Buyer pays card / CC fees"
-                    hint="~3% processing not deducted from your net."
-                    checked={form.buyerPaysCardFee}
-                    onChange={(checked) => setForm((f) => ({ ...f, buyerPaysCardFee: checked }))}
-                  />
-                </div>
+            <FieldHint
+              label="Local sales tax %"
+              hint="Backed out of the local sell price (e.g. 9 for Alabama)."
+              v={form.salesTaxPct}
+              on={set("salesTaxPct")}
+            />
+
+            <div className="space-y-3 rounded-md border border-desk-border bg-desk-panel2/50 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-desk-muted">
+                GunBroker exit fees
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <FieldHint
+                  label="Outbound ship ($)"
+                  hint="Listing ship charge (buyer pays if checked below)."
+                  v={form.outboundShip}
+                  on={set("outboundShip")}
+                />
+                <FieldHint
+                  label="Listing fees ($)"
+                  hint="GunBroker listing upgrades — always deducted from your net."
+                  v={form.listingUpgrades}
+                  on={set("listingUpgrades")}
+                />
               </div>
-            )}
+              <div className="flex flex-col gap-2">
+                <BuyerPaidFeeToggle
+                  id="buyer-pays-ship"
+                  title="Buyer pays outbound shipping"
+                  hint="Ship not deducted from GB max bid / net."
+                  checked={form.buyerPaysOutboundShip}
+                  onChange={(checked) => setForm((f) => ({ ...f, buyerPaysOutboundShip: checked }))}
+                />
+                <BuyerPaidFeeToggle
+                  id="buyer-pays-card"
+                  title="Buyer pays card / CC fees"
+                  hint="~3% processing not deducted from GB net."
+                  checked={form.buyerPaysCardFee}
+                  onChange={(checked) => setForm((f) => ({ ...f, buyerPaysCardFee: checked }))}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="border-t border-desk-border pt-3 space-y-3">
             <div>
               <h2 className="text-sm font-semibold text-desk-text">
-                {isVendor ? "4. Your dealer cost" : "4. Auction / buy-side (optional)"}
+                {isVendor ? "3. Your dealer cost" : "3. Auction / buy-side (optional)"}
               </h2>
               <p className="mt-0.5 text-[11px] text-desk-muted">
                 {isVendor
                   ? "Price on the vendor ad."
                   : isTradeIn
-                    ? "Inbound ship only — no buyer premium on trade-ins."
-                    : "Buyer’s premium + inbound ship set the max hammer. Enter live bid after Evaluate to check GO/NO-GO."}
+                    ? "Inbound ship only — no buyer premium. Offer amount optional until after Evaluate."
+                    : "Buyer’s premium + inbound set Max Bid. Hammer is optional — Evaluate first, then type the live bid to check GO."}
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -813,6 +813,25 @@ export default function DeskPage() {
                   v={form.vendorCost}
                   on={set("vendorCost")}
                 />
+              )}
+              {!isVendor && (
+                <div className="col-span-2">
+                  <label className="field-label" htmlFor="form-live-bid">
+                    {isTradeIn ? "Cash offer you’re considering ($)" : "Live bid / hammer ($)"}
+                  </label>
+                  <input
+                    id="form-live-bid"
+                    className="field-input num text-lg font-bold"
+                    inputMode="decimal"
+                    placeholder="Optional — leave blank to get Max Bids first"
+                    value={liveBid}
+                    onChange={(e) => setLiveBid(e.target.value)}
+                  />
+                  <p className="mt-1 text-[11px] text-desk-muted">
+                    Not required to Evaluate. After results, the same field updates Local / GB GO against your
+                    ceilings.
+                  </p>
+                </div>
               )}
               {isUsedAuction && (
                 <FieldHint
@@ -828,7 +847,13 @@ export default function DeskPage() {
                 v={form.inboundShip}
                 on={set("inboundShip")}
               />
-              {(isVendor || isUsedAuction) && (
+              {!isVendor && parseMoneyFieldOrZero(liveBid) > 0 && (
+                <div className="col-span-2 rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-sm">
+                  <span className="text-desk-muted">Working all-in at this hammer </span>
+                  <span className="num font-bold text-desk-text">{usd(previewAllIn)}</span>
+                </div>
+              )}
+              {isVendor && (
                 <div className="col-span-2 rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-sm">
                   <span className="text-desk-muted">Working all-in </span>
                   <span className="num font-bold text-desk-text">{usd(previewAllIn)}</span>
@@ -859,7 +884,7 @@ export default function DeskPage() {
             {loading
               ? "Loading market comps…"
               : form.gbaModelId && form.gbaCaliberId
-                ? `Get ${isTradeIn ? "max offer" : "max bid"} (${form.sellChannel === "local" ? "Local" : "GB"})`
+                ? `Get ${isTradeIn ? "max offers" : "max bids"} (Local + GunBroker)`
                 : "Pick Make → Model → Caliber first"}
           </button>
           {loading && (
@@ -877,10 +902,12 @@ export default function DeskPage() {
               <ol className="mx-auto max-w-md space-y-1 text-left text-xs">
                 <li>1. Pick <strong className="text-desk-text">Make → Model → Caliber</strong> from OA</li>
                 <li>
-                  2. Choose <strong className="text-desk-text">Local</strong> or{" "}
-                  <strong className="text-desk-text">GunBroker</strong> and set min profit + fees
+                  2. Set min profit + Local tax and GunBroker fees (both exits always run)
                 </li>
-                <li>3. Get your <strong className="text-desk-text">max bid / max offer</strong> from sold comps</li>
+                <li>
+                  3. Get <strong className="text-desk-text">Local + GunBroker max bids</strong>, then type a
+                  live bid to check GO
+                </li>
               </ol>
             </div>
           )}
@@ -987,18 +1014,18 @@ export default function DeskPage() {
                 <ExitComparisonPanel
                   chosen={r.chosen}
                   targetProfit={r.input.targetProfit}
-                  verdict={r.verdict}
-                  maxBidGb={form.sellChannel === "local" ? r.chosen.maxBid : r.maxBid}
-                  localMaxBid={r.localMaxBid}
-                  profitGb={r.chosen.netProfit}
-                  localProfit={r.localNetProfit}
-                  profitUpside={r.profitUpside}
-                  upsideRoute={r.upsideRoute}
+                  exits={r.exits}
                   allIn={r.allInCost}
                   hammerOverCeiling={hammerOverCeiling}
                   enteredHammer={enteredHammerOrPrice}
                   isAuction={isAuction}
-                  sellChannel={form.sellChannel}
+                  newDealerWarning={formatNewDealerWarning({
+                    allInCost: r.allInCost,
+                    dealerFloor: data.wholesale.cheapestInStockFirearm,
+                    vendorLabel: insights?.cheapestInStockDealer
+                      ? vendorLabel(insights.cheapestInStockDealer.vendorName)
+                      : null,
+                  })}
                 />
               )}
 

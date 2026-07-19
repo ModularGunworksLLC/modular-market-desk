@@ -21,6 +21,21 @@ export function violatesNewFloor(allInCost: number, dealerFloor: number | null |
   return allInCost >= ceiling;
 }
 
+/** Loud used-vs-new callout when all-in is within the new-floor buffer. */
+export function formatNewDealerWarning(params: {
+  allInCost: number;
+  dealerFloor: number | null | undefined;
+  vendorLabel?: string | null;
+  /** e.g. "at next" for batch sheets */
+  allInContext?: string;
+}): string | null {
+  if (!violatesNewFloor(params.allInCost, params.dealerFloor)) return null;
+  const floor = params.dealerFloor!;
+  const vendor = (params.vendorLabel ?? "").trim() || "distributor";
+  const ctx = params.allInContext ? ` ${params.allInContext}` : "";
+  return `NEW @ ${vendor} $${floor.toFixed(2)} — all-in${ctx} is within $${NEW_FLOOR_BUFFER} of new wholesale; skip used.`;
+}
+
 /** Invert all-in ceiling to a hammer / cash offer (before premium). */
 export function hammerFromMaxAllIn(
   maxAllIn: number,

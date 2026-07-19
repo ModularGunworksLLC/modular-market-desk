@@ -2,6 +2,7 @@
 
 import { allInCost } from "@/lib/arbitrage/acquisition";
 import { evaluateDeal } from "@/lib/arbitrage/evaluate";
+import { formatNewDealerWarning } from "@/lib/arbitrage/new-floor";
 import { heroViable } from "@/lib/arbitrage/verdict";
 import type { EvaluationResult, PriceStats } from "@/lib/arbitrage/types";
 import type { DealInsights } from "@/lib/deal-insights";
@@ -112,8 +113,6 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
   const isVendor = deskMode.workflow === "vendor";
   const isTradeIn = deskMode.usedSubtype === "tradein";
   const liveHammer = parseMoneyFieldOrZero(liveBid);
-  const exitLabel = result.input.sellChannel === "local" ? "local sale" : "GunBroker";
-  const exitShort = result.input.sellChannel === "local" ? "Local" : "GB";
 
   const liveResult = evaluateDeal(
     {
@@ -135,13 +134,35 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
     },
   );
 
-  const heroNumber = isVendor ? null : result.effectiveMaxHammer;
+  // Max bids follow live BP/inbound; verdicts need a real hammer (don't treat $0 as GO).
+  const ceilingExits = liveResult.exits;
+  const verdictExits = liveHammer > 0 ? liveResult.exits : result.exits;
   const heroLabel = isTradeIn ? "MAX OFFER" : "MAX BID";
+  const bestCeiling = Math.max(ceilingExits.local.maxBid, ceilingExits.gunbroker.maxBid);
   const viable = isVendor
     ? liveResult.verdict === "GO"
-    : heroViable({ effectiveMaxHammer: result.effectiveMaxHammer, compCount: sold.count });
+    : heroViable({ effectiveMaxHammer: bestCeiling, compCount: sold.count }) ||
+      verdictExits.local.verdict === "GO" ||
+      verdictExits.gunbroker.verdict === "GO";
 
-  const ceiling = result.effectiveMaxHammer;
+  const ceiling = bestCeiling;
+  const liveAllIn = isVendor
+    ? result.allInCost
+    : allInCost({
+        targetAcquisitionCost: liveHammer,
+        buyerPremiumPct: isTradeIn ? 0 : buyerPremiumPct,
+        inboundShip,
+      });
+  const dealerVendor = insights?.cheapestInStockDealer
+    ? vendorLabel(insights.cheapestInStockDealer.vendorName)
+    : null;
+  const newDealerWarning = !isVendor
+    ? formatNewDealerWarning({
+        allInCost: liveHammer > 0 ? liveAllIn : result.allInCost,
+        dealerFloor: wholesale.cheapestInStockFirearm,
+        vendorLabel: dealerVendor,
+      })
+    : null;
   const overCeiling =
     !isVendor && liveHammer > 0 && ceiling > 0 && liveHammer > ceiling + 0.01;
   const underCeiling =
@@ -164,13 +185,17 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
 
   const goReasons: string[] = [];
   if (!isVendor && viable && sold.count > 0) {
+    const goExits = [
+      verdictExits.local.verdict === "GO" ? "Local" : null,
+      verdictExits.gunbroker.verdict === "GO" ? "GunBroker" : null,
+    ].filter(Boolean);
     if (webComps?.divergence === "cooling") {
       goReasons.push(
-        `Clears $${result.input.targetProfit} min profit at Cooling-capped P25 via ${exitShort} (street asks under sold FMV).`,
+        `Clears $${result.input.targetProfit} min profit at Cooling-capped P25 (${goExits.join(" + ") || "check exits"}).`,
       );
     } else {
       goReasons.push(
-        `Clears $${result.input.targetProfit} min profit at conservative sold (P25) via ${exitShort}.`,
+        `Clears $${result.input.targetProfit} min profit at conservative sold P25 on: ${goExits.join(" + ") || "neither exit"}.`,
       );
     }
     if (sold.count < 8) goReasons.push(`Only ${sold.count} sold comps — treat Max Bid as cautious.`);
@@ -180,13 +205,18 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
     goReasons.push("Cost clears target profit vs lowest active ask.");
   }
 
-  const reasonList =
-    liveResult.verdict === "NO-GO" || (!isVendor && !viable)
-      ? liveResult.verdictReasons.length
-        ? liveResult.verdictReasons
-        : !isVendor && sold.count === 0
-          ? ["No sold comps — cannot set a Max Bid."]
-          : ["Does not clear your profit floor at the decision price."]
+  const reasonList = newDealerWarning
+    ? [newDealerWarning, ...goReasons]
+    : verdictExits.local.verdict === "NO-GO" && verdictExits.gunbroker.verdict === "NO-GO"
+      ? [
+          ...(verdictExits.local.verdictReasons.length
+            ? verdictExits.local.verdictReasons.map((r) => `Local: ${r}`)
+            : []),
+          ...(verdictExits.gunbroker.verdictReasons.length
+            ? verdictExits.gunbroker.verdictReasons.map((r) => `GB: ${r}`)
+            : []),
+          ...(!isVendor && sold.count === 0 ? ["No sold comps — cannot set a Max Bid."] : []),
+        ].slice(0, 6)
       : goReasons;
 
   const maxBidAllIn =
@@ -251,47 +281,76 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
         </div>
 
         {!isVendor && (
-          <div className="mt-4">
-            <p className="text-xs uppercase tracking-widest text-desk-muted">{heroLabel}</p>
-            <p
-              className={`num text-5xl font-black tracking-tight transition-opacity duration-300 ${
-                viable ? "text-desk-go" : "text-desk-nogo"
-              }`}
-            >
-              {sold.count > 0 ? usd(heroNumber ?? undefined) : "—"}
+          <div className="mt-4 space-y-3">
+            <p className="text-xs uppercase tracking-widest text-desk-muted">
+              {heroLabel} — both exits (fees in)
             </p>
-            <p className="mt-1 text-sm text-desk-muted">
-              Walk-away via {exitLabel} — do not exceed this {isTradeIn ? "cash offer" : "hammer"}. Fees for that
-              exit are already in this number.
-            </p>
+            {newDealerWarning ? (
+              <p className="rounded-md border border-desk-nogo/40 bg-desk-nogo/15 px-3 py-2 text-xs font-semibold text-desk-nogo">
+                {newDealerWarning}
+              </p>
+            ) : null}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-md border border-desk-border bg-desk-panel2/80 px-3 py-3">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-muted">
+                  Local AL
+                </p>
+                <p
+                  className={`num text-4xl font-black tracking-tight ${
+                    verdictExits.local.verdict === "GO" ? "text-desk-go" : "text-desk-nogo"
+                  }`}
+                >
+                  {sold.count > 0 ? usd(ceilingExits.local.maxBid) : "—"}
+                </p>
+                <p
+                  className={`mt-1 text-sm font-black ${
+                    verdictExits.local.verdict === "GO" ? "text-desk-go" : "text-desk-nogo"
+                  }`}
+                >
+                  {sold.count > 0 ? verdictExits.local.verdict : "—"}
+                </p>
+                <p className="mt-1 text-[11px] text-desk-muted">
+                  Tax-backed local sale · do not exceed this {isTradeIn ? "offer" : "hammer"}
+                </p>
+              </div>
+              <div className="rounded-md border border-desk-border bg-desk-panel2/80 px-3 py-3">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-muted">
+                  GunBroker
+                </p>
+                <p
+                  className={`num text-4xl font-black tracking-tight ${
+                    verdictExits.gunbroker.verdict === "GO" ? "text-desk-go" : "text-desk-nogo"
+                  }`}
+                >
+                  {sold.count > 0 ? usd(ceilingExits.gunbroker.maxBid) : "—"}
+                </p>
+                <p
+                  className={`mt-1 text-sm font-black ${
+                    verdictExits.gunbroker.verdict === "GO" ? "text-desk-go" : "text-desk-nogo"
+                  }`}
+                >
+                  {sold.count > 0 ? verdictExits.gunbroker.verdict : "—"}
+                </p>
+                <p className="mt-1 text-[11px] text-desk-muted">
+                  FVF + listing fees baked in · do not exceed this {isTradeIn ? "offer" : "hammer"}
+                </p>
+              </div>
+            </div>
             {sold.count > 0 && sold.median > 0 && (
-              <div className="mt-3 rounded-md border border-desk-accent/40 bg-desk-accent/10 px-3 py-3">
+              <div className="rounded-md border border-desk-accent/40 bg-desk-accent/10 px-3 py-3">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-accent">
                   Assessed market value
                 </p>
                 <p className="num text-3xl font-black text-desk-text">{usd(sold.median)}</p>
                 <p className="mt-1 text-xs text-desk-muted">
-                  {webComps?.source === "web"
-                    ? `What the tool thinks this sells for (web street median${
-                        webComps.domainCount > 0
-                          ? ` · ${webComps.domainCount} domain${webComps.domainCount === 1 ? "" : "s"}`
-                          : ""
-                      } · n=${sold.count}) — before fees`
-                    : `What the tool thinks this sells for (OA sold median · n=${sold.count}) — before fees`}
-                </p>
-                <p className="mt-1 text-xs text-desk-muted">
-                  Max Bid / Walk-away below are after fees from conservative P25, not this number.
+                  OA sold median · n={sold.count} — before fees. Max Bids above use conservative P25 after
+                  fees.
                 </p>
               </div>
             )}
             {maxBidAllIn != null && sold.count > 0 && (
-              <p className="mt-1 text-xs text-desk-muted">
-                All-in at Max Bid (premium + inbound): {usd(maxBidAllIn)}
-              </p>
-            )}
-            {result.profitMaxHammer > result.effectiveMaxHammer + 0.01 && (
-              <p className="mt-1 text-xs text-desk-nogo">
-                New wholesale cap lowered this from {usd(result.profitMaxHammer)} (profit-only max).
+              <p className="text-xs text-desk-muted">
+                All-in at best Max Bid (premium + inbound): {usd(maxBidAllIn)}
               </p>
             )}
           </div>
@@ -330,17 +389,14 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
               </div>
             </dl>
             <p className="mt-2 text-sm text-desk-text">
-              If you sell near conservative (P25) on {exitShort}: net ≈{" "}
-              <span className="num font-semibold">
-                {usd(
-                  result.input.sellChannel === "local"
-                    ? result.chosen.routeB.net
-                    : result.chosen.routeA.net,
-                )}
+              At P25 sell: Local net ≈{" "}
+              <span className="num font-semibold">{usd(result.chosen.routeB.net)}</span>
+              {" · "}
+              GB net ≈ <span className="num font-semibold">{usd(result.chosen.routeA.net)}</span>
+              <span className="text-desk-muted">
+                {" "}
+                (profit target ${result.input.targetProfit})
               </span>
-              {" → "}
-              profit ≈ <span className="num font-semibold">{usd(result.netProfit)}</span>
-              <span className="text-desk-muted"> (vs ${result.input.targetProfit} target)</span>
             </p>
             <p className={`mt-1 text-xs ${liq.hot ? "text-desk-muted" : "text-desk-warn"}`}>
               {liq.text}
@@ -428,19 +484,32 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
               </div>
             )}
             {liveHammer > 0 && (
-              <span
-                className={`rounded px-2 py-1 text-xs font-bold ${
-                  liveResult.verdict === "GO" ? "bg-desk-go/20 text-desk-go" : "bg-desk-nogo/20 text-desk-nogo"
-                }`}
-              >
-                {liveResult.verdict} @ {usd(liveHammer)}
-              </span>
+              <div className="flex flex-wrap gap-2 text-xs font-bold">
+                <span
+                  className={`rounded px-2 py-1 ${
+                    verdictExits.local.verdict === "GO"
+                      ? "bg-desk-go/20 text-desk-go"
+                      : "bg-desk-nogo/20 text-desk-nogo"
+                  }`}
+                >
+                  Local {verdictExits.local.verdict}
+                </span>
+                <span
+                  className={`rounded px-2 py-1 ${
+                    verdictExits.gunbroker.verdict === "GO"
+                      ? "bg-desk-go/20 text-desk-go"
+                      : "bg-desk-nogo/20 text-desk-nogo"
+                  }`}
+                >
+                  GB {verdictExits.gunbroker.verdict}
+                </span>
+              </div>
             )}
           </div>
           {liveHammer > 0 && (
             <p className="mt-2 text-[11px] text-desk-muted">
-              All-in at this hammer:{" "}
-              {usd(allInCost({ targetAcquisitionCost: liveHammer, buyerPremiumPct: isTradeIn ? 0 : buyerPremiumPct, inboundShip }))}
+              All-in at this hammer: {usd(liveAllIn)} · Local profit{" "}
+              {usd(verdictExits.local.netProfit)} · GB profit {usd(verdictExits.gunbroker.netProfit)}
             </p>
           )}
           {nearCeiling && (

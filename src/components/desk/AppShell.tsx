@@ -112,7 +112,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <div className="flex-1 space-y-4 overflow-y-auto p-4">
               <div>
-                <label className="field-label">Default sell channel</label>
+                <label className="field-label">Legacy API preference (tie-break)</label>
+                <p className="mb-1 text-[11px] text-desk-muted">
+                  Evaluate always shows Local + GunBroker. This only sets which channel fills older single-field APIs.
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -123,7 +126,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         : "border-desk-border text-desk-muted"
                     }`}
                   >
-                    Local
+                    Prefer Local
                   </button>
                   <button
                     type="button"
@@ -134,7 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         : "border-desk-border text-desk-muted"
                     }`}
                   >
-                    GunBroker
+                    Prefer GunBroker
                   </button>
                 </div>
               </div>

@@ -37,5 +37,9 @@ if (process.env.NODE_ENV !== "production") {
   globalThis.__mmdLibsql = client;
 }
 
+// Sync scripts + Next.js share the file DB — wait instead of failing on lock.
+void client.execute("PRAGMA busy_timeout = 60000");
+void client.execute("PRAGMA journal_mode = WAL");
+
 export const db = drizzle(client, { schema });
 export { schema };

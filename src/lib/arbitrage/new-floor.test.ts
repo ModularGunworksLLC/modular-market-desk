@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   effectiveHammerCeiling,
+  formatNewDealerWarning,
   hammerFromMaxAllIn,
   NEW_FLOOR_BUFFER,
   violatesNewFloor,
@@ -28,5 +29,19 @@ describe("new floor buffer", () => {
 
   it("inverts max all-in to hammer with premium", () => {
     expect(hammerFromMaxAllIn(325, 25, 18)).toBeCloseTo(254.24, 1);
+  });
+
+  it("formats a loud used-vs-new warning", () => {
+    expect(
+      formatNewDealerWarning({
+        allInCost: 330,
+        dealerFloor: 350,
+        vendorLabel: "Lipsey's",
+        allInContext: "at next",
+      }),
+    ).toMatch(/NEW @ Lipsey's \$350\.00.*at next.*skip used/);
+    expect(
+      formatNewDealerWarning({ allInCost: 300, dealerFloor: 350, vendorLabel: "Zanders" }),
+    ).toBeNull();
   });
 });

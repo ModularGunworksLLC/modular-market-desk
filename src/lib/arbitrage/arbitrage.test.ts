@@ -147,6 +147,17 @@ describe("evaluateDeal end-to-end", () => {
     expect(r.upsideRoute).toBe(r.chosen.bestRoute);
   });
 
+  it("always builds dual exits with independent Max Bid / verdict", () => {
+    const r = evaluateDeal(input, sold);
+    expect(r.exits.gunbroker.maxBid).toBeGreaterThan(0);
+    expect(r.exits.local.maxBid).toBeGreaterThan(0);
+    expect(r.exits.gunbroker.maxBid).toBe(r.maxBid);
+    expect(r.exits.local.maxBid).toBe(r.localMaxBid);
+    expect(["GO", "NO-GO"]).toContain(r.exits.gunbroker.verdict);
+    expect(["GO", "NO-GO"]).toContain(r.exits.local.verdict);
+    expect(r.exits.local.netProfit).toBe(r.localNetProfit);
+  });
+
   it("NO-GO when minMarginPct is not cleared", () => {
     const tight: DealInput = { ...input, minMarginPct: 90, targetProfit: 1 };
     const r = evaluateDeal(tight, sold);

@@ -1,10 +1,12 @@
+import type { AuctionPlatform } from "@/lib/auctions/detect";
+
 export interface AuctionLot {
   lot: string;
   title: string;
   currentBid: number | null;
-  /** HiBid required next hammer when present on the listing. */
+  /** Next legal hammer when the listing exposes it. */
   requiredBid: number | null;
-  /** HiBid bid_increment_amount at current price level. */
+  /** Bid increment at the current price level when known. */
   bidIncrementAmount: number | null;
   bidCount: number;
   imageUrls: string[];
@@ -16,10 +18,21 @@ export interface AuctionLot {
 export interface AuctionIngestResult {
   auctionUrl: string;
   host: string;
+  platform: AuctionPlatform;
   lots: AuctionLot[];
   firearmLots: AuctionLot[];
   skipped: number;
   warnings: string[];
   /** True when any lot carried listing next-bid / increment fields. */
   hasListingIncrements: boolean;
+}
+
+export class AuctionIngestError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400,
+  ) {
+    super(message);
+    this.name = "AuctionIngestError";
+  }
 }

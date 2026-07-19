@@ -63,8 +63,9 @@ async function main(): Promise<void> {
   }
   if (report.comps) {
     const p = report.comps.progress;
+    const refreshed = Math.max(0, p.processed - (p.skippedFresh ?? 0));
     console.log(
-      `> comps: ${p.processed}/${p.total} | withSold ${p.withSold} | zeroSold ${p.zeroSold} | asking ${p.withAsking} | errors ${p.errors} | ${report.comps.seconds}s`,
+      `> comps: ${p.processed}/${p.total} | refreshed ${refreshed} | skippedFresh ${p.skippedFresh ?? 0} | withSold ${p.withSold} | zeroSold ${p.zeroSold} | asking ${p.withAsking} | errors ${p.errors} | ${report.comps.seconds}s`,
     );
   }
   console.log(">", report.note);

@@ -335,18 +335,19 @@ export default function BatchPage() {
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.error || `Ingest failed (${res.status})`);
       setText(json.batchCsv || "");
+      const platform = json.platformLabel || json.platform || "auction";
       setAuctionMsg(
-        `Loaded ${json.sheetLots?.length ?? 0} firearm lots` +
+        `${platform}: loaded ${json.sheetLots?.length ?? 0} firearm lots` +
           (json.skipped ? ` (${json.skipped} non-firearm skipped)` : "") +
           (json.hasListingIncrements
-            ? " · Listing next-bid / increments captured from HiBid"
+            ? " · Listing next-bid / increments captured"
             : " · No listing increments found — Settings schedule will be used") +
           (json.warnings?.length ? ` · ${json.warnings.join(" ")}` : "") +
           " · Titles parse heuristically — fix Make/Model in the sheet if needed, then Run batch",
       );
       setFileStatus({
         kind: "ok",
-        message: `Auction ingest from ${json.host}`,
+        message: `${platform} ingest from ${json.host}`,
         fileName: url,
       });
     } catch (err) {
@@ -607,13 +608,15 @@ export default function BatchPage() {
           )}
 
           <div className="rounded-md border border-desk-border bg-desk-panel2 p-3 space-y-2">
-            <p className="text-xs font-semibold text-desk-text">Paste auction URL (HiBid / Pearce)</p>
+            <p className="text-xs font-semibold text-desk-text">
+              Paste auction URL (HiBid · BidWrangler · Proxibid)
+            </p>
             <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 className="field-input flex-1 font-mono text-xs"
                 value={auctionUrl}
                 onChange={(e) => setAuctionUrl(e.target.value)}
-                placeholder="https://bids.auctionbypearce.com/auctions/..."
+                placeholder="https://bids… / …bidwrangler.com/ui/auctions/… / proxibid.com/for-sale/guns…"
               />
             <button
               type="button"
@@ -625,8 +628,8 @@ export default function BatchPage() {
             </button>
             </div>
             <p className="text-[11px] text-desk-muted">
-              Load lots from URL → review/fix Make/Model in the sheet (title heuristics, no AI) → set BP (15% for
-              Pearce) → Run buy-sheet. Single-gun Max Bid: use Desk home OA Make → Model → Caliber pickers.
+              Pearce/Fowler (HiBid), Van Massey (BidWrangler), Proxibid guns categories. Load → set this auction&apos;s
+              BP → Run. Sheet shows Local and GunBroker Max Bid side-by-side.
             </p>
             {auctionMsg && <p className="text-xs text-desk-text">{auctionMsg}</p>}
           </div>
@@ -693,7 +696,7 @@ export default function BatchPage() {
                 placeholder="e.g. 13 or 15"
               />
               <div>
-                <label className="field-label">Exit channel</label>
+                <label className="field-label">Sort / legacy preference</label>
                 <select
                   className="field-input"
                   value={defaults.sellChannel}
@@ -704,17 +707,16 @@ export default function BatchPage() {
                     }))
                   }
                 >
-                  <option value="local">Local (AL tax)</option>
-                  <option value="gunbroker">GunBroker</option>
+                  <option value="local">Prefer Local when tying</option>
+                  <option value="gunbroker">Prefer GunBroker when tying</option>
                 </select>
               </div>
             </div>
             <p className="mt-2 text-[11px] text-desk-muted">
-              BP is per auction house — required. All-in = hammer × (1+BP%) + inbound (dealer inbound usually $0).
-              Active:{" "}
+              BP is per auction house — required. Results always show <strong>Local</strong> and{" "}
+              <strong>GunBroker</strong> Max Bid / GO. All-in = hammer × (1+BP%) + inbound. Active BP{" "}
               <span className="font-semibold text-desk-text">
-                BP {defaults.buyerPremiumPct.trim() || "?"}% ·{" "}
-                {defaults.sellChannel === "local" ? "Local exit" : "GunBroker exit"}
+                {defaults.buyerPremiumPct.trim() || "?"}%
               </span>
             </p>
           </div>
@@ -722,23 +724,18 @@ export default function BatchPage() {
             <NumField label="Target profit ($)" v={defaults.targetProfit} on={setD("targetProfit")} />
             <NumField label="Min margin %" v={defaults.minMarginPct} on={setD("minMarginPct")} />
             <NumField label="Inbound ship ($)" v={defaults.inboundShip} on={setD("inboundShip")} />
-            {defaults.sellChannel === "local" ? (
-              <NumField label="Sales tax %" v={defaults.salesTaxPct} on={setD("salesTaxPct")} />
-            ) : (
-              <NumField
-                label="Outbound ship ($)"
-                v={defaults.outboundShip}
-                on={setD("outboundShip")}
-                placeholder="Auto: 45 pistol / 60 rifle"
-              />
-            )}
-            {defaults.sellChannel === "gunbroker" && (
-              <NumField
-                label="Listing upgrades ($)"
-                v={defaults.listingUpgrades}
-                on={setD("listingUpgrades")}
-              />
-            )}
+            <NumField label="Local sales tax %" v={defaults.salesTaxPct} on={setD("salesTaxPct")} />
+            <NumField
+              label="GB outbound ship ($)"
+              v={defaults.outboundShip}
+              on={setD("outboundShip")}
+              placeholder="Auto: 45 pistol / 60 rifle"
+            />
+            <NumField
+              label="GB listing upgrades ($)"
+              v={defaults.listingUpgrades}
+              on={setD("listingUpgrades")}
+            />
             <div>
               <label className="field-label">Condition (comps)</label>
               <select
@@ -849,22 +846,25 @@ export default function BatchPage() {
                     </label>
                   </div>
                 </div>
-                <table className="w-full min-w-[1480px] text-sm">
+                <table className="w-full min-w-[1680px] text-sm">
                   <thead className="text-left text-xs uppercase text-desk-muted">
                     <tr>
                       <th className="py-1">Lot</th>
                       <th>Item</th>
-                      <th>Verdict</th>
+                      <th>Local</th>
+                      <th>GB</th>
                       <th>Trust</th>
                       <th className="text-right">Market med</th>
                       <th className="text-right">Decision P25</th>
                       <th className="text-right">Current</th>
                       <th className="text-right">Next</th>
                       <th className="text-right">All-in@next</th>
-                      <th className="text-right">Max bid</th>
+                      <th className="text-right">Max Local</th>
+                      <th className="text-right">Max GB</th>
                       <th className="text-right">Walk</th>
                       <th className="text-right">Headroom</th>
-                      <th className="text-right">Profit@next</th>
+                      <th className="text-right">P@$ Local</th>
+                      <th className="text-right">P@$ GB</th>
                       <th className="text-right">Dealer floor</th>
                       <th className="text-right">Comps</th>
                     </tr>
@@ -913,6 +913,14 @@ export default function BatchPage() {
                             {r.incrementSource ? ` · ${r.incrementSource}` : ""}
                             {r.askMedian != null ? ` · asks ~$${Math.round(r.askMedian)}` : ""}
                           </div>
+                          {r.newDealerWarning && (
+                            <div
+                              className="mt-0.5 truncate text-[10px] font-semibold text-desk-nogo"
+                              title={r.newDealerWarning}
+                            >
+                              {r.newDealerWarning}
+                            </div>
+                          )}
                           {r.matchWarnings?.length > 0 && (
                             <div
                               className="mt-0.5 truncate text-[10px] font-medium text-desk-nogo"
@@ -928,17 +936,32 @@ export default function BatchPage() {
                         <td>
                           {r.error ? (
                             <span className="text-[11px] text-desk-nogo" title={r.error}>
-                              error
+                              err
                             </span>
-                          ) : r.verdict == null ? (
-                            <span className="text-[11px] text-desk-muted">no comps</span>
+                          ) : r.verdictLocal == null ? (
+                            <span className="text-[11px] text-desk-muted">—</span>
                           ) : (
                             <span
                               className={`font-sans font-bold ${
-                                r.verdict === "GO" ? "text-desk-go" : "text-desk-nogo"
+                                r.verdictLocal === "GO" ? "text-desk-go" : "text-desk-nogo"
                               }`}
                             >
-                              {r.verdict}
+                              {r.verdictLocal}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {r.error ? (
+                            <span className="text-[11px] text-desk-nogo">err</span>
+                          ) : r.verdictGb == null ? (
+                            <span className="text-[11px] text-desk-muted">—</span>
+                          ) : (
+                            <span
+                              className={`font-sans font-bold ${
+                                r.verdictGb === "GO" ? "text-desk-go" : "text-desk-nogo"
+                              }`}
+                            >
+                              {r.verdictGb}
                             </span>
                           )}
                         </td>
@@ -972,7 +995,20 @@ export default function BatchPage() {
                         <td className="text-right" title={`BP ${r.buyerPremiumPct}%`}>
                           {usd(r.allInAtNext)}
                         </td>
-                        <td className="text-right">{usd(r.maxBid)}</td>
+                        <td
+                          className={`text-right font-semibold ${
+                            r.verdictLocal === "GO" ? "text-desk-go" : "text-desk-text"
+                          }`}
+                        >
+                          {usd(r.maxBidLocal)}
+                        </td>
+                        <td
+                          className={`text-right font-semibold ${
+                            r.verdictGb === "GO" ? "text-desk-go" : "text-desk-text"
+                          }`}
+                        >
+                          {usd(r.maxBidGb)}
+                        </td>
                         <td className="text-right font-semibold">{usd(r.walkAwayBid ?? r.walkAway)}</td>
                         <td
                           className={`text-right font-semibold ${
@@ -981,11 +1017,19 @@ export default function BatchPage() {
                         >
                           {r.headroom == null ? "—" : `${r.headroom >= 0 ? "+" : ""}${usd(r.headroom)}`}
                         </td>
-                        <td className={`text-right ${r.netProfit != null && r.netProfit >= 0 ? "text-desk-go" : "text-desk-nogo"}`}>
-                          {usd(r.netProfit)}
-                          <div className="text-[10px] font-sans text-desk-muted">
-                            {r.sellChannel === "local" ? "local" : "GB"}
-                          </div>
+                        <td
+                          className={`text-right ${
+                            r.netProfitLocal != null && r.netProfitLocal >= 0 ? "text-desk-go" : "text-desk-nogo"
+                          }`}
+                        >
+                          {usd(r.netProfitLocal)}
+                        </td>
+                        <td
+                          className={`text-right ${
+                            r.netProfitGb != null && r.netProfitGb >= 0 ? "text-desk-go" : "text-desk-nogo"
+                          }`}
+                        >
+                          {usd(r.netProfitGb)}
                         </td>
                         <td className="text-right">{usd(r.dealerFloor)}</td>
                         <td className="text-right text-desk-muted">{r.soldCount || "—"}</td>
@@ -996,11 +1040,11 @@ export default function BatchPage() {
                 </table>
                 <p className="mt-3 text-[11px] text-desk-muted">
                   {incrementHint ? <span className="text-desk-text">{incrementHint}. </span> : null}
-                  <strong className="text-desk-text">GO</strong> uses <em>next</em> bid + this auction&apos;s BP
-                  and your exit channel. <strong className="text-desk-text">Market med</strong> = OA sold
-                  median (context). <strong className="text-desk-text">Decision P25</strong> drives Max Bid
-                  (capped when Trust = Cooling). All-in@next = next × (1+BP%) + inbound. Street asks never
-                  replace solds — they sanity-check them.
+                  <strong className="text-desk-text">Local / GB</strong> are both evaluated at <em>next</em>{" "}
+                  bid + this auction&apos;s BP. <strong className="text-desk-text">Market med</strong> = OA
+                  sold median (context). <strong className="text-desk-text">Decision P25</strong> drives Max
+                  Bid (capped when Trust = Cooling). NEW@dealer warnings mean skip used. Street asks never
+                  replace solds.
                 </p>
               </div>
             </>

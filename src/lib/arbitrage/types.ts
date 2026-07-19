@@ -78,6 +78,17 @@ export interface ScenarioResult {
   profitUpside: number;
 }
 
+/** Per-exit walk-away + GO/NO-GO at the decision sell anchor. */
+export interface ExitDecision {
+  maxBid: number;
+  /** Profit-only max hammer before new-floor clamp. */
+  profitMaxBid: number;
+  netProfit: number;
+  marginPct: number;
+  verdict: Verdict;
+  verdictReasons: string[];
+}
+
 export interface EvaluationResult {
   input: DealInput;
   allInCost: number;
@@ -85,25 +96,36 @@ export interface EvaluationResult {
   scenarios: ScenarioResult[];
   /** Decision scenario — P25 sold (used) or lowest ask (vendor). */
   chosen: ScenarioResult;
+  /**
+   * Both exits always computed (same P25/ask anchor, same all-in).
+   * Prefer this over the selected-channel headline fields for dual UI.
+   */
+  exits: {
+    gunbroker: ExitDecision;
+    local: ExitDecision;
+  };
+  /** Selected-channel verdict (input.sellChannel). */
   verdict: Verdict;
-  /** Human-readable NO-GO triggers (profit, new floor, wholesale). */
+  /** Human-readable NO-GO triggers for the selected channel. */
   verdictReasons: string[];
   decisionAnchor: DecisionAnchor;
   /** Market anchor used for chosen scenario sell price. */
   decisionSellPrice: number;
-  /** Which exit channel drives verdict + headline max bid. Default gunbroker. */
+  /** Which exit channel drives selected-channel verdict + maxBid. */
   decisionRoute: SellRoute;
   /** Higher-netting route at decision anchor (informational upside). */
   upsideRoute: SellRoute;
-  /** Max hammer from profit math only (before new-floor cap). */
+  /** Selected-channel max hammer from profit math only (before new-floor). */
   profitMaxHammer: number;
-  /** Walk-away hammer after new-floor cap (used modes). Same as profitMaxHammer when no cap. */
+  /** Selected-channel walk-away after new-floor (alias of exits[channel].maxBid). */
   effectiveMaxHammer: number;
-  /** @deprecated alias — use effectiveMaxHammer */
+  /** @deprecated alias — use effectiveMaxHammer / exits */
   maxBid: number;
+  /** Selected-channel net profit at current all-in. */
   netProfit: number;
   marginPct: number;
   localNetProfit: number;
+  /** Local exit walk-away after new-floor (same as exits.local.maxBid). */
   localMaxBid: number;
   profitUpside: number;
 }

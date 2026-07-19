@@ -16,15 +16,27 @@ export interface BatchResultRow {
   /** Dealer all-in at current bid (if everyone stops). */
   allInAtCurrent: number | null;
   buyerPremiumPct: number;
+  /** @deprecated Prefer maxBidLocal / maxBidGb — kept for sort defaults. */
   sellChannel: "gunbroker" | "local";
-  /** Max Bid floored to a legal increment step. */
+  /** Max Bid floored to a legal increment step (best of the two exits). */
   walkAwayBid: number | null;
+  /** Selected / best-exit verdict for legacy columns. */
   verdict: "GO" | "NO-GO" | null;
+  verdictLocal: "GO" | "NO-GO" | null;
+  verdictGb: "GO" | "NO-GO" | null;
+  /** Best (higher) of the two exit max bids — used for headroom / sort. */
   maxBid: number | null;
-  /** Lower of profit-based max bid and the new dealer floor — the true walk-away ceiling. */
+  maxBidLocal: number | null;
+  maxBidGb: number | null;
+  /** Lower of best max bid and the new dealer floor — true walk-away ceiling. */
   walkAway: number | null;
-  /** Profit at nextBid for selected sell channel. */
+  /** Profit at nextBid via Local. */
+  netProfitLocal: number | null;
+  /** Profit at nextBid via GunBroker. */
+  netProfitGb: number | null;
+  /** @deprecated alias of netProfitLocal for older UI — prefer dual fields. */
   netProfit: number | null;
+  /** @deprecated alias of netProfitLocal */
   localProfit: number | null;
   soldCount: number;
   soldP25: number | null;
@@ -41,6 +53,8 @@ export interface BatchResultRow {
   divergence: AskSoldDivergence | null;
   dealerFloor: number | null;
   bestDealer: string | null;
+  /** Loud used-vs-new warning when all-in at next is at new money. */
+  newDealerWarning: string | null;
   /** maxBid − nextBid (room after the raise you must make). */
   headroom: number | null;
   incrementSource: "listing" | "settings";
