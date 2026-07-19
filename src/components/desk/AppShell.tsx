@@ -12,7 +12,8 @@ import {
 } from "@/lib/desk-defaults";
 
 const NAV = [
-  { href: "/", label: "Evaluate" },
+  { href: "/", label: "Markets" },
+  { href: "/evaluate", label: "Evaluate" },
   { href: "/batch", label: "Batch" },
   { href: "/deals", label: "Wholesale" },
   { href: "/import", label: "Import" },

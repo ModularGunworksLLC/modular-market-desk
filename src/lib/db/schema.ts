@@ -23,6 +23,18 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+export {
+  tgvModels,
+  tgvModelStats,
+  tgvSoldComps,
+  tgvSyncRuns,
+  type TgvModel,
+  type TgvModelStat,
+  type TgvSoldComp,
+  type TgvSyncRun,
+} from "./tgv-schema";
+
+
 /* ------------------------------------------------------------------ enums */
 /* SQLite has no enum type; these are the allowed text values for each column. */
 

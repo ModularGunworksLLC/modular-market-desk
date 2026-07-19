@@ -42,6 +42,7 @@ import { enqueueWebEnrich } from "@/lib/web-comps/queue";
 import type { WebCompsSummary } from "@/lib/web-comps/types";
 import { assessMatchSuspicion } from "@/lib/match-suspicion";
 import { classifyLotTitle, lotKindLabel } from "@/lib/auctions/lot-kind";
+import { lookupLocalTgvStats, type TgvAdvisoryStats } from "@/lib/tgv/store";
 
 export interface EvaluationOutput {
   deskMode: DeskMode;
@@ -59,6 +60,8 @@ export interface EvaluationOutput {
   webComps: WebCompsSummary;
   /** Identity / OA↔web disparity warnings (advisory). */
   matchWarnings: string[];
+  /** Local TGV bank when OA solds miss — advisory only, never Max Bid. */
+  tgvAdvisory: TgvAdvisoryStats | null;
   /** @deprecated use deskMode */
   acquisitionMode?: "auction" | "dealer";
 }
@@ -203,6 +206,7 @@ export async function runEvaluation(
       compMeta: null,
       webComps: emptyWeb,
       matchWarnings,
+      tgvAdvisory: null,
       acquisitionMode: deskMode.workflow === "vendor" ? "dealer" : "auction",
     };
   }
@@ -606,6 +610,27 @@ export async function runEvaluation(
   const legacyAcquisitionMode =
     deskMode.workflow === "vendor" ? ("dealer" as const) : ("auction" as const);
 
+  // Local TGV bank when OA solds miss — advisory FMV only (no live fetch, no Max Bid).
+  let tgvAdvisory: TgvAdvisoryStats | null = null;
+  if (sold.count === 0) {
+    try {
+      tgvAdvisory = await lookupLocalTgvStats({
+        manufacturer: enriched.manufacturer,
+        model: enriched.model,
+        category: body.category,
+      });
+      if (tgvAdvisory) {
+        sourceStatus.tgv = `local TGV (${tgvAdvisory.match}) PP used ${
+          tgvAdvisory.privatePartyUsed != null ? `$${Math.round(tgvAdvisory.privatePartyUsed)}` : "—"
+        }`;
+      } else {
+        sourceStatus.tgv = "no local TGV row";
+      }
+    } catch {
+      sourceStatus.tgv = "TGV lookup failed";
+    }
+  }
+
   return {
     deskMode,
     modeId,
@@ -620,6 +645,7 @@ export async function runEvaluation(
     compMeta,
     webComps,
     matchWarnings,
+    tgvAdvisory,
     acquisitionMode: legacyAcquisitionMode,
   };
 }
