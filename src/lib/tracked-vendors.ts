@@ -5,6 +5,7 @@ export const TRACKED_VENDORS = [
   "zanders",
   "davidsons",
   "chattanooga",
+  "orion",
   "2ndamendmentwholesale",
 ] as const;
 
@@ -15,6 +16,7 @@ export const VENDOR_LABELS: Record<TrackedVendor, string> = {
   zanders: "Zanders",
   davidsons: "Davidson's",
   chattanooga: "Chattanooga",
+  orion: "Orion",
   "2ndamendmentwholesale": "2nd Amendment Wholesale",
 };
 
