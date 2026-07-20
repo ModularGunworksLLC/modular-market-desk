@@ -162,6 +162,22 @@ async function computeSummary(
 
   await fillLeafFilter(leaves);
 
+  return finishComputeSummary(condition, category, leaves, leafCount, lastSync);
+}
+
+async function finishComputeSummary(
+  condition: MarketsConditionFilter,
+  category: MarketsCategoryFilter,
+  leaves: LeafRow[],
+  leafCount: number,
+  lastSync: {
+    finishedAt: Date | null;
+    startedAt: Date;
+    kind: string;
+    status: string;
+  } | null,
+): Promise<MarketsSummary> {
+
   const nowIso = new Date().toISOString();
   const cutoff30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const cutoff90 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -194,6 +210,31 @@ async function computeSummary(
     };
   }
 
+  // One indexed join into a TEMP slice, then cheap aggregates (avoids 6× full
+  // oa_sold_comps scans with upper() that blocked oa_sold_comps_leaf_idx).
+  await db.$client.execute("DROP TABLE IF EXISTS _markets_sold_slice");
+  await db.$client.execute(`
+    CREATE TEMP TABLE _markets_sold_slice AS
+    SELECT
+      s.sales_date AS sales_date,
+      s.price AS price,
+      f.condition AS condition,
+      f.model_id AS model_id,
+      f.caliber_id AS caliber_id,
+      c.manufacturer AS manufacturer,
+      c.caliber AS caliber
+    FROM oa_sold_comps s
+    INNER JOIN _markets_leaf_filter f
+      ON s.condition = f.condition
+      AND s.model_id = f.model_id
+      AND s.caliber_id = f.caliber_id
+    INNER JOIN oa_catalog c
+      ON c.condition = f.condition
+      AND c.model_id = f.model_id
+      AND c.caliber_id = f.caliber_id
+    WHERE s.price > 0
+  `);
+
   const [
     seasonRes,
     mfrAllRes,
@@ -203,93 +244,52 @@ async function computeSummary(
     coverageRes,
   ] = await Promise.all([
     db.$client.execute(`
-      SELECT CAST(substr(s.sales_date, 6, 2) AS INTEGER) AS month, count(*) AS n
-      FROM oa_sold_comps s
-      INNER JOIN _markets_leaf_filter f
-        ON upper(s.condition) = f.condition
-        AND s.model_id = f.model_id
-        AND s.caliber_id = f.caliber_id
-      WHERE s.price > 0
-        AND length(s.sales_date) >= 7
-        AND substr(s.sales_date, 5, 1) = '-'
+      SELECT CAST(substr(sales_date, 6, 2) AS INTEGER) AS month, count(*) AS n
+      FROM _markets_sold_slice
+      WHERE length(sales_date) >= 7
+        AND substr(sales_date, 5, 1) = '-'
       GROUP BY month
     `),
     db.$client.execute({
       sql: `
-        SELECT c.manufacturer AS name, count(*) AS n
-        FROM oa_sold_comps s
-        INNER JOIN _markets_leaf_filter f
-          ON upper(s.condition) = f.condition
-          AND s.model_id = f.model_id
-          AND s.caliber_id = f.caliber_id
-        INNER JOIN oa_catalog c
-          ON upper(c.condition) = f.condition
-          AND c.model_id = f.model_id
-          AND c.caliber_id = f.caliber_id
-        WHERE s.price > 0
-        GROUP BY c.manufacturer
-        ORDER BY n DESC, c.manufacturer ASC
+        SELECT manufacturer AS name, count(*) AS n
+        FROM _markets_sold_slice
+        GROUP BY manufacturer
+        ORDER BY n DESC, manufacturer ASC
         LIMIT ?
       `,
       args: [TOP_N],
     }),
     db.$client.execute({
       sql: `
-        SELECT c.manufacturer AS name, count(*) AS n
-        FROM oa_sold_comps s
-        INNER JOIN _markets_leaf_filter f
-          ON upper(s.condition) = f.condition
-          AND s.model_id = f.model_id
-          AND s.caliber_id = f.caliber_id
-        INNER JOIN oa_catalog c
-          ON upper(c.condition) = f.condition
-          AND c.model_id = f.model_id
-          AND c.caliber_id = f.caliber_id
-        WHERE s.price > 0
-          AND length(s.sales_date) >= 10
-          AND s.sales_date >= ?
-        GROUP BY c.manufacturer
-        ORDER BY n DESC, c.manufacturer ASC
+        SELECT manufacturer AS name, count(*) AS n
+        FROM _markets_sold_slice
+        WHERE length(sales_date) >= 10
+          AND sales_date >= ?
+        GROUP BY manufacturer
+        ORDER BY n DESC, manufacturer ASC
         LIMIT ?
       `,
       args: [cutoff90, TOP_N],
     }),
     db.$client.execute({
       sql: `
-        SELECT c.caliber AS name, count(*) AS n
-        FROM oa_sold_comps s
-        INNER JOIN _markets_leaf_filter f
-          ON upper(s.condition) = f.condition
-          AND s.model_id = f.model_id
-          AND s.caliber_id = f.caliber_id
-        INNER JOIN oa_catalog c
-          ON upper(c.condition) = f.condition
-          AND c.model_id = f.model_id
-          AND c.caliber_id = f.caliber_id
-        WHERE s.price > 0
-        GROUP BY c.caliber
-        ORDER BY n DESC, c.caliber ASC
+        SELECT caliber AS name, count(*) AS n
+        FROM _markets_sold_slice
+        GROUP BY caliber
+        ORDER BY n DESC, caliber ASC
         LIMIT ?
       `,
       args: [TOP_N],
     }),
     db.$client.execute({
       sql: `
-        SELECT c.caliber AS name, count(*) AS n
-        FROM oa_sold_comps s
-        INNER JOIN _markets_leaf_filter f
-          ON upper(s.condition) = f.condition
-          AND s.model_id = f.model_id
-          AND s.caliber_id = f.caliber_id
-        INNER JOIN oa_catalog c
-          ON upper(c.condition) = f.condition
-          AND c.model_id = f.model_id
-          AND c.caliber_id = f.caliber_id
-        WHERE s.price > 0
-          AND length(s.sales_date) >= 10
-          AND s.sales_date >= ?
-        GROUP BY c.caliber
-        ORDER BY n DESC, c.caliber ASC
+        SELECT caliber AS name, count(*) AS n
+        FROM _markets_sold_slice
+        WHERE length(sales_date) >= 10
+          AND sales_date >= ?
+        GROUP BY caliber
+        ORDER BY n DESC, caliber ASC
         LIMIT ?
       `,
       args: [cutoff90, TOP_N],
@@ -297,42 +297,22 @@ async function computeSummary(
     db.$client.execute({
       sql: `
         SELECT
-          (SELECT count(*) FROM oa_sold_comps s
-            INNER JOIN _markets_leaf_filter f
-              ON upper(s.condition) = f.condition
-              AND s.model_id = f.model_id
-              AND s.caliber_id = f.caliber_id
-            WHERE s.price > 0) AS sold_comp_rows,
+          (SELECT count(*) FROM _markets_sold_slice) AS sold_comp_rows,
           (SELECT count(*) FROM (
-            SELECT 1 FROM oa_sold_comps s
-            INNER JOIN _markets_leaf_filter f
-              ON upper(s.condition) = f.condition
-              AND s.model_id = f.model_id
-              AND s.caliber_id = f.caliber_id
-            WHERE s.price > 0
-            GROUP BY f.condition, f.model_id, f.caliber_id
+            SELECT 1 FROM _markets_sold_slice
+            GROUP BY condition, model_id, caliber_id
           )) AS leaves_with_solds,
           (SELECT count(*) FROM (
-            SELECT 1 FROM oa_sold_comps s
-            INNER JOIN _markets_leaf_filter f
-              ON upper(s.condition) = f.condition
-              AND s.model_id = f.model_id
-              AND s.caliber_id = f.caliber_id
-            WHERE s.price > 0
-              AND length(s.sales_date) >= 10
-              AND s.sales_date >= ?
-            GROUP BY f.condition, f.model_id, f.caliber_id
+            SELECT 1 FROM _markets_sold_slice
+            WHERE length(sales_date) >= 10
+              AND sales_date >= ?
+            GROUP BY condition, model_id, caliber_id
           )) AS leaves_30d,
           (SELECT count(*) FROM (
-            SELECT 1 FROM oa_sold_comps s
-            INNER JOIN _markets_leaf_filter f
-              ON upper(s.condition) = f.condition
-              AND s.model_id = f.model_id
-              AND s.caliber_id = f.caliber_id
-            WHERE s.price > 0
-              AND length(s.sales_date) >= 10
-              AND s.sales_date >= ?
-            GROUP BY f.condition, f.model_id, f.caliber_id
+            SELECT 1 FROM _markets_sold_slice
+            WHERE length(sales_date) >= 10
+              AND sales_date >= ?
+            GROUP BY condition, model_id, caliber_id
           )) AS leaves_90d
       `,
       args: [cutoff30, cutoff90],
