@@ -1,0 +1,399 @@
+{
+  "base": "https://desk.modulargunworks.com",
+  "generatedAt": "2026-07-18T18:23:44.021Z",
+  "results": [
+    {
+      "gun": "Marlin Model 39A Golden",
+      "status": "acquired",
+      "notes": "Slingit: $606 gun + $15 accessory; Excellent; Lyman peep",
+      "slingit": {
+        "retail": 1050,
+        "offerOrPaid": 621,
+        "offerAsPctOfRetail": 59.1
+      },
+      "desk": {
+        "match": "MARLIN 39 .22 LR (score 95.4)",
+        "matchTier": "family",
+        "soldCount": 81,
+        "oa": {
+          "low": 341,
+          "p25": 581,
+          "median": 728,
+          "p75": 905,
+          "high": 1525,
+          "askingMedian": 1097.5
+        },
+        "retailVsOaMedianPct": 44.2,
+        "atSlingitPaid": {
+          "localVerdict": "NO-GO",
+          "gbVerdict": "NO-GO",
+          "medianNetProfitLocal": 46.89,
+          "medianNetProfitGb": 64.88,
+          "p25NetProfitGb": -76.24,
+          "deskMaxBidAt15pctLocal": 458.03,
+          "deskMaxBidAt15pctGb": 469.76
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 410.02,
+          "localMedian": 513.76,
+          "gbP25": 419.05,
+          "gbMedian": 527.6,
+          "headlineLocal": [
+            "Max offer $410.02 at P25 sold $581.00 (median $728.00)."
+          ],
+          "headlineGb": [
+            "Max offer $419.05 at P25 sold $581.00 (median $728.00)."
+          ]
+        }
+      }
+    },
+    {
+      "gun": "Winchester Model 9422M",
+      "status": "acquired",
+      "notes": "Retail not captured in UI snapshot; compare on paid + OA",
+      "slingit": {
+        "retail": null,
+        "offerOrPaid": 710,
+        "offerAsPctOfRetail": null
+      },
+      "desk": {
+        "match": "WINCHESTER 9422 .22 WMR (score 95.4)",
+        "matchTier": "family",
+        "soldCount": 9,
+        "oa": {
+          "low": 455,
+          "p25": 780,
+          "median": 955,
+          "p75": 1000,
+          "high": 1200,
+          "askingMedian": 105
+        },
+        "retailVsOaMedianPct": null,
+        "atSlingitPaid": {
+          "localVerdict": "NO-GO",
+          "gbVerdict": "NO-GO",
+          "medianNetProfitLocal": 166.15,
+          "medianNetProfitGb": 193.8,
+          "p25NetProfitGb": 25.8,
+          "deskMaxBidAt15pctLocal": 622.26,
+          "deskMaxBidAt15pctGb": 639.83
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 550.46,
+          "localMedian": 673.96,
+          "gbP25": 566,
+          "gbMedian": 695.23,
+          "headlineLocal": [
+            "Max offer $550.46 at P25 sold $780.00 (median $955.00)."
+          ],
+          "headlineGb": [
+            "Max offer $566.00 at P25 sold $780.00 (median $955.00)."
+          ]
+        }
+      }
+    },
+    {
+      "gun": "Browning A-500G Invector",
+      "status": "incomplete",
+      "slingit": {
+        "retail": 475,
+        "offerOrPaid": 335,
+        "offerAsPctOfRetail": 70.5
+      },
+      "desk": {
+        "match": null,
+        "matchTier": null,
+        "soldCount": 0,
+        "oa": {
+          "low": 0,
+          "p25": 0,
+          "median": 0,
+          "p75": 0,
+          "high": 0,
+          "askingMedian": 0
+        },
+        "retailVsOaMedianPct": null,
+        "atSlingitPaid": {
+          "localVerdict": "NO-GO",
+          "gbVerdict": "NO-GO",
+          "medianNetProfitLocal": -335,
+          "medianNetProfitGb": -340,
+          "p25NetProfitGb": -340,
+          "deskMaxBidAt15pctLocal": 0,
+          "deskMaxBidAt15pctGb": 0
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 0,
+          "localMedian": 0,
+          "gbP25": 0,
+          "gbMedian": 0,
+          "headlineLocal": [],
+          "headlineGb": []
+        }
+      }
+    },
+    {
+      "gun": "Remington Model 1100 Field",
+      "status": "incomplete",
+      "slingit": {
+        "retail": 400,
+        "offerOrPaid": 280,
+        "offerAsPctOfRetail": 70
+      },
+      "desk": {
+        "match": "REMINGTON 1100 12 GAUGE (score 95.4)",
+        "matchTier": "family",
+        "soldCount": 37,
+        "oa": {
+          "low": 385,
+          "p25": 505,
+          "median": 650,
+          "p75": 900,
+          "high": 1599,
+          "askingMedian": 550
+        },
+        "retailVsOaMedianPct": -38.5,
+        "atSlingitPaid": {
+          "localVerdict": "GO",
+          "gbVerdict": "GO",
+          "medianNetProfitLocal": 316.33,
+          "medianNetProfitGb": 331,
+          "p25NetProfitGb": 191.8,
+          "deskMaxBidAt15pctLocal": 388.3,
+          "deskMaxBidAt15pctGb": 396.8
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 356.38,
+          "localMedian": 458.72,
+          "gbP25": 362.92,
+          "gbMedian": 470,
+          "headlineLocal": [
+            "Max offer $356.38 at P25 sold $505.00 (median $650.00)."
+          ],
+          "headlineGb": [
+            "Max offer $362.92 at P25 sold $505.00 (median $650.00)."
+          ]
+        }
+      }
+    },
+    {
+      "gun": "Maadi ARM Crutch Folder",
+      "status": "incomplete",
+      "slingit": {
+        "retail": 2200,
+        "offerOrPaid": 1540,
+        "offerAsPctOfRetail": 70
+      },
+      "desk": {
+        "match": null,
+        "matchTier": null,
+        "soldCount": 0,
+        "oa": {
+          "low": 0,
+          "p25": 0,
+          "median": 0,
+          "p75": 0,
+          "high": 0,
+          "askingMedian": 0
+        },
+        "retailVsOaMedianPct": null,
+        "atSlingitPaid": {
+          "localVerdict": "NO-GO",
+          "gbVerdict": "NO-GO",
+          "medianNetProfitLocal": -1540,
+          "medianNetProfitGb": -1545,
+          "p25NetProfitGb": -1545,
+          "deskMaxBidAt15pctLocal": 0,
+          "deskMaxBidAt15pctGb": 0
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 0,
+          "localMedian": 0,
+          "gbP25": 0,
+          "gbMedian": 0,
+          "headlineLocal": [],
+          "headlineGb": []
+        }
+      }
+    },
+    {
+      "gun": "Norinco MAK-90 Sporter Post-Ban",
+      "status": "incomplete",
+      "slingit": {
+        "retail": 900,
+        "offerOrPaid": 640,
+        "offerAsPctOfRetail": 71.1
+      },
+      "desk": {
+        "match": "NORINCO MAK-90 7.62X39 (score 95.4)",
+        "matchTier": "family",
+        "soldCount": 7,
+        "oa": {
+          "low": 699,
+          "p25": 745,
+          "median": 909,
+          "p75": 1000.5,
+          "high": 1225,
+          "askingMedian": 1295
+        },
+        "retailVsOaMedianPct": -1,
+        "atSlingitPaid": {
+          "localVerdict": "NO-GO",
+          "gbVerdict": "NO-GO",
+          "medianNetProfitLocal": 193.94,
+          "medianNetProfitGb": 219.64,
+          "p25NetProfitGb": 62.2,
+          "deskMaxBidAt15pctLocal": 594.34,
+          "deskMaxBidAt15pctGb": 610.61
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 525.76,
+          "localMedian": 641.49,
+          "gbP25": 540.15,
+          "gbMedian": 661.26,
+          "headlineLocal": [
+            "Max offer $525.76 at P25 sold $745.00 (median $909.00)."
+          ],
+          "headlineGb": [
+            "Max offer $540.15 at P25 sold $745.00 (median $909.00)."
+          ]
+        }
+      }
+    },
+    {
+      "gun": "Canik METE MC9 (listed ask)",
+      "status": "listed",
+      "notes": "Slingit retail = listing ask $285; desk cost probe $200 hypothetical buy",
+      "slingit": {
+        "retail": 285,
+        "offerOrPaid": 200,
+        "offerAsPctOfRetail": 70.2
+      },
+      "desk": {
+        "match": "CANIK METE MC9 9MM LUGER (score 88.25)",
+        "matchTier": "family",
+        "soldCount": 9,
+        "oa": {
+          "low": 225,
+          "p25": 300,
+          "median": 400,
+          "p75": 475,
+          "high": 590,
+          "askingMedian": 358.485
+        },
+        "retailVsOaMedianPct": -28.7,
+        "atSlingitPaid": {
+          "localVerdict": "GO",
+          "gbVerdict": "GO",
+          "medianNetProfitLocal": 166.97,
+          "medianNetProfitGb": 171,
+          "p25NetProfitGb": 77,
+          "deskMaxBidAt15pctLocal": 200.23,
+          "deskMaxBidAt15pctGb": 202
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 200.23,
+          "localMedian": 282.28,
+          "gbP25": 202,
+          "gbMedian": 285.38,
+          "headlineLocal": [
+            "Max offer $200.23 at P25 sold $300.00 (median $400.00)."
+          ],
+          "headlineGb": [
+            "Max offer $202.00 at P25 sold $300.00 (median $400.00)."
+          ]
+        }
+      }
+    },
+    {
+      "gun": "Taurus G2s (listed ask)",
+      "status": "listed",
+      "notes": "Listing ask $145; desk cost probe $100",
+      "slingit": {
+        "retail": 145,
+        "offerOrPaid": 100,
+        "offerAsPctOfRetail": 69
+      },
+      "desk": {
+        "match": "TAURUS G2S 9MM LUGER (score 74.5)",
+        "matchTier": "family",
+        "soldCount": 59,
+        "oa": {
+          "low": 100,
+          "p25": 120,
+          "median": 130,
+          "p75": 149,
+          "high": 195,
+          "askingMedian": 199.99
+        },
+        "retailVsOaMedianPct": 11.5,
+        "atSlingitPaid": {
+          "localVerdict": "NO-GO",
+          "gbVerdict": "NO-GO",
+          "medianNetProfitLocal": 19.27,
+          "medianNetProfitGb": 17.2,
+          "p25NetProfitGb": 7.8,
+          "deskMaxBidAt15pctLocal": 35.09,
+          "deskMaxBidAt15pctGb": 32.8
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 35.09,
+          "localMedian": 44.27,
+          "gbP25": 32.8,
+          "gbMedian": 42.2,
+          "headlineLocal": [
+            "Max offer $35.09 at P25 sold $120.00 (median $130.00)."
+          ],
+          "headlineGb": [
+            "Max offer $32.80 at P25 sold $120.00 (median $130.00)."
+          ]
+        }
+      }
+    },
+    {
+      "gun": "Smith & Wesson SD9 VE (listed ask)",
+      "status": "listed",
+      "notes": "Listing ask $280; desk cost probe $200",
+      "slingit": {
+        "retail": 280,
+        "offerOrPaid": 200,
+        "offerAsPctOfRetail": 71.4
+      },
+      "desk": {
+        "match": "SMITH & WESSON S&W SD9 VE 9MM LUGER (score 83.66666666666666)",
+        "matchTier": "family",
+        "soldCount": 15,
+        "oa": {
+          "low": 130,
+          "p25": 160,
+          "median": 179,
+          "p75": 196,
+          "high": 240,
+          "askingMedian": 362
+        },
+        "retailVsOaMedianPct": 56.4,
+        "atSlingitPaid": {
+          "localVerdict": "NO-GO",
+          "gbVerdict": "NO-GO",
+          "medianNetProfitLocal": -35.78,
+          "medianNetProfitGb": -36.74,
+          "p25NetProfitGb": -54.6,
+          "deskMaxBidAt15pctLocal": 71.79,
+          "deskMaxBidAt15pctGb": 70.4
+        },
+        "deskMaxPayAt30pctMargin": {
+          "localP25": 71.79,
+          "localMedian": 89.22,
+          "gbP25": 70.4,
+          "gbMedian": 88.26,
+          "headlineLocal": [
+            "Max offer $71.79 at P25 sold $160.00 (median $179.00)."
+          ],
+          "headlineGb": [
+            "Max offer $70.40 at P25 sold $160.00 (median $179.00)."
+          ]
+        }
+      }
+    }
+  ]
+}

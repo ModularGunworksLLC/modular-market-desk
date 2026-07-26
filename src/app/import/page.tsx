@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   getCatalogSummaries,
   listConnections,
@@ -39,7 +40,12 @@ export default async function ImportDashboard() {
     <main className="mx-auto max-w-[1800px] px-4 py-6">
       <div className="mb-6">
         <h1 className="text-lg font-semibold tracking-tight">Ingestion Dashboard</h1>
-        <p className="text-xs text-desk-muted">Catalogs &amp; Session Vault</p>
+        <p className="text-xs text-desk-muted">
+          Catalogs &amp; Session Vault ·{" "}
+          <Link href="/catalog" className="text-desk-accent hover:underline">
+            Search master catalog →
+          </Link>
+        </p>
       </div>
 
       {dbError && (

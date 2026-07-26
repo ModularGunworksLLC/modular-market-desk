@@ -499,3 +499,68 @@ export type WebPriceObservation = typeof webPriceObservations.$inferSelect;
 export type NewWebPriceObservation = typeof webPriceObservations.$inferInsert;
 export type WebPriceStat = typeof webPriceStats.$inferSelect;
 export type MarketSyncRun = typeof marketSyncRuns.$inferSelect;
+
+/* ----------------------------------------------------------- trade-in portal */
+/* Public customer sell/trade-in intake. Photos live on disk under data/trade-in/. */
+
+export const TRADE_IN_STATUSES = ["submitted", "handled"] as const;
+export type TradeInStatus = (typeof TRADE_IN_STATUSES)[number];
+
+export const tradeInRequests = sqliteTable(
+  "trade_in_requests",
+  {
+    id: id(),
+    status: text("status", { enum: TRADE_IN_STATUSES }).notNull().default("submitted"),
+    manufacturer: text("manufacturer").notNull(),
+    model: text("model").notNull(),
+    serialNumber: text("serial_number").notNull(),
+    caliber: text("caliber"),
+    customerName: text("customer_name").notNull(),
+    customerEmail: text("customer_email").notNull(),
+    customerPhone: text("customer_phone").notNull(),
+    notes: text("notes"),
+    /** Soft USED sold P25 from local OA bank — not a binding offer. */
+    estimateP25: real("estimate_p25"),
+    estimateSoldCount: integer("estimate_sold_count"),
+    estimateLabel: text("estimate_label"),
+    oaModelId: integer("oa_model_id"),
+    oaCaliberId: integer("oa_caliber_id"),
+    notifySent: integer("notify_sent", { mode: "boolean" }).notNull().default(false),
+    notifyError: text("notify_error"),
+    sourceIp: text("source_ip"),
+    userAgent: text("user_agent"),
+    handledAt: integer("handled_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    statusIdx: index("trade_in_requests_status_idx").on(t.status, t.createdAt),
+    createdIdx: index("trade_in_requests_created_idx").on(t.createdAt),
+  }),
+);
+
+export const tradeInPhotos = sqliteTable(
+  "trade_in_photos",
+  {
+    id: id(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => tradeInRequests.id, { onDelete: "cascade" }),
+    /** Relative path under data/trade-in/<requestId>/ */
+    storedName: text("stored_name").notNull(),
+    thumbName: text("thumb_name"),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    reqIdx: index("trade_in_photos_request_idx").on(t.requestId),
+  }),
+);
+
+export type TradeInRequest = typeof tradeInRequests.$inferSelect;
+export type NewTradeInRequest = typeof tradeInRequests.$inferInsert;
+export type TradeInPhoto = typeof tradeInPhotos.$inferSelect;
+export type NewTradeInPhoto = typeof tradeInPhotos.$inferInsert;

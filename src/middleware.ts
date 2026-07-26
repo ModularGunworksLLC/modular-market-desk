@@ -7,7 +7,14 @@ import {
 } from "@/lib/desk-auth";
 
 /** Public paths when desk auth is enabled. */
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/logout", "/api/auth/status"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/api/auth/status",
+  "/api/trade-in/estimate",
+  "/api/trade-in/submit",
+];
 
 export async function middleware(request: NextRequest) {
   if (!deskAuthEnabled()) {
@@ -15,6 +22,12 @@ export async function middleware(request: NextRequest) {
   }
 
   const { pathname } = request.nextUrl;
+
+  // Public trade-in form only — inbox stays auth-gated.
+  if (pathname === "/trade-in" || pathname === "/api/trade-in/estimate" || pathname === "/api/trade-in/submit") {
+    return NextResponse.next();
+  }
+  // Do not treat /trade-in/inbox as public via startsWith(/trade-in)
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
     return NextResponse.next();
   }

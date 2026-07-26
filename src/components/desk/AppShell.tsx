@@ -14,8 +14,10 @@ import {
 const NAV = [
   { href: "/", label: "Markets" },
   { href: "/evaluate", label: "Evaluate" },
+  { href: "/catalog", label: "Catalog" },
   { href: "/batch", label: "Batch" },
   { href: "/deals", label: "Wholesale" },
+  { href: "/trade-in/inbox", label: "Trade-ins" },
   { href: "/import", label: "Import" },
 ] as const;
 
@@ -37,6 +39,7 @@ function NavLink({ href, label, active }: { href: string; label: string; active:
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isLogin = pathname === "/login";
+  const isPublicTradeIn = pathname === "/trade-in";
   const [open, setOpen] = useState(false);
   const [defaults, setDefaults] = useState<DeskDealerDefaults>(defaultDealerDefaults);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -53,7 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new CustomEvent("desk-defaults-changed", { detail: next }));
   }
 
-  if (isLogin) {
+  if (isLogin || isPublicTradeIn) {
     return <>{children}</>;
   }
 

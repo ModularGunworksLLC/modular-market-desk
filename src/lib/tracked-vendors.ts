@@ -7,6 +7,7 @@ export const TRACKED_VENDORS = [
   "chattanooga",
   "orion",
   "2ndamendmentwholesale",
+  "rsr",
 ] as const;
 
 export type TrackedVendor = (typeof TRACKED_VENDORS)[number];
@@ -18,6 +19,7 @@ export const VENDOR_LABELS: Record<TrackedVendor, string> = {
   chattanooga: "Chattanooga",
   orion: "Orion",
   "2ndamendmentwholesale": "2nd Amendment Wholesale",
+  rsr: "RSR Group",
 };
 
 /** Vendors that support API/feed catalog sync (token in Session Vault). */
