@@ -20,11 +20,26 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("multipart/form-data")) {
+    return NextResponse.json(
+      {
+        error: `Expected multipart/form-data (got ${contentType || "no Content-Type"}). Re-select the CSV and try again; large files need a rebuild with raised middlewareClientMaxBodySize.`,
+      },
+      { status: 400 },
+    );
+  }
+
   let form: FormData;
   try {
     form = await request.formData();
-  } catch {
-    return NextResponse.json({ error: "Expected multipart/form-data." }, { status: 400 });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: `Failed to parse upload as multipart/form-data: ${errorMessage(err)}. Large CSVs need middlewareClientMaxBodySize ≥ file size (see next.config).`,
+      },
+      { status: 400 },
+    );
   }
 
   const file = form.get("file");
