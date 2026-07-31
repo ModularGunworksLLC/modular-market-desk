@@ -171,6 +171,7 @@ async function flush(batch: NewCatalogItem[]): Promise<number> {
         qty: sqlExcluded("qty"),
         inStock: sqlExcluded("in_stock"),
         sourceFile: sqlExcluded("source_file"),
+        importedAt: sqlExcluded("imported_at"),
         updatedAt: sqlExcluded("updated_at"),
       },
     });

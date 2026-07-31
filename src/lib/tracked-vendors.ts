@@ -18,10 +18,13 @@ export const VENDOR_LABELS: Record<TrackedVendor, string> = {
   "2ndamendmentwholesale": "2nd Amendment Wholesale",
 };
 
-/** Vendors that support API/feed catalog sync (token in Session Vault). */
-export const API_SYNC_VENDORS = ["2ndamendmentwholesale"] as const;
+/**
+ * Vendors that support automated catalog sync (API feed, Lipsey's Integration
+ * API, and/or Firecrawl portal scrape via Session Vault credentials).
+ */
+export const API_SYNC_VENDORS = TRACKED_VENDORS;
 
-export type ApiSyncVendor = (typeof API_SYNC_VENDORS)[number];
+export type ApiSyncVendor = TrackedVendor;
 
 export function vendorLabel(name: string): string {
   const key = name.toLowerCase() as TrackedVendor;
