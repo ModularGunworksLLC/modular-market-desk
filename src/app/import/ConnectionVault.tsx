@@ -68,6 +68,15 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
               <option value="davidsons" />
               <option value="chattanooga" />
               <option value="2ndamendmentwholesale" />
+              <option value="orion" />
+              <option value="rsr" />
+              <option value="shootingwarehouse" />
+              <option value="pawholesale" />
+              <option value="bearcreekarsenal" />
+              <option value="palmettostatearmory" />
+              <option value="dpms" />
+              <option value="lakeline" />
+              <option value="righttobear" />
             </datalist>
           </div>
           <div>

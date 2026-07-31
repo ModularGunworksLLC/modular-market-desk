@@ -1,9 +1,82 @@
 /**
- * Default CSV presets for the four tracked distributors. These seed the `csv_presets` table;
+ * Default CSV presets for tracked distributors. These seed the `csv_presets` table;
  * the importer always reads the mapping from the DB so dealers can be re-mapped without a deploy.
  */
 
 import type { CsvColumnMap, NewCsvPreset } from "@/lib/db/schema";
+import { VENDOR_LABELS, type TrackedVendor } from "@/lib/tracked-vendors";
+
+/** Flexible header aliases for Firecrawl / portal CSV exports from newer vendors. */
+const GENERIC_COLUMN_MAP = {
+  sku: ["SKU", "sku", "Item Number", "Item #", "Item No", "ItemNumber", "Product SKU", "ITEM"],
+  upc: ["UPC", "upc", "GTIN", "Barcode", "UPC Code", "UPC #", "UPCCODE"],
+  manufacturer: ["Manufacturer", "Brand", "Mfg", "MFG", "Vendor", "Mfg Name"],
+  model: ["Model", "Model Number", "Model #", "MFG Model", "MODEL"],
+  description: [
+    "Description",
+    "Name",
+    "Product Name",
+    "Item Description",
+    "Short Description",
+    "Title",
+    "DESCRIPTION",
+  ],
+  caliber: ["Caliber", "Caliber/Gauge", "Gauge", "CALIBER"],
+  category: ["Category", "Product Type", "Type", "Categories", "CATEGORY"],
+  dealerPrice: [
+    "Dealer Price",
+    "Dealer Cost",
+    "Your Price",
+    "Your Cost",
+    "Price",
+    "Cost",
+    "Wholesale Price",
+    "Wholesale",
+    "Unit Price",
+    "PRICE",
+    "Special Price",
+  ],
+  msrp: ["MSRP", "Retail", "Retail Price"],
+  mapPrice: ["MAP", "MAP Price", "Minimum Advertised Price", "Retail MAP"],
+  qty: [
+    "Qty",
+    "Quantity",
+    "Stock",
+    "Qty On Hand",
+    "Quantity On Hand",
+    "Quantity Available",
+    "In Stock",
+    "Available",
+    "QOH",
+    "QTY",
+  ],
+  onSale: ["On Sale", "Sale", "Special"],
+  salePrice: ["Sale Price", "Special Price"],
+} satisfies CsvColumnMap;
+
+function genericPreset(vendorName: TrackedVendor): NewCsvPreset {
+  return {
+    vendorName,
+    label: VENDOR_LABELS[vendorName],
+    delimiter: ",",
+    encoding: "utf-8",
+    columnMap: GENERIC_COLUMN_MAP,
+  };
+}
+
+const EXTRA_VENDOR_PRESETS: NewCsvPreset[] = (
+  [
+    "orion",
+    "rsr",
+    "shootingwarehouse",
+    "pawholesale",
+    "bearcreekarsenal",
+    "palmettostatearmory",
+    "dpms",
+    "lakeline",
+    "righttobear",
+  ] as const
+).map(genericPreset);
 
 export const DEFAULT_PRESETS: NewCsvPreset[] = [
   {
@@ -132,4 +205,5 @@ export const DEFAULT_PRESETS: NewCsvPreset[] = [
       salePrice: ["Sale Price", "Special Price"],
     } satisfies CsvColumnMap,
   },
+  ...EXTRA_VENDOR_PRESETS,
 ];

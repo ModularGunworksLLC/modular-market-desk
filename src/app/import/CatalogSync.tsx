@@ -101,9 +101,9 @@ export function CatalogSync() {
     <section className="panel">
       <h2 className="mb-3 text-sm font-semibold text-desk-muted">Vendor catalog sync</h2>
       <p className="mb-3 text-sm text-desk-muted">
-        Pulls the full sellable catalog your dealer accounts are authorized for — Lipsey&apos;s
-        Integration API, CSV feeds, or Firecrawl portal scrape with vaulted session cookies — then
-        upserts into the local catalog and marks missing SKUs out of stock.
+        Pulls the full sellable catalog your dealer accounts are authorized for across all tracked
+        portals — Lipsey&apos;s Integration API, CSV feeds, or Firecrawl portal scrape with vaulted
+        session cookies — then upserts into the local catalog and marks missing SKUs out of stock.
       </p>
 
       <ul className="mb-3 space-y-2">

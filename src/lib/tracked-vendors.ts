@@ -6,6 +6,15 @@ export const TRACKED_VENDORS = [
   "davidsons",
   "chattanooga",
   "2ndamendmentwholesale",
+  "orion",
+  "rsr",
+  "shootingwarehouse",
+  "pawholesale",
+  "bearcreekarsenal",
+  "palmettostatearmory",
+  "dpms",
+  "lakeline",
+  "righttobear",
 ] as const;
 
 export type TrackedVendor = (typeof TRACKED_VENDORS)[number];
@@ -16,6 +25,15 @@ export const VENDOR_LABELS: Record<TrackedVendor, string> = {
   davidsons: "Davidson's",
   chattanooga: "Chattanooga",
   "2ndamendmentwholesale": "2nd Amendment Wholesale",
+  orion: "Orion FFL Sales",
+  rsr: "RSR Group",
+  shootingwarehouse: "The Shooting Warehouse",
+  pawholesale: "PA Wholesale",
+  bearcreekarsenal: "Bear Creek Arsenal",
+  palmettostatearmory: "Palmetto State Armory",
+  dpms: "DPMS",
+  lakeline: "Lake Line LLC",
+  righttobear: "Right to Bear",
 };
 
 /**
