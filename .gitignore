@@ -28,6 +28,9 @@ next-env.d.ts
 *.log
 npm-debug.log*
 
+# Firecrawl CLI / agent local cache
+.firecrawl/
+
 # typescript
 *.tsbuildinfo
 

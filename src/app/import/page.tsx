@@ -101,7 +101,7 @@ export default async function ImportDashboard() {
           <CatalogUploader vendors={vendorOptions} />
         </section>
 
-        {/* API sync */}
+        {/* API / Firecrawl sync */}
         <CatalogSync />
 
         {/* Session Vault */}

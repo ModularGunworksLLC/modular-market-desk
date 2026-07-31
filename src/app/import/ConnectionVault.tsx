@@ -63,13 +63,26 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
             />
             <datalist id="vault-vendor-options">
               <option value="outdoor_analytics" />
+              <option value="lipseys" />
+              <option value="zanders" />
+              <option value="davidsons" />
+              <option value="chattanooga" />
               <option value="2ndamendmentwholesale" />
+              <option value="orion" />
+              <option value="rsr" />
+              <option value="shootingwarehouse" />
+              <option value="pawholesale" />
+              <option value="bearcreekarsenal" />
+              <option value="palmettostatearmory" />
+              <option value="dpms" />
+              <option value="lakeline" />
+              <option value="righttobear" />
             </datalist>
           </div>
           <div>
             <label className="field-label">Kind</label>
             <select className="field-input" name="kind" defaultValue="market_api">
-              <option value="market_api">market_api (bearer token)</option>
+              <option value="market_api">market_api (bearer / Lipsey Token)</option>
               <option value="vendor_session">vendor_session (cookie string)</option>
             </select>
           </div>
@@ -79,11 +92,19 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
           <input className="field-input" name="label" placeholder="Outdoor Analytics" />
         </div>
         <div>
-          <label className="field-label">Feed URL (2AW / distributor APIs)</label>
+          <label className="field-label">Feed URL (CSV / Lipsey CatalogFeed)</label>
           <input
             className="field-input font-mono text-xs"
             name="feedUrl"
             placeholder="https://... (optional; or TAW_FEED_URL in .env)"
+          />
+        </div>
+        <div>
+          <label className="field-label">Catalog / portal URL (Firecrawl)</label>
+          <input
+            className="field-input font-mono text-xs"
+            name="catalogUrl"
+            placeholder="https://dealer-portal/.../inventory (optional override)"
           />
         </div>
         <div>

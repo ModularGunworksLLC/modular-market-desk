@@ -22,6 +22,7 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
   const label = String(formData.get("label") ?? "").trim() || vendor;
   const secret = String(formData.get("secret") ?? "").trim();
   const feedUrl = String(formData.get("feedUrl") ?? "").trim();
+  const catalogUrl = String(formData.get("catalogUrl") ?? "").trim();
   const expiresRaw = String(formData.get("expiresAt") ?? "").trim();
 
   if (!vendor) return { ok: false, message: "Vendor is required." };
@@ -44,6 +45,7 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
 
   const meta: Record<string, unknown> = {};
   if (feedUrl) meta.feedUrl = feedUrl;
+  if (catalogUrl) meta.catalogUrl = catalogUrl;
 
   try {
     await db
