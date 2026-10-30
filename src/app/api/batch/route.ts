@@ -16,8 +16,11 @@ import {
   batchRowSchema,
   evaluateBatchRow,
 } from "@/lib/batch/evaluate-row";
-import { getMarketToken } from "@/lib/connections";
-import { GbaApiClient } from "@/lib/gba/client";
+import { GbaApiClient, GbaApiError } from "@/lib/gba/client";
+import { liveOaUnavailableBanner } from "@/lib/oa/live-label";
+import { oaExpiryWarnMs } from "@/lib/oa/config";
+import { liveTokenBlocked, resolveOaState } from "@/lib/oa/status";
+import { loadOaVault, markOaProbeOk, markOaUnauthorized, type OaVaultSnapshot } from "@/lib/oa/vault-store";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -40,21 +43,35 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const { rows, defaults } = parsed.data;
-  const token = await getMarketToken();
+  let oaSnapshot = await loadOaVault();
 
-  if (token) {
+  if (oaSnapshot.usableToken) {
+    const token = oaSnapshot.usableToken;
     try {
       await new GbaApiClient(token).dependencies();
-    } catch {
-      // Non-fatal: per-row resolution will report its own status.
+      await markOaProbeOk();
+      oaSnapshot = await loadOaVault();
+    } catch (err) {
+      if (err instanceof GbaApiError && err.status === 401) {
+        await markOaUnauthorized();
+        oaSnapshot = await loadOaVault();
+      }
     }
   }
+
+  const oaNotice = oaSheetNotice(oaSnapshot);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
-      send({ type: "meta", total: rows.length, hasToken: Boolean(token) });
+      send({
+        type: "meta",
+        total: rows.length,
+        hasToken: Boolean(oaSnapshot.usableToken),
+        oaLiveUnavailable: oaNotice.unavailable,
+        oaBanner: oaNotice.banner,
+      });
 
       let next = 0;
       let completed = 0;
@@ -63,7 +80,7 @@ export async function POST(request: Request): Promise<Response> {
         while (next < rows.length) {
           const idx = next++;
           const row = rows[idx]!;
-          const result = await evaluateBatchRow(row, defaults, token);
+          const result = await evaluateBatchRow(row, defaults, oaSnapshot.usableToken, oaSnapshot);
           completed++;
           if (result.error) tally.errored++;
           else if (result.soldCount === 0) tally.noComps++;
@@ -79,7 +96,9 @@ export async function POST(request: Request): Promise<Response> {
         type: "done",
         completed,
         tally,
-        hasToken: Boolean(token),
+        hasToken: Boolean(oaSnapshot.usableToken),
+        oaLiveUnavailable: oaNotice.unavailable,
+        oaBanner: oaNotice.banner,
       });
       controller.close();
     },
@@ -92,4 +111,18 @@ export async function POST(request: Request): Promise<Response> {
       "X-Accel-Buffering": "no",
     },
   });
+}
+
+function oaSheetNotice(snap: OaVaultSnapshot): { unavailable: boolean; banner: string | null } {
+  const state = resolveOaState({
+    connected: snap.connected,
+    status: snap.status,
+    expiresAt: snap.expiresAt,
+    lastProbeOk: snap.lastProbeOk,
+    now: new Date(),
+    warnWithinMs: oaExpiryWarnMs(),
+  });
+  const block = liveTokenBlocked(state);
+  if (!block) return { unavailable: false, banner: null };
+  return { unavailable: true, banner: liveOaUnavailableBanner(block, "cache", true) };
 }

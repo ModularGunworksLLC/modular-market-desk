@@ -19,8 +19,17 @@ import { enrichEvaluateIdentity } from "@/lib/catalog-enrich";
 import type { CompIdentityContext } from "@/lib/comp-identity";
 import { filterOutlierPrices, type CompFilterMeta } from "@/lib/comp-filter";
 import { deskModeId, resolveDeskMode, type DeskMode } from "@/lib/desk-mode";
-import { getMarketToken } from "@/lib/connections";
-import { redactSecrets } from "@/lib/vault";
+import { normalizeVaultSecret, redactSecrets } from "@/lib/vault";
+import { decodeJwtExp } from "@/lib/oa/jwt";
+import { oaExpiryWarnMs } from "@/lib/oa/config";
+import {
+  describeOaMarket,
+  emptyOaAvailability,
+  type OaAvailability,
+  type OaBlockReason,
+} from "@/lib/oa/live-label";
+import { liveTokenBlocked, resolveOaState } from "@/lib/oa/status";
+import { loadOaVault, markOaProbeOk, markOaUnauthorized, type OaVaultSnapshot } from "@/lib/oa/vault-store";
 import { db } from "@/lib/db";
 import { valuations } from "@/lib/db/schema";
 import { buildDealInsights, type DealInsights } from "@/lib/deal-insights";
@@ -62,6 +71,8 @@ export interface EvaluationOutput {
   matchWarnings: string[];
   /** Local TGV bank when OA solds miss — advisory only, never Max Bid. */
   tgvAdvisory: TgvAdvisoryStats | null;
+  /** Live vs cache labeling. Cache numbers are never described as live. */
+  oaAvailability: OaAvailability;
   /** @deprecated use deskMode */
   acquisitionMode?: "auction" | "dealer";
 }
@@ -79,7 +90,7 @@ export class EvaluationError extends Error {
 
 export async function runEvaluation(
   body: EvaluateRequest,
-  opts?: { persist?: boolean; token?: string | null },
+  opts?: { persist?: boolean; token?: string | null; oaSnapshot?: OaVaultSnapshot },
 ): Promise<EvaluationOutput> {
   const persist = opts?.persist ?? true;
   const enriched = await enrichEvaluateIdentity(body);
@@ -122,8 +133,10 @@ export async function runEvaluation(
   let sold: PriceStats = summarize([]);
   let asking: PriceStats = summarize([]);
 
-  // Allow callers (batch) to pass a pre-fetched token so we don't decrypt per row.
-  const token = opts?.token !== undefined ? opts.token : await getMarketToken();
+  // Batch passes one snapshot so each row does not decrypt the vault.
+  const oaSnapshot = opts?.oaSnapshot ?? (await loadOaVault());
+  const { token, oaBlock } = resolveEvalToken(opts, oaSnapshot);
+  let oaAvailability: OaAvailability = emptyOaAvailability();
 
   const identityCtx: CompIdentityContext = {
     upc: enriched.upc || undefined,
@@ -207,6 +220,7 @@ export async function runEvaluation(
       webComps: emptyWeb,
       matchWarnings,
       tgvAdvisory: null,
+      oaAvailability: emptyOaAvailability(),
       acquisitionMode: deskMode.workflow === "vendor" ? "dealer" : "auction",
     };
   }
@@ -231,7 +245,17 @@ export async function runEvaluation(
       askingListings = local.askingRows;
       compMeta = local.compMeta;
       catalogMatch = local.selection;
-      sourceStatus.gba = local.source;
+      oaAvailability = rememberOa(
+        sourceStatus,
+        describeOaMarket({
+          block: oaBlock,
+          liveHttpStatus: null,
+          used: "cache",
+          hasComps: true,
+          cacheSource: local.source,
+          liveSource: null,
+        }),
+      );
     } else if (token) {
       try {
         const market = await new GbaApiClient(token).market({
@@ -246,8 +270,21 @@ export async function runEvaluation(
         soldListings = market.soldRows;
         askingListings = market.askingRows;
         compMeta = market.compMeta;
-        sourceStatus.gba = `live OA (${sold.count} sold, ${asking.count} asking)`;
+        oaAvailability = rememberOa(
+          sourceStatus,
+          describeOaMarket({
+            block: null,
+            liveHttpStatus: null,
+            used: "live",
+            hasComps: sold.count > 0,
+            cacheSource: local?.source ?? null,
+            liveSource: `live OA (${sold.count} sold, ${asking.count} asking)`,
+          }),
+        );
+        await safeMark(markOaProbeOk);
       } catch (err) {
+        const http = err instanceof GbaApiError ? (err.status ?? null) : null;
+        if (http === 401) await safeMark(markOaUnauthorized);
         if (local) {
           sold = local.sold;
           asking = local.asking;
@@ -255,10 +292,31 @@ export async function runEvaluation(
           askingListings = local.askingRows;
           compMeta = local.compMeta;
           catalogMatch = local.selection;
-          sourceStatus.gba = `${local.source} (live OA failed)`;
+          oaAvailability = rememberOa(
+            sourceStatus,
+            describeOaMarket({
+              block: oaBlock,
+              liveHttpStatus: http,
+              used: local.sold.count > 0 ? "cache" : "none",
+              hasComps: local.sold.count > 0,
+              cacheSource: local.source,
+              liveSource: null,
+            }),
+          );
         } else {
-          const status = err instanceof GbaApiError ? (err.status ?? 502) : 502;
-          throw new EvaluationError((err as Error).message, status);
+          const described = describeOaMarket({
+            block: oaBlock,
+            liveHttpStatus: http,
+            used: "none",
+            hasComps: false,
+            cacheSource: null,
+            liveSource: null,
+          });
+          oaAvailability = described.availability;
+          const message =
+            described.availability.banner ??
+            redactSecrets((err as Error).message);
+          throw new EvaluationError(message, http === 401 ? 401 : (http ?? 502));
         }
       }
     } else if (local) {
@@ -268,11 +326,30 @@ export async function runEvaluation(
       askingListings = local.askingRows;
       compMeta = local.compMeta;
       catalogMatch = local.selection;
-      sourceStatus.gba = local.source;
+      oaAvailability = rememberOa(
+        sourceStatus,
+        describeOaMarket({
+          block: oaBlock ?? "missing",
+          liveHttpStatus: null,
+          used: local.sold.count > 0 ? "cache" : "none",
+          hasComps: local.sold.count > 0,
+          cacheSource: local.source,
+          liveSource: null,
+        }),
+      );
     } else {
+      const described = describeOaMarket({
+        block: oaBlock ?? "missing",
+        liveHttpStatus: null,
+        used: "none",
+        hasComps: false,
+        cacheSource: null,
+        liveSource: null,
+      });
       throw new EvaluationError(
-        "No local comps for that Make/Model/Caliber and no Outdoor Analytics token. Sync OA on Import, or paste a token.",
-        409,
+        described.availability.banner ??
+          "No local comps for that Make/Model/Caliber and no Outdoor Analytics token. Sync OA on Import, or connect a token.",
+        oaBlock === "unauthorized" ? 401 : 409,
       );
     }
   } else {
@@ -306,7 +383,17 @@ export async function runEvaluation(
             askingListings = local.askingRows;
             compMeta = local.compMeta;
             resolved = true;
-            sourceStatus.gba = local.source;
+            oaAvailability = rememberOa(
+              sourceStatus,
+              describeOaMarket({
+                block: oaBlock,
+                liveHttpStatus: null,
+                used: "cache",
+                hasComps: true,
+                cacheSource: local.source,
+                liveSource: null,
+              }),
+            );
           }
         }
       } catch {
@@ -315,9 +402,19 @@ export async function runEvaluation(
 
       if (!resolved) {
         if (!token) {
+          const described = describeOaMarket({
+            block: oaBlock ?? "missing",
+            liveHttpStatus: null,
+            used: "none",
+            hasComps: false,
+            cacheSource: null,
+            liveSource: null,
+          });
+          oaAvailability = described.availability;
           sourceStatus.gba =
-            sourceStatus.gba ||
-            "no local comps match — sync OA catalog on Import, or paste a token for live pull";
+            described.availability.banner ??
+            described.sourceLabel ??
+            "no local comps match — sync OA catalog on Import, or connect a token for a live pull";
         } else {
           try {
             const market = await new GbaApiClient(token).resolveMarket(
@@ -340,15 +437,37 @@ export async function runEvaluation(
               compMeta = market.compMeta;
               resolved = true;
               const s = market.selection;
-              sourceStatus.gba = `live auto: ${s.manufacturer} ${s.model}${s.caliber ? ` ${s.caliber}` : ""} (${s.conditionParam}, score ${s.score.toFixed(0)}) - ${sold.count} sold, ${asking.count} asking`;
+              oaAvailability = rememberOa(
+                sourceStatus,
+                describeOaMarket({
+                  block: null,
+                  liveHttpStatus: null,
+                  used: "live",
+                  hasComps: sold.count > 0,
+                  cacheSource: null,
+                  liveSource: `live auto: ${s.manufacturer} ${s.model}${s.caliber ? ` ${s.caliber}` : ""} (${s.conditionParam}, score ${s.score.toFixed(0)}) - ${sold.count} sold, ${asking.count} asking`,
+                }),
+              );
+              await safeMark(markOaProbeOk);
             } else {
               sourceStatus.gba = "no catalog match for this manufacturer/model";
             }
           } catch (err) {
+            const http = err instanceof GbaApiError ? (err.status ?? null) : null;
+            if (http === 401) await safeMark(markOaUnauthorized);
+            const described = describeOaMarket({
+              block: oaBlock,
+              liveHttpStatus: http,
+              used: "none",
+              hasComps: false,
+              cacheSource: null,
+              liveSource: null,
+            });
+            oaAvailability = described.availability;
             const reason = redactSecrets(
               err instanceof GbaApiError ? err.message : (err as Error).message,
             );
-            sourceStatus.gba = `error: ${reason}`;
+            sourceStatus.gba = described.availability.banner ?? `error: ${reason}`;
           }
         }
       }
@@ -359,6 +478,27 @@ export async function runEvaluation(
       sold = summarize(soldFilter.filtered);
       asking = summarize(body.askingPrices ?? []);
       sourceStatus.manual = `manual (${sold.count} sold, ${asking.count} asking)`;
+      if (oaBlock) {
+        oaAvailability = rememberOa(
+          sourceStatus,
+          describeOaMarket({
+            block: oaBlock,
+            liveHttpStatus: null,
+            used: "manual",
+            hasComps: sold.count > 0,
+            cacheSource: null,
+            liveSource: null,
+          }),
+        );
+        sourceStatus.manual = `manual comps (not live OA) (${sold.count} sold, ${asking.count} asking)`;
+      } else {
+        oaAvailability = {
+          dataSource: "manual",
+          liveUnavailable: false,
+          reason: null,
+          banner: null,
+        };
+      }
       compMeta = {
         soldRawCount: body.soldPrices?.length ?? 0,
         soldDecisionCount: sold.count,
@@ -646,6 +786,59 @@ export async function runEvaluation(
     webComps,
     matchWarnings,
     tgvAdvisory,
+    oaAvailability,
     acquisitionMode: legacyAcquisitionMode,
   };
+}
+
+function resolveEvalToken(
+  opts: { token?: string | null; oaSnapshot?: OaVaultSnapshot } | undefined,
+  oaSnapshot: OaVaultSnapshot,
+): { token: string | null; oaBlock: OaBlockReason | null } {
+  if (opts?.oaSnapshot) {
+    const state = resolveOaState({
+      connected: oaSnapshot.connected,
+      status: oaSnapshot.status,
+      expiresAt: oaSnapshot.expiresAt,
+      lastProbeOk: oaSnapshot.lastProbeOk,
+      now: new Date(),
+      warnWithinMs: oaExpiryWarnMs(),
+    });
+    const oaBlock = liveTokenBlocked(state);
+    return { token: oaBlock ? null : oaSnapshot.usableToken, oaBlock };
+  }
+  if (opts?.token !== undefined) {
+    const injected = opts.token ? normalizeVaultSecret(opts.token) : "";
+    if (!injected) return { token: null, oaBlock: "missing" };
+    const exp = decodeJwtExp(injected);
+    if (exp && exp.getTime() <= Date.now()) return { token: null, oaBlock: "expired" };
+    return { token: injected, oaBlock: null };
+  }
+  const state = resolveOaState({
+    connected: oaSnapshot.connected,
+    status: oaSnapshot.status,
+    expiresAt: oaSnapshot.expiresAt,
+    lastProbeOk: oaSnapshot.lastProbeOk,
+    now: new Date(),
+    warnWithinMs: oaExpiryWarnMs(),
+  });
+  const oaBlock = liveTokenBlocked(state);
+  return { token: oaBlock ? null : oaSnapshot.usableToken, oaBlock };
+}
+
+async function safeMark(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch {
+    /* Probe bookkeeping must not change the money result or log the token. */
+  }
+}
+
+function rememberOa(
+  sourceStatus: Record<string, string>,
+  described: ReturnType<typeof describeOaMarket>,
+): OaAvailability {
+  sourceStatus.gba = described.sourceLabel;
+  if (described.availability.banner) sourceStatus.oaLive = described.availability.banner;
+  return described.availability;
 }

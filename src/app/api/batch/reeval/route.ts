@@ -13,7 +13,8 @@ import {
   batchRowSchema,
   evaluateBatchRow,
 } from "@/lib/batch/evaluate-row";
-import { getMarketToken } from "@/lib/connections";
+import { GbaApiClient, GbaApiError } from "@/lib/gba/client";
+import { loadOaVault, markOaProbeOk, markOaUnauthorized } from "@/lib/oa/vault-store";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -34,7 +35,19 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     const { rows, defaults } = parsed.data;
-    const token = await getMarketToken();
+    let oaSnapshot = await loadOaVault();
+    if (oaSnapshot.usableToken) {
+      try {
+        await new GbaApiClient(oaSnapshot.usableToken).dependencies();
+        await markOaProbeOk();
+        oaSnapshot = await loadOaVault();
+      } catch (err) {
+        if (err instanceof GbaApiError && err.status === 401) {
+          await markOaUnauthorized();
+          oaSnapshot = await loadOaVault();
+        }
+      }
+    }
     const out: Awaited<ReturnType<typeof evaluateBatchRow>>[] = new Array(rows.length);
     let next = 0;
 
@@ -42,7 +55,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       while (next < rows.length) {
         const idx = next++;
         const row = rows[idx]!;
-        out[idx] = await evaluateBatchRow(row, defaults, token);
+        out[idx] = await evaluateBatchRow(row, defaults, oaSnapshot.usableToken, oaSnapshot);
       }
     };
 

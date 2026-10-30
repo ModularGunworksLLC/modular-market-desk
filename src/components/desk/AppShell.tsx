@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { OaStatusBanner } from "@/components/desk/OaStatusBanner";
 import {
   defaultDealerDefaults,
   loadDealerDefaults,
@@ -60,6 +61,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
+  const showOaBanner =
+    pathname === "/evaluate" ||
+    pathname.startsWith("/evaluate/") ||
+    pathname === "/batch" ||
+    pathname.startsWith("/batch/") ||
+    pathname === "/import" ||
+    pathname.startsWith("/import/");
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-desk-border bg-desk-bg/95 backdrop-blur-sm">
@@ -88,6 +97,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </header>
+
+      {showOaBanner && <OaStatusBanner />}
 
       {children}
 

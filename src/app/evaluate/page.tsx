@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { AtGlancePanel } from "@/components/desk/AtGlancePanel";
@@ -53,6 +52,12 @@ interface ApiResponse {
   webComps?: WebCompsSummary | null;
   matchWarnings?: string[];
   tgvAdvisory?: TgvAdvisoryStats | null;
+  oaAvailability?: {
+    dataSource: "live" | "cache" | "manual" | "none";
+    liveUnavailable: boolean;
+    reason: "missing" | "expired" | "unauthorized" | null;
+    banner: string | null;
+  };
 }
 
 export default function DeskPage() {
@@ -88,7 +93,6 @@ export default function DeskPage() {
   const [loading, setLoading] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [enrichNote, setEnrichNote] = useState<string | null>(null);
-  const [vaultOk, setVaultOk] = useState<boolean | null>(null);
   const [serial, setSerial] = useState("");
   const [stolen, setStolen] = useState<StolenCheckResult | null>(null);
   const [allowStolenProceed, setAllowStolenProceed] = useState(false);
@@ -138,17 +142,6 @@ export default function DeskPage() {
   const isVendor = workflow === "vendor";
   const isTradeIn = usedSubtype === "tradein";
   const isUsedAuction = workflow === "used" && usedSubtype === "auction";
-
-  useEffect(() => {
-    fetch("/api/vault/status")
-      .then((r) => r.json())
-      .then((j: { ok?: boolean }) => {
-        setVaultOk(Boolean(j.ok));
-      })
-      .catch(() => {
-        setVaultOk(false);
-      });
-  }, []);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -517,16 +510,6 @@ export default function DeskPage() {
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
-      {vaultOk === false && (
-        <p className="mb-4 text-xs text-desk-muted">
-          Live OA token needs refresh on{" "}
-          <Link href="/import" className="text-desk-accent hover:underline">
-            Import → Connections
-          </Link>{" "}
-          (only needed to re-sync catalogs). Evaluate still uses your local OA comps DB.
-        </p>
-      )}
-
       <div className="mb-4">
         <h1 className="text-lg font-semibold tracking-tight text-desk-text">Evaluate</h1>
         <p className="text-xs text-desk-muted">
@@ -958,6 +941,19 @@ export default function DeskPage() {
 
           {data && (
           <>
+          {data.oaAvailability?.banner && (
+            <div className="panel border-desk-nogo/70 bg-desk-nogo/10 text-sm text-desk-text">
+              {data.oaAvailability.banner}{" "}
+              <a href="/import#connect-oa" className="font-semibold text-desk-accent hover:underline">
+                Connect OA
+              </a>
+            </div>
+          )}
+          {data.oaAvailability?.dataSource === "cache" && !data.oaAvailability.banner && (
+            <p className="text-xs text-desk-muted">
+              Sold comps are from the local catalog cache, not a live Outdoor Analytics pull.
+            </p>
+          )}
           {r && (isVendor || sold != null) && (
             <AtGlancePanel
               title={title}

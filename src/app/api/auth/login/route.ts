@@ -6,7 +6,10 @@ import {
   deskAuthEnabled,
   deskAuthSecret,
   mintDeskSessionToken,
+  secretsMatch,
 } from "@/lib/desk-auth";
+import { oaClientMeta } from "@/lib/oa/request-meta";
+import { rateLimitOk } from "@/lib/trade-in/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -14,16 +17,15 @@ const bodySchema = z.object({
   secret: z.string().min(1),
 });
 
-function secretsMatch(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
+const LOGIN_LIMIT = 10;
+const LOGIN_WINDOW_MS = 60_000;
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const ip = oaClientMeta(request.headers).ip ?? "unknown";
+  if (!rateLimitOk(`desk-login:${ip}`, LOGIN_LIMIT, LOGIN_WINDOW_MS)) {
+    return NextResponse.json({ error: "Too many login attempts. Wait a minute and try again." }, { status: 429 });
+  }
+
   if (!deskAuthEnabled()) {
     return NextResponse.json({ ok: true, authRequired: false });
   }
@@ -36,7 +38,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const expected = deskAuthSecret()!;
   const presented = parsed.data.secret.trim();
-  if (!secretsMatch(presented, expected)) {
+  if (!(await secretsMatch(presented, expected))) {
     return NextResponse.json({ error: "Invalid desk secret." }, { status: 401 });
   }
 

@@ -11,6 +11,18 @@ const nextConfig = {
     optimizePackageImports: ["drizzle-orm"],
     middlewareClientMaxBodySize: "50mb",
   },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

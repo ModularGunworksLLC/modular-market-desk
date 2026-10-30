@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Mock Outdoor Analytics — Desk token handoff</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { font: 15px/1.45 system-ui, sans-serif; margin: 0; background: #0e1412; color: #e7f0ea; }
+      main { max-width: 640px; margin: 0 auto; padding: 28px 16px 64px; }
+      h1 { font-size: 1.25rem; margin: 0 0 8px; }
+      p, li { color: #b7c4bc; }
+      code { color: #d5ffe8; }
+      button, a.btn { background: #1f6f4a; color: white; border: 0; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; text-decoration: none; display: inline-block; }
+      button.secondary { background: #24302a; }
+      .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+      #log { white-space: pre-wrap; background: #070b09; border-radius: 8px; padding: 12px; min-height: 3em; }
+      label { display: block; margin-top: 12px; }
+      input { margin-top: 4px; width: 8em; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Mock Outdoor Analytics</h1>
+      <p>
+        This page is a stand-in for hub.outdooranalytics.com. It stores a <strong>fake</strong> JWT in
+        <code>sessionStorage["gb_session_token"]</code>. It does not call Outdoor Analytics.
+      </p>
+      <ol>
+        <li>Run Desk with <code>npm run dev</code> and set <code>DESK_PUBLIC_ORIGIN</code> to this origin (for example <code>http://127.0.0.1:3000</code>).</li>
+        <li>Sign in to Desk if <code>DESK_AUTH_SECRET</code> is set. The popup needs that session.</li>
+        <li>Set a fake token below, then drag <strong>Connect OA</strong> from <a href="/import#connect-oa">Import</a> to the bookmarks bar — or use the link loaded from Desk below.</li>
+        <li>Click the bookmark on <em>this</em> page. A Desk window opens and saves the token. The fake token must not appear in the address bar.</li>
+      </ol>
+      <label>Hours until exp <input id="hours" type="number" value="6" step="0.5" /></label>
+      <div class="row">
+        <button type="button" id="future">Store fake token (future exp)</button>
+        <button type="button" class="secondary" id="past">Store fake token (already expired)</button>
+        <button type="button" class="secondary" id="clear">Clear sessionStorage key</button>
+      </div>
+      <p>Bookmarklet from this Desk (same code as Import):</p>
+      <p><a class="btn" id="bookmark" href="#">Connect OA</a></p>
+      <p id="key"></p>
+      <div id="log">No fake token stored yet.</div>
+    </main>
+    <script>
+      var KEY = "gb_session_token";
+      function b64url(obj) {
+        var json = JSON.stringify(obj);
+        var bytes = new TextEncoder().encode(json);
+        var bin = "";
+        bytes.forEach(function (b) { bin += String.fromCharCode(b); });
+        return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+      }
+      function fakeJwt(expSeconds) {
+        var header = b64url({ alg: "none", typ: "JWT" });
+        var payload = b64url({ exp: expSeconds, sub: "fake-oa-test", note: "not a real Outdoor Analytics token" });
+        return header + "." + payload + ".fake-signature-not-a-real-token";
+      }
+      function log(text) {
+        document.getElementById("log").textContent = text;
+      }
+      function store(hours) {
+        var exp = Math.floor(Date.now() / 1000 + hours * 3600);
+        var token = fakeJwt(exp);
+        sessionStorage.setItem(KEY, token);
+        log("Stored a fake JWT in sessionStorage['" + KEY + "']. exp unix " + exp + " (" + hours + " hours from now). The token is not printed here.");
+      }
+      document.getElementById("future").onclick = function () {
+        store(Number(document.getElementById("hours").value) || 6);
+      };
+      document.getElementById("past").onclick = function () {
+        store(-2);
+      };
+      document.getElementById("clear").onclick = function () {
+        sessionStorage.removeItem(KEY);
+        log("Cleared " + KEY + ". The bookmarklet should tell you to sign in to Outdoor Analytics first.");
+      };
+      fetch("/api/vault/oa", { credentials: "same-origin" })
+        .then(function (res) { return res.json().then(function (body) { return { res: res, body: body }; }); })
+        .then(function (out) {
+          if (!out.res.ok || !out.body.href) {
+            document.getElementById("key").textContent = out.body.message || "Sign in to Desk, then reload this page to load the bookmarklet.";
+            return;
+          }
+          document.getElementById("bookmark").href = out.body.href;
+          document.getElementById("key").textContent = "Bookmarklet reads sessionStorage key " + (out.body.storageKey || KEY) + ".";
+        })
+        .catch(function () {
+          document.getElementById("key").textContent = "Could not load the bookmarklet. Open Import → Connect OA instead.";
+        });
+    </script>
+  </body>
+</html>

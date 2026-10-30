@@ -89,7 +89,15 @@ server {
 
 Reload nginx, then open **https://market.modulargunworks.com**.
 
-**Apache:** same idea — `ProxyPass / http://127.0.0.1:3010/` with long timeout.
+**Apache:** same idea — `ProxyPass / http://127.0.0.1:3010/` with a long timeout. Apache must **overwrite** any client-supplied `X-Real-IP`. `RequestHeader set` replaces the header; do not use `append`.
+
+```apache
+RequestHeader set X-Real-IP "%{REMOTE_ADDR}s"
+ProxyPass / http://127.0.0.1:3010/
+ProxyPassReverse / http://127.0.0.1:3010/
+```
+
+`RequestHeader set` needs `mod_headers`. The value is the address Apache accepted the connection from, not a header the browser sent. The app validates that value as an IPv4 or IPv6 address and stores `unknown` otherwise. The Docker publish is `127.0.0.1:3010` so the process is not reachable except through this proxy.
 
 ### 6. DNS
 

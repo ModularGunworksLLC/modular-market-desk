@@ -13,7 +13,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { GbaApiError } from "@/lib/gba/client";
+import { OaTokenBlockedError } from "@/lib/oa/live-label";
 import { syncOaCatalog } from "@/lib/oa/sync-catalog";
+import { redactSecrets } from "@/lib/vault";
 import { startOaFullSync, syncOaFull } from "@/lib/oa/sync-full";
 
 export const runtime = "nodejs";
@@ -72,9 +74,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     const report = await syncOaFull(opts);
     return NextResponse.json({ ok: true, mode: body.mode, report });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = redactSecrets(err instanceof Error ? err.message : String(err));
     let status = 500;
-    if (message.includes("No Outdoor Analytics token")) status = 409;
+    if (err instanceof OaTokenBlockedError) {
+      status = err.block === "unauthorized" ? 401 : 409;
+    } else if (message.includes("No Outdoor Analytics token") || message.includes("token missing")) {
+      status = 409;
+    }
     if (err instanceof GbaApiError && err.status === 401) status = 401;
     return NextResponse.json({ ok: false, error: message }, { status });
   }

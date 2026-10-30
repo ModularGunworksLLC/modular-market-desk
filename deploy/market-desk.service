@@ -8,7 +8,7 @@ User=bitnami
 WorkingDirectory=/opt/market-desk-v2/.next/standalone
 Environment=NODE_ENV=production
 Environment=PORT=3010
-Environment=HOSTNAME=0.0.0.0
+Environment=HOSTNAME=127.0.0.1
 Environment=DATABASE_URL=file:/opt/market-desk-v2/data/desk.db
 EnvironmentFile=-/opt/market-desk-v2/.env
 ExecStart=/usr/bin/node server.js

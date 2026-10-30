@@ -85,6 +85,22 @@ export const connections = sqliteTable(
   }),
 );
 
+/* ------------------------------------------------------------- audit_log */
+/* Who/when/what for OA token set, clear, and failed attempts. Never store the token. */
+
+export const AUDIT_ACTIONS = ["oa_token_set", "oa_token_clear", "oa_token_failed_attempt"] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+export const auditLog = sqliteTable("audit_log", {
+  // AUTOINCREMENT so prune order stays stable even when created_at ties at 1-second resolution.
+  seq: integer("seq").primaryKey({ autoIncrement: true }),
+  actor: text("actor").notNull(),
+  action: text("action", { enum: AUDIT_ACTIONS }).notNull(),
+  target: text("target").notNull().default("outdoor_analytics"),
+  detail: text("detail", { mode: "json" }).$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: createdAt(),
+});
+
 /* ----------------------------------------------------------- csv_presets */
 /* Maps a vendor's raw CSV headers onto our unified catalog columns. */
 
@@ -482,6 +498,8 @@ export const webPriceStats = sqliteTable(
 
 export type Connection = typeof connections.$inferSelect;
 export type NewConnection = typeof connections.$inferInsert;
+export type AuditLogRow = typeof auditLog.$inferSelect;
+export type NewAuditLogRow = typeof auditLog.$inferInsert;
 export type CsvPreset = typeof csvPresets.$inferSelect;
 export type NewCsvPreset = typeof csvPresets.$inferInsert;
 export type CatalogItem = typeof catalogItems.$inferSelect;

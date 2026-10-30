@@ -62,9 +62,9 @@ function shortSourceLine(sourceStatus?: string | null, soldCount?: number, webCo
   if (!raw) {
     return soldCount != null && soldCount > 0 ? `OA solds · n=${soldCount}` : "Market comps";
   }
-  if (/local cache/i.test(raw) || /Local OA/i.test(raw)) {
+  if (/local cache/i.test(raw) || /Local OA/i.test(raw) || /not live/i.test(raw)) {
     const n = soldCount != null ? ` · n=${soldCount}` : "";
-    return `OA local solds${n}`;
+    return `Local catalog cache (not live)${n}`;
   }
   if (/live/i.test(raw)) {
     const n = soldCount != null ? ` · n=${soldCount}` : "";

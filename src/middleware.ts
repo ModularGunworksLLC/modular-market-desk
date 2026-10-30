@@ -5,6 +5,8 @@ import {
   DESK_AUTH_COOKIE,
   deskAuthEnabled,
 } from "@/lib/desk-auth";
+import { isOaMockPath, localTestPageEnabled } from "@/lib/oa/dev-only";
+import { safeInternalPath } from "@/lib/safe-next";
 
 /** Public paths when desk auth is enabled. */
 const PUBLIC_PATHS = [
@@ -17,11 +19,15 @@ const PUBLIC_PATHS = [
 ];
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  if (isOaMockPath(pathname) && !localTestPageEnabled(process.env.NODE_ENV, process.env.OA_MOCK_PAGE)) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   if (!deskAuthEnabled()) {
     return NextResponse.next();
   }
-
-  const { pathname } = request.nextUrl;
 
   // Public trade-in form only — inbox stays auth-gated.
   if (pathname === "/trade-in" || pathname === "/api/trade-in/estimate" || pathname === "/api/trade-in/submit") {
@@ -58,7 +64,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const login = new URL("/login", request.url);
-  login.searchParams.set("next", pathname);
+  login.searchParams.set("next", safeInternalPath(pathname, request.nextUrl.origin));
   return NextResponse.redirect(login);
 }
 
