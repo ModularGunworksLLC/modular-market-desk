@@ -58,9 +58,9 @@ The weekly sync does not swallow an auth failure. The Import weekly card shows a
 - `/import` and `/oa-connect` send `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`. Referrer-Policy is `no-referrer` on every page.
 - The token stays AES-256-GCM with `SESSION_VAULT_KEY`. The ciphertext format is unchanged. Request bodies are capped at 8 KB and must be `application/json`.
 - `exp` is base64url-decoded. The signature is not verified. An `exp` more than 30 days out is stored but the banner marks it suspicious.
-- `audit_log` records actor, time, action (`oa_token_set`, `oa_token_clear`, `oa_token_failed_attempt`), `X-Real-IP`, and a truncated user agent. The token is not stored. The table keeps the newest 500 rows.
+- `audit_log` records actor, time, action (`oa_token_set`, `oa_token_clear`, `oa_token_failed_attempt`), a validated `X-Real-IP`, and a truncated user agent. The token is not stored. Only failed-attempt rows are capped (newest 500). Set and clear rows are never pruned.
 - Failed attempts that reach the route (bad origin, bad confirm, malformed token) are audited. Anonymous requests blocked by middleware never reach the route, so they are not audited. That avoids filling the log from the public internet.
-- `public/oa-mock.html` is served only when `NODE_ENV` is not production, or the host is loopback.
+- The mock page is not a `public/` file. `/oa-mock.html` is a route that returns 404 in production, including percent-encoded paths such as `/oa%2Dmock.html`.
 
 Actor is `desk-session`, `desk-bearer`, or `desk-open` (local dev with no secret). There is still no per-person id. IP and user agent are the extra "who" fields.
 

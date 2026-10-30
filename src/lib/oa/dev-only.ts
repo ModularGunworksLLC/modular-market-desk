@@ -7,3 +7,19 @@ export function localTestPageEnabled(nodeEnv: string | undefined, mockFlag?: str
   if (mockFlag === "1") return true;
   return nodeEnv !== "production";
 }
+
+/** Encoded forms such as /oa%2Dmock.html and /%6Fa-mock.html decode to the mock page. */
+export function isOaMockPath(pathname: string): boolean {
+  let decoded = pathname;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+  const path = decoded.toLowerCase().replace(/\/+$/, "") || "/";
+  return path === "/oa-mock.html" || path === "/oa-mock";
+}

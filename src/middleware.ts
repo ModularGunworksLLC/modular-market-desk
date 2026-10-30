@@ -5,7 +5,7 @@ import {
   DESK_AUTH_COOKIE,
   deskAuthEnabled,
 } from "@/lib/desk-auth";
-import { localTestPageEnabled } from "@/lib/oa/dev-only";
+import { isOaMockPath, localTestPageEnabled } from "@/lib/oa/dev-only";
 import { safeInternalPath } from "@/lib/safe-next";
 
 /** Public paths when desk auth is enabled. */
@@ -21,10 +21,8 @@ const PUBLIC_PATHS = [
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname === "/oa-mock.html" || pathname === "/oa-mock") {
-    if (!localTestPageEnabled(process.env.NODE_ENV, process.env.OA_MOCK_PAGE)) {
-      return new NextResponse("Not found", { status: 404 });
-    }
+  if (isOaMockPath(pathname) && !localTestPageEnabled(process.env.NODE_ENV, process.env.OA_MOCK_PAGE)) {
+    return new NextResponse("Not found", { status: 404 });
   }
 
   if (!deskAuthEnabled()) {

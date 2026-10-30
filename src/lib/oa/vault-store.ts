@@ -139,21 +139,36 @@ export async function pruneOaAudit(keep = 500): Promise<void> {
 async function upgradeAuditSeq(): Promise<void> {
   const info = await db.$client.execute("PRAGMA table_info(audit_log)");
   const names = info.rows.map((row) => String((row as { name?: string }).name));
-  if (names.length === 0 || names.includes("seq")) return;
-  await db.$client.executeMultiple(`
-    CREATE TABLE audit_log_seq (
-      seq integer PRIMARY KEY AUTOINCREMENT,
-      actor text NOT NULL,
-      action text NOT NULL,
-      target text NOT NULL DEFAULT 'outdoor_analytics',
-      detail text NOT NULL DEFAULT '{}',
-      created_at integer NOT NULL DEFAULT (unixepoch())
-    );
-    INSERT INTO audit_log_seq (actor, action, target, detail, created_at)
-      SELECT actor, action, target, detail, created_at FROM audit_log ORDER BY rowid;
-    DROP TABLE audit_log;
-    ALTER TABLE audit_log_seq RENAME TO audit_log;
-  `);
+  if (names.includes("seq")) {
+    await db.$client.execute("DROP TABLE IF EXISTS audit_log_seq");
+    return;
+  }
+  if (names.length === 0) return;
+  const client = db.$client;
+  await client.execute("BEGIN IMMEDIATE");
+  try {
+    await client.execute("DROP TABLE IF EXISTS audit_log_seq");
+    await client.execute(`
+      CREATE TABLE audit_log_seq (
+        seq integer PRIMARY KEY AUTOINCREMENT,
+        actor text NOT NULL,
+        action text NOT NULL,
+        target text NOT NULL DEFAULT 'outdoor_analytics',
+        detail text NOT NULL DEFAULT '{}',
+        created_at integer NOT NULL DEFAULT (unixepoch())
+      )
+    `);
+    await client.execute(`
+      INSERT INTO audit_log_seq (actor, action, target, detail, created_at)
+      SELECT actor, action, target, detail, created_at FROM audit_log ORDER BY rowid
+    `);
+    await client.execute("DROP TABLE audit_log");
+    await client.execute("ALTER TABLE audit_log_seq RENAME TO audit_log");
+    await client.execute("COMMIT");
+  } catch (err) {
+    await client.execute("ROLLBACK").catch(() => undefined);
+    throw err;
+  }
 }
 
 export function scrubAuditDetail(detail: Record<string, unknown>): Record<string, unknown> {

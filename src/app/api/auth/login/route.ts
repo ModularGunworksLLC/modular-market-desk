@@ -8,6 +8,8 @@ import {
   mintDeskSessionToken,
   secretsMatch,
 } from "@/lib/desk-auth";
+import { oaClientMeta } from "@/lib/oa/request-meta";
+import { rateLimitOk } from "@/lib/trade-in/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -15,7 +17,15 @@ const bodySchema = z.object({
   secret: z.string().min(1),
 });
 
+const LOGIN_LIMIT = 10;
+const LOGIN_WINDOW_MS = 60_000;
+
 export async function POST(request: Request): Promise<NextResponse> {
+  const ip = oaClientMeta(request.headers).ip ?? "unknown";
+  if (!rateLimitOk(`desk-login:${ip}`, LOGIN_LIMIT, LOGIN_WINDOW_MS)) {
+    return NextResponse.json({ error: "Too many login attempts. Wait a minute and try again." }, { status: 429 });
+  }
+
   if (!deskAuthEnabled()) {
     return NextResponse.json({ ok: true, authRequired: false });
   }
