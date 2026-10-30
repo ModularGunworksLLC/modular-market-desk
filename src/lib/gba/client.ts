@@ -97,7 +97,8 @@ export class GbaApiClient {
       throw new GbaApiError("Unauthorized - re-paste the Outdoor Analytics token", 401);
     }
     if (!res.ok) {
-      throw new GbaApiError(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`, res.status);
+      const body = redactSecrets((await res.text()).slice(0, 500));
+      throw new GbaApiError(`HTTP ${res.status}: ${body.slice(0, 200)}`, res.status);
     }
 
     const body = (await res.json()) as unknown;

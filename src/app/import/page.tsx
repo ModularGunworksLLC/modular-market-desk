@@ -9,9 +9,13 @@ import {
 import type { CsvPreset } from "@/lib/db/schema";
 import { intFmt, timeAgo, usd } from "@/lib/format";
 
+import { bookmarkletOptionsFromEnv, buildOaBookmarkletHref } from "@/lib/oa/bookmarklet";
+import { DEFAULT_OA_SESSION_STORAGE_KEY } from "@/lib/oa/config";
+
 import { CatalogSync } from "./CatalogSync";
 import { CatalogUploader } from "./CatalogUploader";
 import { ConnectionVault } from "./ConnectionVault";
+import { ConnectOaCard } from "./ConnectOaCard";
 import { MarketDataBankSync } from "./MarketDataBankSync";
 import { OaCatalogSync } from "./OaCatalogSync";
 import { PresetPanel } from "./PresetPanel";
@@ -35,6 +39,7 @@ export default async function ImportDashboard() {
 
   const dbError = summaries.error ?? presets.error ?? conns.error;
   const vendorOptions = presets.data.map((p) => ({ value: p.vendorName, label: p.label }));
+  const bookmarklet = bookmarkletOptionsFromEnv();
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
@@ -46,6 +51,15 @@ export default async function ImportDashboard() {
             Search master catalog →
           </Link>
         </p>
+      </div>
+
+      <div className="mb-4">
+        <ConnectOaCard
+          bookmarkletHref={buildOaBookmarkletHref(bookmarklet)}
+          storageKey={bookmarklet.storageKey}
+          deskOrigin={bookmarklet.deskOrigin}
+          keyVerifiedInBundle={bookmarklet.storageKey === DEFAULT_OA_SESSION_STORAGE_KEY}
+        />
       </div>
 
       {dbError && (

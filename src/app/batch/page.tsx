@@ -74,6 +74,7 @@ export default function BatchPage() {
   const [onlyGo, setOnlyGo] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("headroom");
   const [incrementHint, setIncrementHint] = useState<string | null>(null);
+  const [oaBanner, setOaBanner] = useState<string | null>(null);
   const [fileStatus, setFileStatus] = useState<{
     kind: "idle" | "loading" | "ok" | "error";
     message: string;
@@ -425,6 +426,7 @@ export default function BatchPage() {
     setResults(new Map());
     setProgress({ done: 0, total: evaluable.length });
     setIncrementHint(null);
+    setOaBanner(null);
     setWebQueueBanner(null);
     appliedReadyKeys.current.clear();
     reevalInFlight.current.clear();
@@ -498,6 +500,7 @@ export default function BatchPage() {
           const evt = JSON.parse(line) as BatchStreamEvent;
           if (evt.type === "meta") {
             setProgress({ done: 0, total: evt.total });
+            setOaBanner(evt.oaLiveUnavailable ? evt.oaBanner ?? null : null);
           } else if (evt.type === "result") {
             setResults((prev) => {
               const m = new Map(prev);
@@ -553,6 +556,15 @@ export default function BatchPage() {
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
+      {oaBanner && (
+        <div className="mb-4 rounded-md border border-desk-nogo/70 bg-desk-nogo/10 px-3 py-2 text-sm text-desk-text">
+          {oaBanner}{" "}
+          <a href="/import#connect-oa" className="font-semibold text-desk-accent hover:underline">
+            Connect OA
+          </a>
+        </div>
+      )}
+
       <div className="mb-6">
         <h1 className="text-lg font-semibold tracking-tight">Batch Buy-Sheet</h1>
         <p className="text-xs text-desk-muted">
@@ -901,6 +913,21 @@ export default function BatchPage() {
                         <td className="max-w-[260px] font-sans">
                           <div className="truncate" title={r.label}>
                             {r.label}
+                            {r.oaLiveUnavailable && (
+                              <span className="ml-1 rounded bg-desk-nogo/20 px-1 text-[10px] font-semibold text-desk-nogo">
+                                cache
+                              </span>
+                            )}
+                            {!r.oaLiveUnavailable && r.oaDataSource === "cache" && (
+                              <span className="ml-1 rounded bg-desk-panel2 px-1 text-[10px] text-desk-muted">
+                                cache
+                              </span>
+                            )}
+                            {r.oaDataSource === "live" && (
+                              <span className="ml-1 rounded bg-desk-go/15 px-1 text-[10px] text-desk-go">
+                                live
+                              </span>
+                            )}
                             {r.bestDealer && (
                               <span className="ml-1 text-[10px] capitalize text-desk-muted">· {r.bestDealer}</span>
                             )}

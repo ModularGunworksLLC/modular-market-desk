@@ -15,7 +15,9 @@ import { ingestGunsAlabama } from "@/lib/market-sync/adapters/gunsalabama";
 import { ingestCuratedSitesForIdentities } from "@/lib/market-sync/adapters/tavily-sites";
 import { ensureMarketDataBankTables } from "@/lib/market-sync/ensure";
 import { upsertStreetObservations } from "@/lib/market-sync/upsert-obs";
+import { OaTokenBlockedError, weeklySyncFailureNote } from "@/lib/oa/live-label";
 import { syncOaFull, isOaFullSyncRunning } from "@/lib/oa/sync-full";
+import { redactSecrets } from "@/lib/vault";
 import type { WebIdentity } from "@/lib/web-comps/types";
 
 export type MarketSyncStatus = {
@@ -49,6 +51,15 @@ export type WeeklySyncReport = {
   error?: string;
   note: string;
 };
+
+function tokenBlockFromMessage(message: string): OaTokenBlockedError | null {
+  if (/token expired|OA token expired/i.test(message)) return new OaTokenBlockedError("expired", message);
+  if (/token missing|No Outdoor Analytics token|OA token missing/i.test(message)) {
+    return new OaTokenBlockedError("missing", message);
+  }
+  if (/token unauthorized|unauthorized/i.test(message)) return new OaTokenBlockedError("unauthorized", message);
+  return null;
+}
 
 export function isWeeklyMarketSyncRunning(): boolean {
   return weeklyLock != null;
@@ -158,7 +169,7 @@ export function startWeeklyMarketSync(opts?: {
       const report: WeeklySyncReport = {
         runId,
         status: "error",
-        error: err instanceof Error ? err.message : String(err),
+        error: redactSecrets(err instanceof Error ? err.message : String(err)),
         note: "Weekly market sync failed",
       };
       try {
@@ -222,6 +233,8 @@ async function runWeekly(opts?: {
     status: "running",
     note: "Weekly market sync running",
   };
+  let oaBlocked: OaTokenBlockedError | null = null;
+  let loudOaError: string | null = null;
 
   try {
     // 1) OA solds into local bank
@@ -245,11 +258,24 @@ async function runWeekly(opts?: {
             note: oaReport.note || oaReport.status,
             error: oaReport.error,
           };
+          if (oaReport.status === "error") {
+            const message = redactSecrets(oaReport.error || oaReport.note || "OA sync failed");
+            loudOaError = message;
+            oaBlocked = tokenBlockFromMessage(message);
+          }
         } catch (e) {
+          const message = redactSecrets(e instanceof Error ? e.message : String(e));
+          if (e instanceof OaTokenBlockedError) oaBlocked = e;
+          else {
+            loudOaError = message;
+            oaBlocked = tokenBlockFromMessage(message);
+          }
           report.oa = {
             started: false,
-            error: e instanceof Error ? e.message : String(e),
-            note: "OA sync failed — continuing with ask sources",
+            error: message,
+            note: oaBlocked
+              ? weeklySyncFailureNote(oaBlocked.block)
+              : "OA sync failed — the weekly run is marked error so it shows on Import.",
           };
         }
       }
@@ -299,14 +325,25 @@ async function runWeekly(opts?: {
     // 4) Prune
     report.pruned = await pruneOldAsks(180);
 
-    report.status = "ok";
-    report.note = "Weekly market sync complete — evaluate/Batch read SQLite first";
+    if (oaBlocked) {
+      report.status = "error";
+      report.error = redactSecrets(oaBlocked.message);
+      report.note = weeklySyncFailureNote(oaBlocked.block);
+    } else if (loudOaError) {
+      report.status = "error";
+      report.error = loudOaError;
+      report.note = `Weekly market sync failed: ${loudOaError}`;
+    } else {
+      report.status = "ok";
+      report.note = "Weekly market sync complete — evaluate/Batch read SQLite first";
+    }
 
     await db
       .update(marketSyncRuns)
       .set({
-        status: "ok",
+        status: report.status,
         finishedAt: new Date(),
+        error: report.error ?? null,
         meta: report as unknown as Record<string, unknown>,
       })
       .where(eq(marketSyncRuns.id, runId));
@@ -314,7 +351,7 @@ async function runWeekly(opts?: {
     return report;
   } catch (e) {
     report.status = "error";
-    report.error = e instanceof Error ? e.message : String(e);
+    report.error = redactSecrets(e instanceof Error ? e.message : String(e));
     report.note = "Weekly market sync failed";
     await db
       .update(marketSyncRuns)

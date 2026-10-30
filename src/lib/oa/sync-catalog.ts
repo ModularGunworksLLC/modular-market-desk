@@ -5,19 +5,23 @@
 
 import { randomUUID } from "node:crypto";
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 import { flattenDependencies } from "@/lib/gba/catalog-flatten";
-import { GbaApiClient } from "@/lib/gba/client";
+import { GbaApiClient, GbaApiError } from "@/lib/gba/client";
 import { db } from "@/lib/db";
-import { connections, oaCatalog, oaSyncRuns } from "@/lib/db/schema";
+import { oaCatalog, oaSyncRuns } from "@/lib/db/schema";
+import { OaTokenBlockedError } from "@/lib/oa/live-label";
+import { oaExpiryWarnMs } from "@/lib/oa/config";
+import { liveTokenBlocked, oaStatusMessage, resolveOaState } from "@/lib/oa/status";
 import { compsCoverageFromDb, ensureOaMarketTables } from "@/lib/oa/sync-comps";
 import {
   getCatalogLock,
   isOaFullSyncRunning,
   setCatalogLock,
 } from "@/lib/oa/sync-state";
-import { decryptSecret, normalizeVaultSecret } from "@/lib/vault";
+import { loadOaVault, markOaUnauthorized, requireUsableOaToken } from "@/lib/oa/vault-store";
+import { normalizeVaultSecret, redactSecrets } from "@/lib/vault";
 
 const BATCH = 400;
 const REPORT_LIST_CAP = 80;
@@ -97,25 +101,6 @@ export type OaCatalogStatus = {
 };
 
 /** Vault token for outdoor_analytics (no server-only import — safe for CLI + API). */
-async function loadOaToken(): Promise<string | null> {
-  const env = process.env.GBA_BEARER_TOKEN?.trim();
-  if (env) {
-    const t = normalizeVaultSecret(env);
-    if (t) return t;
-  }
-  const rows = await db
-    .select()
-    .from(connections)
-    .where(and(eq(connections.vendor, "outdoor_analytics"), eq(connections.kind, "market_api")))
-    .limit(1);
-  const row = rows[0];
-  if (!row || row.status !== "active") return null;
-  try {
-    return normalizeVaultSecret(decryptSecret(row.secret)) || null;
-  } catch {
-    return null;
-  }
-}
 
 function brandKey(condition: string, manufacturerId: number, manufacturer: string): string {
   return `${condition}|${manufacturerId}|${manufacturer}`;
@@ -255,11 +240,17 @@ async function coverageFromDb(): Promise<OaCatalogSyncReport["coverage"] | null>
 export async function getOaCatalogStatus(): Promise<OaCatalogStatus> {
   await ensureOaCatalogTables();
   const issues: string[] = [];
-  const token = await loadOaToken();
-  if (!token) {
-    issues.push(
-      "No Outdoor Analytics token. On Import → Session Vault: vendor=outdoor_analytics, kind=market_api, paste your Bearer token.",
-    );
+  const snap = await loadOaVault();
+  const state = resolveOaState({
+    connected: snap.connected,
+    status: snap.status,
+    expiresAt: snap.expiresAt,
+    lastProbeOk: snap.lastProbeOk,
+    now: new Date(),
+    warnWithinMs: oaExpiryWarnMs(),
+  });
+  if (liveTokenBlocked(state)) {
+    issues.push(oaStatusMessage(state, snap.expiresAt, new Date()));
   }
 
   const coverage = await coverageFromDb();
@@ -280,7 +271,7 @@ export async function getOaCatalogStatus(): Promise<OaCatalogStatus> {
 
   return {
     ok: issues.length === 0,
-    hasToken: Boolean(token),
+    hasToken: snap.usableToken != null,
     issues,
     coverage,
     comps: {
@@ -334,11 +325,11 @@ export async function syncOaCatalog(opts?: {
 async function runSync(opts?: { token?: string; nested?: boolean }): Promise<OaCatalogSyncReport> {
   await ensureOaCatalogTables();
 
-  const token = opts?.token?.trim() || (await loadOaToken());
+  const token = opts?.token?.trim()
+    ? normalizeVaultSecret(opts.token)
+    : await requireUsableOaToken();
   if (!token) {
-    throw new Error(
-      "No Outdoor Analytics token. Save one on Import → Session Vault (outdoor_analytics / market_api).",
-    );
+    throw new OaTokenBlockedError("missing");
   }
 
   const runId = randomUUID();
@@ -454,7 +445,12 @@ async function runSync(opts?: { token?: string; nested?: boolean }): Promise<OaC
 
     return report;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    let surfaced: Error = err instanceof Error ? err : new Error("OA catalog sync failed");
+    if (err instanceof GbaApiError && err.status === 401) {
+      await markOaUnauthorized();
+      surfaced = new OaTokenBlockedError("unauthorized");
+    }
+    const message = redactSecrets(surfaced.message);
     if (!opts?.nested) {
       await db
         .update(oaSyncRuns)
@@ -465,6 +461,7 @@ async function runSync(opts?: { token?: string; nested?: boolean }): Promise<OaC
         })
         .where(eq(oaSyncRuns.id, runId));
     }
-    throw err;
+    if (surfaced instanceof OaTokenBlockedError) throw surfaced;
+    throw new Error(message);
   }
 }

@@ -105,8 +105,11 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
           />
         </div>
         <div>
-          <label className="field-label">Expires (optional)</label>
+          <label className="field-label">Expires (optional override)</label>
           <input className="field-input" type="datetime-local" name="expiresAt" />
+          <p className="mt-1 text-[11px] text-desk-muted">
+            Leave blank for Outdoor Analytics — Desk reads the JWT exp claim. Fill this only to override that time.
+          </p>
         </div>
         <button
           type="submit"

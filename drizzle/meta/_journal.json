@@ -22,6 +22,13 @@
       "when": 1784300000000,
       "tag": "0002_web_comps",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790000000000,
+      "tag": "0005_oa_audit_log",
+      "breakpoints": true
     }
   ]
 }

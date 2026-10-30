@@ -16,6 +16,7 @@ import {
 } from "@/lib/auctions/bid-increments";
 import type { BatchResultRow } from "@/lib/batch/types";
 import { runEvaluation } from "@/lib/evaluate-pipeline";
+import type { OaVaultSnapshot } from "@/lib/oa/vault-store";
 import { vendorLabel } from "@/lib/tracked-vendors";
 import type { EvaluateRequest } from "@/lib/validation";
 
@@ -76,6 +77,7 @@ export async function evaluateBatchRow(
   row: BatchRowInput,
   defaults: BatchDefaultsInput,
   token: string | null,
+  oaSnapshot?: OaVaultSnapshot,
 ): Promise<BatchResultRow> {
   const label = `${row.manufacturer} ${row.model}${row.caliber ? ` ${row.caliber}` : ""}`.trim();
   const schedule = normalizeBidIncrements(defaults.bidIncrements);
@@ -139,6 +141,9 @@ export async function evaluateBatchRow(
     oaCatalog: null,
     webEnrich: null,
     matchWarnings: [],
+    oaDataSource: "none",
+    oaLiveUnavailable: false,
+    oaLiveMessage: null,
     error: null,
   };
 
@@ -171,7 +176,11 @@ export async function evaluateBatchRow(
   };
 
   try {
-    const out = await runEvaluation(body, { persist: true, token });
+    const out = await runEvaluation(body, {
+      persist: true,
+      oaSnapshot,
+      token: oaSnapshot ? undefined : token,
+    });
     const sold = out.result.sold;
     const dealerFloor = out.wholesale.cheapestInStockFirearm;
     const bestDealerName = out.insights.cheapestInStockDealer?.vendorName ?? null;
@@ -211,7 +220,13 @@ export async function evaluateBatchRow(
     let grossResaleNote: string | null = null;
     if (sold.count > 0 && sold.median > 0) {
       estimatedGrossResale = Math.round(sold.median * 100) / 100;
-      grossResaleNote = `OA sold median · n=${sold.count}`;
+      const fromCache = out.oaAvailability?.dataSource === "cache";
+      const fromLive = out.oaAvailability?.dataSource === "live";
+      grossResaleNote = fromCache
+        ? `Local catalog cache (not live) sold median · n=${sold.count}`
+        : fromLive
+          ? `OA live sold median · n=${sold.count}`
+          : `Sold median (not live OA) · n=${sold.count}`;
       if (out.webComps?.median != null && out.webComps.median > 0 && out.webComps.count > 0) {
         const d = out.webComps.domainCount;
         grossResaleNote += ` · street asks ~$${Math.round(out.webComps.median)}${
@@ -258,7 +273,12 @@ export async function evaluateBatchRow(
       newDealerWarning,
       headroom,
       matchNote:
-        [out.sourceStatus.gba, out.sourceStatus.web, out.sourceStatus.matchWarning]
+        [
+          out.oaAvailability?.banner,
+          out.sourceStatus.gba,
+          out.sourceStatus.web,
+          out.sourceStatus.matchWarning,
+        ]
           .filter(Boolean)
           .join(" · ") || "no comps",
       matchScore: out.catalogMatch?.score ?? null,
@@ -284,9 +304,20 @@ export async function evaluateBatchRow(
           }
         : null,
       matchWarnings: out.matchWarnings ?? [],
+      oaDataSource: out.oaAvailability?.dataSource ?? "none",
+      oaLiveUnavailable: out.oaAvailability?.liveUnavailable ?? false,
+      oaLiveMessage: out.oaAvailability?.banner ?? null,
       error: null,
     };
   } catch (err) {
-    return { ...base, error: err instanceof Error ? err.message : String(err) };
+    const message = err instanceof Error ? err.message : String(err);
+    const unavailable = message.startsWith("Live OA data unavailable");
+    return {
+      ...base,
+      error: message,
+      oaLiveUnavailable: unavailable,
+      oaLiveMessage: unavailable ? message : null,
+      oaDataSource: "none",
+    };
   }
 }

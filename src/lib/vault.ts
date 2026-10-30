@@ -43,6 +43,19 @@ export function redactSecrets(text: string): string {
     .replace(/\b[A-Za-z0-9_-]{40,}\b/g, "[redacted-token]");
 }
 
+/**
+ * Remove an exact secret (even one that does not look like a JWT) and then
+ * run the pattern redactor. Use on every string that might have touched a token.
+ */
+export function redactLiteral(text: string, secret: string | null | undefined): string {
+  let out = text;
+  const trimmed = secret?.trim() ?? "";
+  if (trimmed.length >= 8 && out.includes(trimmed)) {
+    out = out.split(trimmed).join("[redacted]");
+  }
+  return redactSecrets(out);
+}
+
 export function decryptSecret(payload: string): string {
   const [ivB64, tagB64, dataB64] = payload.split(".");
   if (!ivB64 || !tagB64 || !dataB64) throw new Error("Malformed vault payload.");

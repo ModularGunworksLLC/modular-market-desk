@@ -1,0 +1,137 @@
+# Connect Outdoor Analytics
+
+One-click refresh for the Outdoor Analytics (OA) session token Desk uses as a Bearer token against `api.gunbrokeranalytics.com`. The live Desk deploy is a separate step. This change does not deploy, merge, or touch the Lightsail host.
+
+Michael approved the build on 2026-10-30. Shipping it to the live desk still waits for his separate yes, and the AWS Cloud SME does that deploy.
+
+## Install the bookmarklet (once)
+
+1. Open Desk → **Import**.
+2. On the **Connect OA** card, drag the **Connect OA** link to the bookmarks bar.
+3. Leave it there. Do not click it on the Import page. Clicking it on Desk only shows a reminder.
+
+The bookmark is a `javascript:` link. Its only hard-coded destination is `DESK_PUBLIC_ORIGIN` (otherwise `PUBLIC_DESK_URL`, otherwise `https://desk.modulargunworks.com`). It will not post the token anywhere else. React 19 strips `javascript:` URLs during render, so the card writes the real href onto the link after it mounts. Wait for the page to finish loading before you drag it.
+
+## Use it
+
+1. Sign in to Desk in the browser you will use (the popup needs that session).
+2. Sign in to [Outdoor Analytics](https://hub.outdooranalytics.com) through GunBroker.
+3. Click the **Connect OA** bookmark while that OA tab is focused.
+4. A Desk window opens at `/oa-connect`. If it shows the Desk login, sign in. The bookmark keeps trying for about a minute.
+5. The OA tab shows a green or red banner. The banner never includes the token.
+6. Evaluate, Batch, and Import show the expiry banner at the top.
+
+If OA has no session, the banner says to sign in to Outdoor Analytics first. Nothing is sent.
+
+**Clear** and **Re-check token** are on the same Import card. Clear destroys the stored ciphertext (it is replaced, not left revoked-but-readable). Re-check calls OA once and updates the banner.
+
+The old paste box on Import still works. Leave **Expires** blank and Desk reads `exp` from the JWT. Fill Expires only to override that time.
+
+## What the banners mean
+
+Times are America/Chicago. They do not follow the server's timezone.
+
+| State | Look | Meaning |
+| --- | --- | --- |
+| connected | Neutral | `OA connected, expires at <Chicago time> (in X hours)` |
+| expiring_soon | Amber | Less than `OA_EXPIRY_WARN_HOURS` left (default 2) |
+| expired | Red | `exp` is in the past. Live calls are not attempted |
+| unauthorized | Red | OA returned 401, or the last probe failed that way |
+| not_connected | Red | Nothing saved, or the token was cleared |
+
+Evaluate and Batch add a second line when live data cannot be used:
+
+`Live OA data unavailable: token expired. Results below use the local catalog cache and may be stale.`
+
+(`token missing` / `token unauthorized` use the same sentence.) Cached numbers still show when the local bank has them. They are labeled **cache**, not live. A per-lot **cache** flag is on the buy sheet. If there is no cache row, the result says so instead of pretending the figures are live.
+
+The weekly sync does not swallow an auth failure. The Import weekly card shows an error, and a 401 sets the connection to `error` so the red banner stays up. Other ask sources may still update; the run is not marked ok.
+
+## Security design
+
+- **Popup + `postMessage`, not a cross-origin fetch.** Checked 2026-10-30: `https://hub.outdooranalytics.com/` returned no `Content-Security-Policy` header and no CSP meta tag, so a bookmarklet is not blocked by CSP today and a `fetch` would not be blocked by `connect-src` either. Fetch is still the wrong tool. The Desk cookie is `SameSite=Lax`, so a cross-origin POST from OA would not send it. Opening `/oa-connect` is a top-level navigation, so the cookie is sent. The token moves in a `postMessage` body to that window. The Desk page then POSTs it to `/api/vault/oa` on the Desk origin.
+- The API rejects any `Origin` that is not the Desk origin, including `https://hub.outdooranalytics.com`. There is no CORS allow-list and no unauthenticated write.
+- Missing `Origin` is accepted only with `Authorization: Bearer <DESK_AUTH_SECRET>` (scripts). A cookie-only POST without `Origin` is rejected.
+- Desk has no role table. Set and clear use the same shared-secret gate as `/import` (`DESK_AUTH_SECRET` cookie session or bearer).
+- The token stays AES-256-GCM with `SESSION_VAULT_KEY`. The ciphertext format is unchanged.
+- `exp` is base64url-decoded. The signature is not verified.
+- `audit_log` records actor, time, and action (`oa_token_set`, `oa_token_clear`, `oa_token_failed_attempt`). The token is not stored. Responses and error strings run through redaction.
+- The connect page sends `Referrer-Policy: no-referrer`. The token is not placed in the URL, so it is not in history or in the request line of an access log.
+
+Actor is `desk-session`, `desk-bearer`, or `desk-open` (auth disabled). There is no per-person id in the v1 gate.
+
+## Session storage key
+
+Default key: `gb_session_token`.
+
+Verified 2026-10-30 from the public bundle `https://hub.outdooranalytics.com/main-GT43ZVAN.js`, which calls `sessionStorage.getItem("gb_session_token")` as the signed-in check. This build did **not** sign in, so it did not watch OA write the value. Override with `OA_SESSION_STORAGE_KEY` if OA renames it, then drag the bookmarklet again.
+
+## Config
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `DESK_PUBLIC_ORIGIN` | Origin baked into the bookmarklet | `PUBLIC_DESK_URL`, else `https://desk.modulargunworks.com` |
+| `OA_ALLOWED_ORIGINS` | Who may `postMessage` into `/oa-connect` | `https://hub.outdooranalytics.com` |
+| `OA_SESSION_STORAGE_KEY` | Key read on the OA page | `gb_session_token` |
+| `OA_EXPIRY_WARN_HOURS` | Amber banner threshold | `2` |
+| `SESSION_VAULT_KEY` | Existing AES-256-GCM key | required |
+| `DESK_AUTH_SECRET` | Existing desk gate | empty disables the gate (local only) |
+
+Loopback origins (`http://127.0.0.1`, `http://localhost`) may use http so local dev works. Any other http origin is refused. When the Desk origin is loopback, that origin may also `postMessage` so the mock page can run. Production does not allow that.
+
+## Test locally with a fake token
+
+```bash
+cp .env.example .env
+# set SESSION_VAULT_KEY (32 bytes, base64) and DATABASE_URL
+# DESK_PUBLIC_ORIGIN must be the origin you type in the browser
+# DESK_PUBLIC_ORIGIN=http://127.0.0.1:3000
+npm run db:init
+npm run dev
+```
+
+1. Open `http://127.0.0.1:3000/import` (sign in first if `DESK_AUTH_SECRET` is set).
+2. Open `http://127.0.0.1:3000/oa-mock.html`.
+3. Click **Store fake token (future exp)** or **already expired**. The page writes `sessionStorage["gb_session_token"]` and does not print the token.
+4. Click the **Connect OA** link on the mock page (loaded from Desk), or the bookmark you dragged.
+5. The Desk popup saves it. Import / Evaluate / Batch show the Chicago expiry banner.
+6. Store an already-expired fake token and connect again. The banner goes red. Evaluate still returns cached comps when they exist, labeled cache.
+
+The mock page is not Outdoor Analytics. It only proves the handoff. Do not put a real OA token in it unless you are on a machine you trust. Automated tests use fake JWTs and do not call OA.
+
+## Staging, then a real token
+
+1. Deploy this branch only to a staging copy of Desk (not production).
+2. Set `DESK_PUBLIC_ORIGIN` to that staging origin and drag a new bookmarklet. The old bookmark still points at whatever origin it was built with.
+3. Repeat the mock-page test against staging.
+4. Sign in to real OA and click the bookmark once. Confirm the banner time matches the session you expect, in Chicago time.
+5. Run one Evaluate that needs a live pull, or **Re-check token**, and confirm the banner stays connected.
+6. Do not paste the token into tickets, logs, or chat.
+
+## Rollout checklist
+
+- [ ] Michael has said yes to the live deploy (the 2026-10-30 approval was for this build, not for production).
+- [ ] AWS Cloud SME deploys. This repo change does not deploy itself.
+- [ ] `SESSION_VAULT_KEY` on the server is the same key already used for the vault. Do not rotate it as part of this change.
+- [ ] `DESK_PUBLIC_ORIGIN` on the server is `https://desk.modulargunworks.com` (or the real public origin).
+- [ ] After deploy, Michael drags a **new** bookmarklet from production Import. A bookmark built on localhost will refuse to talk to production, and the reverse.
+- [ ] He connects once from a signed-in OA tab and checks the Chicago expiry banner.
+- [ ] Weekly sync is left to fail visibly if the token is rejected. Do not hide that error.
+- [ ] `/api/trade-in/estimate` is unchanged and stays public.
+
+## Known limits
+
+- A revoked token whose `exp` is still in the future stays "connected" until something actually calls OA. Batch does that once at the start of a sheet. Evaluate uses the local cache first and does not call OA when that cache already has sold comps, so it will not discover a new 401 by itself. Use **Re-check token**, Batch, or the weekly sync to flip the banner to unauthorized.
+- The bookmarklet was checked against the public OA page (no CSP, and `sessionStorage.getItem("gb_session_token")` in the bundle). It was not clicked on a signed-in OA session.
+- Firefox can block bookmarklets when a page later adds a strict `script-src`. Chrome currently runs them. If OA adds a CSP that blocks the bookmarklet, the fallback is to paste the token on Import.
+- Desk auth is one shared secret. The audit actor is the auth method, not a person's name.
+
+## Automated tests
+
+```bash
+npm test
+npm run lint
+npm run typecheck
+```
+
+Unit tests cover JWT `exp` (including malformed tokens), state transitions, Chicago formatting, bookmarklet shape, redaction, auth rejection (anonymous, evil origin, and the OA origin), audit rows without the token, and the Evaluate cache labeling sentence. They do not call Outdoor Analytics.

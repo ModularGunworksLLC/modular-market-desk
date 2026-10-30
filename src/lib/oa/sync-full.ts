@@ -4,10 +4,10 @@
 
 import { randomUUID } from "node:crypto";
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
-import { connections, oaSyncRuns } from "@/lib/db/schema";
+import { oaSyncRuns } from "@/lib/db/schema";
 import {
   ensureOaCatalogTables,
   syncOaCatalog,
@@ -27,7 +27,10 @@ import {
   setActiveOaFullRunId,
   setFullLock,
 } from "@/lib/oa/sync-state";
-import { decryptSecret, normalizeVaultSecret } from "@/lib/vault";
+import { GbaApiError } from "@/lib/gba/client";
+import { OaTokenBlockedError } from "@/lib/oa/live-label";
+import { markOaUnauthorized, requireUsableOaToken } from "@/lib/oa/vault-store";
+import { normalizeVaultSecret, redactSecrets } from "@/lib/vault";
 
 export type OaFullSyncReport = {
   runId: string;
@@ -38,26 +41,6 @@ export type OaFullSyncReport = {
   error?: string;
   note: string;
 };
-
-async function loadOaToken(): Promise<string | null> {
-  const env = process.env.GBA_BEARER_TOKEN?.trim();
-  if (env) {
-    const t = normalizeVaultSecret(env);
-    if (t) return t;
-  }
-  const rows = await db
-    .select()
-    .from(connections)
-    .where(and(eq(connections.vendor, "outdoor_analytics"), eq(connections.kind, "market_api")))
-    .limit(1);
-  const row = rows[0];
-  if (!row || row.status !== "active") return null;
-  try {
-    return normalizeVaultSecret(decryptSecret(row.secret)) || null;
-  } catch {
-    return null;
-  }
-}
 
 export { isOaFullSyncRunning, getActiveOaFullRunId };
 
@@ -118,11 +101,11 @@ async function runFull(opts?: {
   await ensureOaCatalogTables();
   await ensureOaMarketTables();
 
-  const token = opts?.token?.trim() || (await loadOaToken());
+  const token = opts?.token?.trim()
+    ? normalizeVaultSecret(opts.token)
+    : await requireUsableOaToken();
   if (!token) {
-    throw new Error(
-      "No Outdoor Analytics token. Save one on Import → Session Vault (outdoor_analytics / market_api).",
-    );
+    throw new OaTokenBlockedError("missing");
   }
 
   const runId = opts?.runId ?? randomUUID();
@@ -200,7 +183,14 @@ async function runFull(opts?: {
 
     return report;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    let surfaced: Error = err instanceof Error ? err : new Error("Full sync failed");
+    if (err instanceof GbaApiError && err.status === 401) {
+      await markOaUnauthorized();
+      surfaced = new OaTokenBlockedError("unauthorized");
+    } else if (err instanceof OaTokenBlockedError && err.block === "unauthorized") {
+      await markOaUnauthorized();
+    }
+    const message = redactSecrets(surfaced.message);
     await db
       .update(oaSyncRuns)
       .set({
@@ -209,7 +199,8 @@ async function runFull(opts?: {
         error: message.slice(0, 2000),
       })
       .where(eq(oaSyncRuns.id, runId));
-    throw err;
+    if (surfaced instanceof OaTokenBlockedError) throw surfaced;
+    throw new Error(message);
   }
 }
 

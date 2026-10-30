@@ -9,9 +9,12 @@ import { and, eq, sql } from "drizzle-orm";
 // sql used for counts only
 
 import { summarize } from "@/lib/arbitrage/stats";
-import { GbaApiClient } from "@/lib/gba/client";
+import { GbaApiClient, GbaApiError } from "@/lib/gba/client";
 import { db } from "@/lib/db";
 import { oaCatalog, oaMarketStats, oaSoldComps, oaSyncRuns } from "@/lib/db/schema";
+import { OaTokenBlockedError } from "@/lib/oa/live-label";
+import { markOaUnauthorized } from "@/lib/oa/vault-store";
+import { redactSecrets } from "@/lib/vault";
 
 const DEFAULT_CONCURRENCY = 3;
 const SAMPLE_SOLD = 40;
@@ -229,8 +232,10 @@ export async function syncOaComps(opts: {
 
     const api = new GbaApiClient(opts.token);
     const syncStarted = new Date();
+    let authBlocked: OaTokenBlockedError | null = null;
 
     await mapPool(leaves, concurrency, async (leaf) => {
+      if (authBlocked) return;
       const key = `${leaf.condition}|${leaf.modelId}|${leaf.caliberId}`;
       const label = `${leaf.manufacturer} ${leaf.model} ${leaf.caliber} (${leaf.condition})`;
 
@@ -345,8 +350,13 @@ export async function syncOaComps(opts: {
         else progress.zeroSold++;
         if (askingStats.count > 0) progress.withAsking++;
       } catch (err) {
+        if (err instanceof GbaApiError && err.status === 401) {
+          authBlocked = new OaTokenBlockedError("unauthorized");
+          await markOaUnauthorized();
+          return;
+        }
         progress.errors++;
-        const message = err instanceof Error ? err.message : String(err);
+        const message = redactSecrets(err instanceof Error ? err.message : String(err));
         try {
           await db
             .delete(oaMarketStats)
@@ -394,6 +404,10 @@ export async function syncOaComps(opts: {
       }
     });
 
+    if (authBlocked) {
+      throw authBlocked;
+    }
+
     const seconds = Math.round((Date.now() - t0) / 1000);
     const result: OaCompsSyncResult = {
       runId,
@@ -417,7 +431,7 @@ export async function syncOaComps(opts: {
 
     return result;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = redactSecrets(err instanceof Error ? err.message : String(err));
     if (ownedRun) {
       await db
         .update(oaSyncRuns)
@@ -429,6 +443,7 @@ export async function syncOaComps(opts: {
         })
         .where(eq(oaSyncRuns.id, runId));
     }
-    throw err;
+    if (err instanceof OaTokenBlockedError) throw err;
+    throw new Error(message);
   }
 }

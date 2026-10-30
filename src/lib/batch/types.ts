@@ -81,10 +81,29 @@ export interface BatchResultRow {
   } | null;
   /** Identity / OA↔web disparity warnings. */
   matchWarnings: string[];
+  /** Where the sold numbers came from. Cache is never reported as live. */
+  oaDataSource: "live" | "cache" | "manual" | "none";
+  /** True when the token is missing, expired, or OA returned 401. */
+  oaLiveUnavailable: boolean;
+  oaLiveMessage: string | null;
   error: string | null;
 }
 
 export type BatchStreamEvent =
-  | { type: "meta"; total: number; hasToken: boolean; incrementSourceHint?: string }
+  | {
+      type: "meta";
+      total: number;
+      hasToken: boolean;
+      incrementSourceHint?: string;
+      oaLiveUnavailable?: boolean;
+      oaBanner?: string | null;
+    }
   | { type: "result"; completed: number; row: BatchResultRow }
-  | { type: "done"; completed: number };
+  | {
+      type: "done";
+      completed: number;
+      tally?: { go: number; nogo: number; noComps: number; errored: number };
+      hasToken?: boolean;
+      oaLiveUnavailable?: boolean;
+      oaBanner?: string | null;
+    };
