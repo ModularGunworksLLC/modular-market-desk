@@ -20,6 +20,8 @@ describe("Connect OA bookmarklet", () => {
     expect(source).toContain("https://desk.modulargunworks.com");
     expect(source).toContain("gb_session_token");
     expect(source).toContain("postMessage");
+    expect(source).toContain("ev.source!==popup");
+    expect(source).toContain("Click Save");
     expect(source).toContain('"/oa-connect"');
     expect(source).not.toContain("fetch(");
     expect(source).not.toContain("?token");

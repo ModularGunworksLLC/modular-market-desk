@@ -15,6 +15,7 @@ process.env.DESK_AUTH_SECRET = "test-desk-secret";
 process.env.DESK_PUBLIC_ORIGIN = "http://127.0.0.1:3010";
 process.env.OA_EXPIRY_WARN_HOURS = "2";
 delete process.env.GBA_BEARER_TOKEN;
+delete process.env.OA_ADMIN_SECRET;
 
 const DESK = "http://127.0.0.1:3010";
 const SECRET = "test-desk-secret";
@@ -68,7 +69,7 @@ describe("OA token save endpoint", () => {
       new Request(`${DESK}/api/vault/oa`, {
         method: "POST",
         headers: { origin: DESK, "content-type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, confirmSecret: SECRET }),
       }),
     );
     expect(anon.status).toBe(401);
@@ -78,7 +79,7 @@ describe("OA token save endpoint", () => {
       new Request(`${DESK}/api/vault/oa`, {
         method: "POST",
         headers: authed("https://evil.example"),
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, confirmSecret: SECRET }),
       }),
     );
     expect(evil.status).toBe(403);
@@ -87,7 +88,7 @@ describe("OA token save endpoint", () => {
       new Request(`${DESK}/api/vault/oa`, {
         method: "POST",
         headers: authed("https://hub.outdooranalytics.com"),
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, confirmSecret: SECRET }),
       }),
     );
     expect(fromOa.status).toBe(403);
@@ -106,7 +107,7 @@ describe("OA token save endpoint", () => {
       new Request(`${DESK}/api/vault/oa`, {
         method: "POST",
         headers: authed(DESK),
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, confirmSecret: SECRET }),
       }),
     );
     expect(res.status).toBe(400);
@@ -128,8 +129,10 @@ describe("OA token save endpoint", () => {
           origin: DESK,
           "content-type": "application/json",
           cookie: `desk_session=${cookie}`,
+          "x-real-ip": "203.0.113.10",
+          "user-agent": "DeskAuditTest/1.0",
         },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, confirmSecret: SECRET }),
       }),
     );
     const text = await res.text();
@@ -144,7 +147,10 @@ describe("OA token save endpoint", () => {
     const audits = await latestOaAudit();
     const setRow = audits.find((row) => row.action === "oa_token_set");
     expect(setRow?.actor).toBe("desk-session");
+    expect(setRow?.detail).toContain("203.0.113.10");
+    expect(setRow?.detail).toContain("DeskAuditTest/1.0");
     expect(leaked(setRow?.detail ?? "", token)).toBe(false);
+    expect(leaked(setRow?.detail ?? "", SECRET)).toBe(false);
 
     const client = createClient({ url: `file:${dbFile}` });
     const stored = await client.execute(
@@ -164,7 +170,7 @@ describe("OA token save endpoint", () => {
       new Request(`${DESK}/api/vault/oa`, {
         method: "POST",
         headers: authed(DESK),
-        body: JSON.stringify({ token: soonToken }),
+        body: JSON.stringify({ token: soonToken, confirmSecret: SECRET }),
       }),
     );
     expect(saved.status).toBe(200);
@@ -193,7 +199,7 @@ describe("OA token save endpoint", () => {
       new Request(`${DESK}/api/vault/oa`, {
         method: "POST",
         headers: authed(DESK),
-        body: JSON.stringify({ token: pastToken }),
+        body: JSON.stringify({ token: pastToken, confirmSecret: SECRET }),
       }),
     );
     expect(expiredSave.status).toBe(200);
@@ -210,6 +216,106 @@ describe("OA token save endpoint", () => {
     expect(rejectedBody.lastProbeOk).toBe(false);
     expect(rejectedBody.message.toLowerCase()).toContain("rejected");
     expect(leaked(JSON.stringify(rejectedBody), pastToken)).toBe(false);
+  });
+
+  it("rejects a cookie plus a junk bearer when Origin is missing", async () => {
+    const token = fakeJwt(Math.floor(Date.now() / 1000) + 7200);
+    const cookie = await mintDeskSessionToken(SECRET);
+    const res = await POST(
+      new Request(`${DESK}/api/vault/oa`, {
+        method: "POST",
+        headers: {
+          cookie: `desk_session=${cookie}`,
+          authorization: "Bearer junk-not-the-secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ token, confirmSecret: SECRET }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(leaked(await res.text(), token)).toBe(false);
+    const audits = await latestOaAudit();
+    expect(audits[0]?.action).toBe("oa_token_failed_attempt");
+    expect(audits[0]?.actor).not.toBe("desk-bearer");
+    expect(leaked(audits[0]?.detail ?? "", token)).toBe(false);
+  });
+
+  it("refuses OA writes in production when the desk secret is unset", async () => {
+    const prevSecret = process.env.DESK_AUTH_SECRET;
+    const prevNode = process.env.NODE_ENV;
+    const prevOrigin = process.env.DESK_PUBLIC_ORIGIN;
+    (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+    process.env.DESK_PUBLIC_ORIGIN = "https://desk.modulargunworks.com";
+    delete process.env.DESK_AUTH_SECRET;
+    try {
+      const token = fakeJwt(Math.floor(Date.now() / 1000) + 7200);
+      const res = await POST(
+        new Request("https://desk.modulargunworks.com/api/vault/oa", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer x",
+            "content-type": "application/json",
+            origin: "https://desk.modulargunworks.com",
+          },
+          body: JSON.stringify({ token, confirmSecret: "x" }),
+        }),
+      );
+      expect(res.status).toBe(403);
+      const text = await res.text();
+      expect(text).toContain("DESK_AUTH_SECRET");
+      expect(leaked(text, token)).toBe(false);
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevNode;
+      process.env.DESK_PUBLIC_ORIGIN = prevOrigin;
+      if (prevSecret == null) delete process.env.DESK_AUTH_SECRET;
+      else process.env.DESK_AUTH_SECRET = prevSecret;
+    }
+  });
+
+  it("rejects an oversized body and a non-JSON content type", async () => {
+    const huge = await POST(
+      new Request(`${DESK}/api/vault/oa`, {
+        method: "POST",
+        headers: authed(DESK),
+        body: JSON.stringify({ token: "a".repeat(9000), confirmSecret: SECRET }),
+      }),
+    );
+    expect(huge.status).toBe(413);
+
+    const typed = await POST(
+      new Request(`${DESK}/api/vault/oa`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${SECRET}`, origin: DESK, "content-type": "text/plain" },
+        body: "hello",
+      }),
+    );
+    expect(typed.status).toBe(415);
+  });
+
+  it("requires OA_ADMIN_SECRET when that variable is set", async () => {
+    process.env.OA_ADMIN_SECRET = "oa-admin-test-value";
+    try {
+      const token = fakeJwt(Math.floor(Date.now() / 1000) + 7200);
+      const wrong = await POST(
+        new Request(`${DESK}/api/vault/oa`, {
+          method: "POST",
+          headers: authed(DESK),
+          body: JSON.stringify({ token, confirmSecret: SECRET }),
+        }),
+      );
+      expect(wrong.status).toBe(403);
+      const ok = await POST(
+        new Request(`${DESK}/api/vault/oa`, {
+          method: "POST",
+          headers: authed(DESK),
+          body: JSON.stringify({ token, confirmSecret: "oa-admin-test-value" }),
+        }),
+      );
+      expect(ok.status).toBe(200);
+      expect(leaked(await ok.text(), token)).toBe(false);
+    } finally {
+      delete process.env.OA_ADMIN_SECRET;
+    }
   });
 
   it("returns the bookmarklet to a signed-in caller and not to an anonymous one", async () => {
@@ -231,7 +337,11 @@ describe("OA token save endpoint", () => {
 
   it("clears the token and writes a clear audit row", async () => {
     const res = await DELETE(
-      new Request(`${DESK}/api/vault/oa`, { method: "DELETE", headers: authed(DESK) }),
+      new Request(`${DESK}/api/vault/oa`, {
+        method: "DELETE",
+        headers: authed(DESK),
+        body: JSON.stringify({ confirmSecret: SECRET }),
+      }),
     );
     expect(res.status).toBe(200);
     const status = await GET(new Request(`${DESK}/api/vault/status`, { headers: authed(null) }));
@@ -239,6 +349,15 @@ describe("OA token save endpoint", () => {
     expect(body.state).toBe("not_connected");
     const audits = await latestOaAudit();
     expect(audits[0]?.action).toBe("oa_token_clear");
+    expect(audits[0]?.detail).toContain("ip");
     expect(leaked(logs.join("\n"), "fake-signature-not-a-real-token")).toBe(false);
+    expect(leaked(logs.join("\n"), SECRET)).toBe(false);
+  });
+
+  it("caps the audit log", async () => {
+    const { pruneOaAudit, latestOaAudit: list } = await import("@/lib/oa/vault-store");
+    await pruneOaAudit(2);
+    const rows = await list();
+    expect(rows.length).toBeLessThanOrEqual(2);
   });
 });

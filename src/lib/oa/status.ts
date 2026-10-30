@@ -102,6 +102,18 @@ export function oaStatusMessage(
   }
 }
 
+/** A forged exp decades out must not look like a normal long-lived session. */
+export const OA_EXP_FAR_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function expIsFarFuture(expiresAt: Date | null, now: Date): boolean {
+  if (!expiresAt) return false;
+  return expiresAt.getTime() - now.getTime() > OA_EXP_FAR_MS;
+}
+
+export const FAR_EXPIRY_NOTE = " Expiry is more than 30 days out — treat this token as suspicious.";
+export const ENV_TOKEN_OVERRIDE_NOTE =
+  " GBA_BEARER_TOKEN is set, so sync keeps using that env token. Clearing the vault does not remove it.";
+
 export function oaBannerTone(state: OaConnectionState): "ok" | "warn" | "bad" {
   if (state === "connected") return "ok";
   if (state === "expiring_soon") return "warn";

@@ -8,8 +8,11 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { auditLog, connections, type AuditAction } from "@/lib/db/schema";
-import { decodeJwtExp } from "@/lib/oa/jwt";
+import { decodeJwtExp, jwtShapeOk } from "@/lib/oa/jwt";
 import {
+  ENV_TOKEN_OVERRIDE_NOTE,
+  FAR_EXPIRY_NOTE,
+  expIsFarFuture,
   formatChicago,
   formatHoursUntil,
   liveTokenBlocked,
@@ -51,6 +54,10 @@ export interface PublicOaStatus {
   warnWithinHours: number;
   message: string;
   connectHref: string;
+  /** exp is more than 30 days out. Display warning only; not an auth decision. */
+  expSuspicious: boolean;
+  /** GBA_BEARER_TOKEN is set. Sync ignores a cleared vault token. */
+  envTokenOverride: boolean;
 }
 
 let tablesReady: Promise<void> | null = null;
@@ -106,6 +113,19 @@ export async function writeOaAudit(
     action,
     target: OA_VENDOR,
     detail: scrubbed,
+  });
+  await pruneOaAudit();
+}
+
+/** Keep the newest rows so a noisy client cannot grow this table without bound. */
+export async function pruneOaAudit(keep = 500): Promise<void> {
+  await ensureOaVaultTables();
+  const n = Math.max(1, Math.floor(keep));
+  await db.$client.execute({
+    sql: `DELETE FROM audit_log WHERE id NOT IN (
+      SELECT id FROM audit_log ORDER BY created_at DESC, id DESC LIMIT ?
+    )`,
+    args: [n],
   });
 }
 
@@ -176,9 +196,13 @@ export function toPublicOaStatus(snap: OaVaultSnapshot, now = new Date()): Publi
       });
   const hoursRemaining =
     snap.expiresAt != null ? (snap.expiresAt.getTime() - now.getTime()) / 3_600_000 : null;
-  const message = snap.decryptFailed
+  const expSuspicious = expIsFarFuture(snap.expiresAt, now);
+  const envTokenOverride = Boolean(process.env.GBA_BEARER_TOKEN?.trim());
+  let message = snap.decryptFailed
     ? "Saved OA token could not be decrypted with this server's vault key. Connect OA again."
     : oaStatusMessage(state, snap.expiresAt, now);
+  if (expSuspicious) message += FAR_EXPIRY_NOTE;
+  if (envTokenOverride) message += ENV_TOKEN_OVERRIDE_NOTE;
   return {
     ok: state === "connected" || state === "expiring_soon",
     state,
@@ -192,13 +216,25 @@ export function toPublicOaStatus(snap: OaVaultSnapshot, now = new Date()): Publi
     warnWithinHours: warnWithinMs / 3_600_000,
     message,
     connectHref: "/import#connect-oa",
+    expSuspicious,
+    envTokenOverride,
   };
 }
 
-export async function saveOaToken(token: string, actor: string): Promise<{ expiresAt: Date; message: string }> {
+export async function saveOaToken(
+  token: string,
+  actor: string,
+  auditExtra?: Record<string, unknown>,
+): Promise<{ expiresAt: Date; message: string }> {
   const normalized = normalizeVaultSecret(token);
   if (!normalized) {
     throw new OaSaveError("empty_token", "No OA token was provided.");
+  }
+  if (!jwtShapeOk(normalized)) {
+    throw new OaSaveError(
+      "malformed_jwt",
+      "The OA token is not a JWT with an exp claim. Sign in to Outdoor Analytics and try Connect OA again.",
+    );
   }
   const expiresAt = decodeJwtExp(normalized);
   if (!expiresAt) {
@@ -261,15 +297,20 @@ export async function saveOaToken(token: string, actor: string): Promise<{ expir
   await writeOaAudit("oa_token_set", actor, {
     expiresAt: expiresAt.toISOString(),
     source: "oa_connect",
+    expSuspicious: expIsFarFuture(expiresAt, new Date()),
+    ...auditExtra,
   });
 
+  const suspicious = expIsFarFuture(expiresAt, new Date());
   return {
     expiresAt,
-    message: `OA connected to Desk. Expires at ${formatChicago(expiresAt)} (${formatHoursUntil(expiresAt, new Date())}).`,
+    message:
+      `OA connected to Desk. Expires at ${formatChicago(expiresAt)} (${formatHoursUntil(expiresAt, new Date())}).` +
+      (suspicious ? FAR_EXPIRY_NOTE : ""),
   };
 }
 
-export async function clearOaToken(actor: string): Promise<void> {
+export async function clearOaToken(actor: string, auditExtra?: Record<string, unknown>): Promise<void> {
   await ensureOaVaultTables();
   const rows = await db
     .select({ id: connections.id, meta: connections.meta })
@@ -278,7 +319,7 @@ export async function clearOaToken(actor: string): Promise<void> {
     .limit(1);
   const row = rows[0];
   if (!row) {
-    await writeOaAudit("oa_token_clear", actor, { note: "no row" });
+    await writeOaAudit("oa_token_clear", actor, { note: "no row", ...auditExtra });
     return;
   }
   const prev = (row.meta as Record<string, unknown> | undefined) ?? {};
@@ -293,7 +334,7 @@ export async function clearOaToken(actor: string): Promise<void> {
       updatedAt: new Date(),
     })
     .where(eq(connections.id, row.id));
-  await writeOaAudit("oa_token_clear", actor, { note: "ciphertext replaced" });
+  await writeOaAudit("oa_token_clear", actor, { note: "ciphertext replaced", ...auditExtra });
 }
 
 export async function markOaProbeOk(): Promise<void> {

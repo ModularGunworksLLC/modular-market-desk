@@ -10,6 +10,7 @@ interface StatusPayload {
   state?: OaConnectionState;
   message?: string;
   connectHref?: string;
+  expSuspicious?: boolean;
 }
 
 const TONE: Record<OaConnectionState, string> = {
@@ -46,14 +47,18 @@ export function OaStatusBanner() {
   }, []);
 
   if (!status?.message || !status.state) return null;
-  const tone = TONE[status.state] ?? TONE.not_connected;
+  const tone =
+    status.expSuspicious && status.state === "connected"
+      ? TONE.expiring_soon
+      : (TONE[status.state] ?? TONE.not_connected);
   const href = status.connectHref || "/import#connect-oa";
+  const showLink = status.state !== "connected" || Boolean(status.expSuspicious);
 
   return (
     <div className={`border-b px-4 py-2 text-sm ${tone}`}>
       <div className="mx-auto flex max-w-[1800px] flex-wrap items-center justify-between gap-2">
         <p>{status.message}</p>
-        {status.state !== "connected" && (
+        {showLink && (
           <Link href={href} className="text-xs font-semibold text-desk-accent hover:underline">
             Connect OA
           </Link>

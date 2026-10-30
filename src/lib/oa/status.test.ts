@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  expIsFarFuture,
   formatChicago,
   formatHoursUntil,
   liveTokenBlocked,
@@ -92,5 +93,7 @@ describe("OA connection state", () => {
     expect(oaBannerTone("expiring_soon")).toBe("warn");
     expect(oaBannerTone("expired")).toBe("bad");
     expect(oaBannerTone("unauthorized")).toBe("bad");
+    expect(expIsFarFuture(new Date(now.getTime() + 40 * 24 * 3600 * 1000), now)).toBe(true);
+    expect(expIsFarFuture(new Date(now.getTime() + 2 * 24 * 3600 * 1000), now)).toBe(false);
   });
 });

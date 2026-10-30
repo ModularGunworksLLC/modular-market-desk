@@ -6,7 +6,15 @@ import { revokeConnectionAction, saveConnection, type ActionResult } from "@/lib
 import type { ConnectionView } from "@/lib/import/types";
 import { timeAgo } from "@/lib/format";
 
-export function ConnectionVault({ connections }: { connections: ConnectionView[] }) {
+export function ConnectionVault({
+  connections,
+  confirmRequired = false,
+  confirmLabel = "Desk secret",
+}: {
+  connections: ConnectionView[];
+  confirmRequired?: boolean;
+  confirmLabel?: string;
+}) {
   const [state, formAction, pending] = useActionState<ActionResult | null, FormData>(saveConnection, null);
 
   return (
@@ -38,8 +46,18 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
                   {c.status}
                 </span>
                 {c.status === "active" && (
-                  <form action={revokeConnectionAction}>
+                  <form action={revokeConnectionAction} className="flex items-center gap-2">
                     <input type="hidden" name="id" value={c.id} />
+                    {confirmRequired && c.vendor === "outdoor_analytics" && (
+                      <input
+                        type="password"
+                        name="confirmSecret"
+                        autoComplete="current-password"
+                        placeholder={confirmLabel}
+                        aria-label={confirmLabel}
+                        className="w-36 rounded border border-desk-border bg-desk-panel px-2 py-1 font-mono text-[11px]"
+                      />
+                    )}
                     <button className="text-xs text-desk-muted hover:text-desk-nogo">Revoke</button>
                   </form>
                 )}
@@ -104,6 +122,18 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
             placeholder="OA bearer, Chattanooga API_TOKEN, or cookie string..."
           />
         </div>
+        {confirmRequired && (
+          <div>
+            <label className="field-label">{confirmLabel} (required to save Outdoor Analytics)</label>
+            <input
+              className="field-input font-mono text-xs"
+              type="password"
+              name="confirmSecret"
+              autoComplete="current-password"
+              placeholder="Re-enter to confirm this write"
+            />
+          </div>
+        )}
         <div>
           <label className="field-label">Expires (optional override)</label>
           <input className="field-input" type="datetime-local" name="expiresAt" />

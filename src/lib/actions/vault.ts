@@ -5,8 +5,10 @@ import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
 import { connections } from "@/lib/db/schema";
-import { authorizeDeskRequest, DESK_AUTH_COOKIE, deskAuthEnabled } from "@/lib/desk-auth";
+import { DESK_AUTH_COOKIE, matchDeskCredential } from "@/lib/desk-auth";
+import { authorizeOaWrite } from "@/lib/oa/desk-write-auth";
 import { decodeJwtExp } from "@/lib/oa/jwt";
+import { oaClientMeta } from "@/lib/oa/request-meta";
 import { clearOaToken, writeOaAudit } from "@/lib/oa/vault-store";
 import { encryptSecret, normalizeVaultSecret, redactLiteral, redactSecrets } from "@/lib/vault";
 
@@ -34,13 +36,23 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
   }
   if (!secret) return { ok: false, message: "Paste a token or session string." };
 
-  const actor = await deskActor();
-  if (actor == null) {
-    if (vendor === "outdoor_analytics") {
-      await writeOaAudit("oa_token_failed_attempt", "anonymous", { reason: "unauthenticated", source: "manual" }).catch(
-        () => undefined,
-      );
+  const confirmSecret = String(formData.get("confirmSecret") ?? "");
+  let actor = await deskActor();
+  let auditMeta: { ip: string | null; ua: string | null } = { ip: null, ua: null };
+  if (vendor === "outdoor_analytics" && kindRaw === "market_api") {
+    const gated = await oaWriteFromAction(confirmSecret);
+    auditMeta = gated.meta;
+    if (!gated.decision.ok) {
+      await writeOaAudit("oa_token_failed_attempt", "anonymous", {
+        reason: gated.decision.reason,
+        source: "manual",
+        ip: auditMeta.ip,
+        ua: auditMeta.ua,
+      }).catch(() => undefined);
+      return { ok: false, message: gated.decision.message };
     }
+    actor = gated.decision.actor;
+  } else if (actor == null) {
     return { ok: false, message: "Unauthorized." };
   }
 
@@ -104,6 +116,8 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
         source: "manual",
         expiresAt: expiresAt ? expiresAt.toISOString() : null,
         expirySource: manualExpiry && !Number.isNaN(manualExpiry.getTime()) ? "manual" : jwtExpiry ? "jwt" : "none",
+        ip: auditMeta.ip,
+        ua: auditMeta.ua,
       });
     }
     revalidatePath("/import");
@@ -111,7 +125,12 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
   } catch (err) {
     const message = redactLiteral(redactSecrets(err instanceof Error ? err.message : "Save failed."), normalized);
     if (vendor === "outdoor_analytics") {
-      await writeOaAudit("oa_token_failed_attempt", actor, { reason: "save_failed", source: "manual" }).catch(
+      await writeOaAudit("oa_token_failed_attempt", actor ?? "anonymous", {
+        reason: "save_failed",
+        source: "manual",
+        ip: auditMeta.ip,
+        ua: auditMeta.ua,
+      }).catch(
         () => undefined,
       );
     }
@@ -119,9 +138,7 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
   }
 }
 
-export async function revokeConnection(id: string): Promise<ActionResult> {
-  const actor = await deskActor();
-  if (actor == null) return { ok: false, message: "Unauthorized." };
+export async function revokeConnection(id: string, confirmSecret = ""): Promise<ActionResult> {
   try {
     const rows = await db
       .select({ vendor: connections.vendor, kind: connections.kind })
@@ -130,8 +147,20 @@ export async function revokeConnection(id: string): Promise<ActionResult> {
       .limit(1);
     const row = rows[0];
     if (row?.vendor === "outdoor_analytics" && row.kind === "market_api") {
-      await clearOaToken(actor);
+      const gated = await oaWriteFromAction(confirmSecret);
+      if (!gated.decision.ok) {
+        await writeOaAudit("oa_token_failed_attempt", "anonymous", {
+          reason: gated.decision.reason,
+          source: "manual",
+          ip: gated.meta.ip,
+          ua: gated.meta.ua,
+        }).catch(() => undefined);
+        return { ok: false, message: gated.decision.message };
+      }
+      await clearOaToken(gated.decision.actor, { ip: gated.meta.ip, ua: gated.meta.ua, source: "manual" });
     } else {
+      const actor = await deskActor();
+      if (actor == null) return { ok: false, message: "Unauthorized." };
       await db
         .update(connections)
         .set({ status: "revoked", updatedAt: new Date() })
@@ -144,22 +173,48 @@ export async function revokeConnection(id: string): Promise<ActionResult> {
   }
 }
 
-async function deskActor(): Promise<string | null> {
+async function requestBits(): Promise<{
+  cookieToken: string | null;
+  authorizationHeader: string | null;
+  origin: string | null;
+  meta: { ip: string | null; ua: string | null };
+}> {
   const { cookies, headers } = await import("next/headers");
   const jar = await cookies();
   const hdrs = await headers();
-  const ok = await authorizeDeskRequest({
-    cookieToken: jar.get(DESK_AUTH_COOKIE)?.value,
+  return {
+    cookieToken: jar.get(DESK_AUTH_COOKIE)?.value ?? null,
     authorizationHeader: hdrs.get("authorization"),
+    origin: hdrs.get("origin"),
+    meta: oaClientMeta(hdrs),
+  };
+}
+
+async function oaWriteFromAction(confirmSecret: string) {
+  const bits = await requestBits();
+  const decision = await authorizeOaWrite({
+    cookieToken: bits.cookieToken,
+    authorizationHeader: bits.authorizationHeader,
+    origin: bits.origin,
+    confirmSecret,
   });
-  if (!ok) return null;
-  if (!deskAuthEnabled()) return "desk-open";
-  const auth = hdrs.get("authorization") ?? "";
-  return auth.toLowerCase().startsWith("bearer ") ? "desk-bearer" : "desk-session";
+  return { decision, meta: bits.meta };
+}
+
+async function deskActor(): Promise<string | null> {
+  const bits = await requestBits();
+  const match = await matchDeskCredential({
+    cookieToken: bits.cookieToken,
+    authorizationHeader: bits.authorizationHeader,
+  });
+  if (match === "none") return null;
+  if (match === "open") return "desk-open";
+  return match === "bearer" ? "desk-bearer" : "desk-session";
 }
 
 /** Form-action wrapper: reads the connection id from the submitted form. */
 export async function revokeConnectionAction(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "").trim();
-  if (id) await revokeConnection(id);
+  const confirmSecret = String(formData.get("confirmSecret") ?? "");
+  if (id) await revokeConnection(id, confirmSecret);
 }

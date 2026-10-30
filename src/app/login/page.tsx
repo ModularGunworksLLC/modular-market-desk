@@ -3,6 +3,8 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
 
+import { safeInternalPath } from "@/lib/safe-next";
+
 function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
@@ -26,7 +28,7 @@ function LoginForm() {
         setError(body.error || "Login failed");
         return;
       }
-      router.replace(next.startsWith("/") ? next : "/");
+      router.replace(safeInternalPath(next));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");

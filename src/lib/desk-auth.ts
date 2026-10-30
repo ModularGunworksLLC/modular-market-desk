@@ -57,7 +57,7 @@ export async function sessionTokenValid(
   return timingSafeEqualHex(token, expected);
 }
 
-function secretsMatch(a: string, b: string): boolean {
+export function secretsMatch(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) {
@@ -66,20 +66,36 @@ function secretsMatch(a: string, b: string): boolean {
   return diff === 0;
 }
 
+export type DeskCredentialMatch = "cookie" | "bearer" | "none" | "open";
+
+/**
+ * Which credential actually matched. A Bearer prefix is not a match until the
+ * value compares equal to the secret. `open` means DESK_AUTH_SECRET is unset
+ * (the rest of the desk still fails open; OA writes do not).
+ */
+export async function matchDeskCredential(opts: {
+  cookieToken?: string | null;
+  authorizationHeader?: string | null;
+}): Promise<DeskCredentialMatch> {
+  const secret = deskAuthSecret();
+  if (!secret) return "open";
+
+  const auth = opts.authorizationHeader?.trim() ?? "";
+  let bearerOk = false;
+  if (auth.toLowerCase().startsWith("bearer ")) {
+    bearerOk = secretsMatch(auth.slice(7).trim(), secret);
+  }
+  if (bearerOk) return "bearer";
+  if (await sessionTokenValid(opts.cookieToken, secret)) return "cookie";
+  return "none";
+}
+
 /** Accept cookie session OR `Authorization: Bearer <DESK_AUTH_SECRET>` (for scripts). */
 export async function authorizeDeskRequest(opts: {
   cookieToken?: string | null;
   authorizationHeader?: string | null;
 }): Promise<boolean> {
-  const secret = deskAuthSecret();
-  if (!secret) return true;
-
-  if (await sessionTokenValid(opts.cookieToken, secret)) return true;
-
-  const auth = opts.authorizationHeader?.trim() ?? "";
-  if (auth.toLowerCase().startsWith("bearer ")) {
-    const presented = auth.slice(7).trim();
-    if (secretsMatch(presented, secret)) return true;
-  }
-  return false;
+  const match = await matchDeskCredential(opts);
+  if (match === "open") return true;
+  return match === "cookie" || match === "bearer";
 }

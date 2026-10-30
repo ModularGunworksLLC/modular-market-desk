@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeJwtExp } from "@/lib/oa/jwt";
+import { decodeJwtExp, jwtShapeOk } from "@/lib/oa/jwt";
 
 function fakeJwt(payload: unknown, header: unknown = { alg: "none", typ: "JWT" }): string {
   const enc = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -12,6 +12,12 @@ describe("decodeJwtExp", () => {
     const exp = 1_800_000_000;
     const date = decodeJwtExp(fakeJwt({ exp, sub: "fake-oa-test" }));
     expect(date?.toISOString()).toBe(new Date(exp * 1000).toISOString());
+  });
+
+  it("rejects a token that is not three bounded base64url segments", () => {
+    expect(jwtShapeOk(fakeJwt({ exp: 1_800_000_000 }))).toBe(true);
+    expect(jwtShapeOk("not-a-jwt")).toBe(false);
+    expect(jwtShapeOk(`${"a".repeat(9000)}.bbb.ccc`)).toBe(false);
   });
 
   it("returns null for malformed tokens and does not throw", () => {

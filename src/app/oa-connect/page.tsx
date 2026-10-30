@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { oaAdminConfirmConfig } from "@/lib/oa/admin-confirm";
 import { oaMessageOrigins } from "@/lib/oa/config";
 
 import { OaConnectClient } from "./OaConnectClient";
@@ -13,5 +14,12 @@ export const metadata: Metadata = {
 };
 
 export default function OaConnectPage() {
-  return <OaConnectClient allowedOrigins={oaMessageOrigins()} />;
+  const confirm = oaAdminConfirmConfig();
+  return (
+    <OaConnectClient
+      allowedOrigins={oaMessageOrigins()}
+      confirmRequired={confirm.required}
+      confirmLabel={confirm.label}
+    />
+  );
 }

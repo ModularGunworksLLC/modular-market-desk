@@ -4,6 +4,17 @@
  * instant the portal already put in the payload. Malformed input returns null.
  */
 
+export const OA_TOKEN_MAX_CHARS = 8192;
+export const OA_BODY_MAX_CHARS = 8192;
+
+/** Three base64url segments, bounded so a multi-megabyte body cannot be stored. */
+export function jwtShapeOk(token: string): boolean {
+  if (token.length === 0 || token.length > OA_TOKEN_MAX_CHARS) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  return parts.every((part) => part.length > 0 && /^[A-Za-z0-9_-]+$/.test(part));
+}
+
 export function decodeJwtExp(token: string): Date | null {
   try {
     const parts = token.split(".");
@@ -25,6 +36,8 @@ export function decodeJwtExp(token: string): Date | null {
 function decodeBase64UrlJson(segment: string): unknown {
   const pad = segment.length % 4 === 0 ? "" : "=".repeat(4 - (segment.length % 4));
   const b64 = segment.replace(/-/g, "+").replace(/_/g, "/") + pad;
-  const json = Buffer.from(b64, "base64").toString("utf8");
+  const binary = atob(b64);
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  const json = new TextDecoder().decode(bytes);
   return JSON.parse(json) as unknown;
 }

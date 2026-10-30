@@ -9,8 +9,10 @@ import {
 import type { CsvPreset } from "@/lib/db/schema";
 import { intFmt, timeAgo, usd } from "@/lib/format";
 
+import { oaAdminConfirmConfig } from "@/lib/oa/admin-confirm";
 import { bookmarkletOptionsFromEnv, buildOaBookmarkletHref } from "@/lib/oa/bookmarklet";
 import { DEFAULT_OA_SESSION_STORAGE_KEY } from "@/lib/oa/config";
+import { localTestPageEnabled } from "@/lib/oa/dev-only";
 
 import { CatalogSync } from "./CatalogSync";
 import { CatalogUploader } from "./CatalogUploader";
@@ -40,6 +42,8 @@ export default async function ImportDashboard() {
   const dbError = summaries.error ?? presets.error ?? conns.error;
   const vendorOptions = presets.data.map((p) => ({ value: p.vendorName, label: p.label }));
   const bookmarklet = bookmarkletOptionsFromEnv();
+  const confirm = oaAdminConfirmConfig();
+  const showMockPage = localTestPageEnabled(new URL(bookmarklet.deskOrigin).hostname, process.env.NODE_ENV);
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
@@ -59,6 +63,9 @@ export default async function ImportDashboard() {
           storageKey={bookmarklet.storageKey}
           deskOrigin={bookmarklet.deskOrigin}
           keyVerifiedInBundle={bookmarklet.storageKey === DEFAULT_OA_SESSION_STORAGE_KEY}
+          showMockPage={showMockPage}
+          confirmRequired={confirm.required}
+          confirmLabel={confirm.label}
         />
       </div>
 
@@ -120,7 +127,11 @@ export default async function ImportDashboard() {
         <CatalogSync />
 
         {/* Session Vault */}
-        <ConnectionVault connections={conns.data} />
+        <ConnectionVault
+          connections={conns.data}
+          confirmRequired={confirm.required}
+          confirmLabel={confirm.label}
+        />
 
         {/* Outdoor Analytics full brand/model catalog */}
         <OaCatalogSync />

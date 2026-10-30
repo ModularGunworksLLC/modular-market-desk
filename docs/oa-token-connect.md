@@ -17,13 +17,13 @@ The bookmark is a `javascript:` link. Its only hard-coded destination is `DESK_P
 1. Sign in to Desk in the browser you will use (the popup needs that session).
 2. Sign in to [Outdoor Analytics](https://hub.outdooranalytics.com) through GunBroker.
 3. Click the **Connect OA** bookmark while that OA tab is focused.
-4. A Desk window opens at `/oa-connect`. If it shows the Desk login, sign in. The bookmark keeps trying for about a minute.
+4. A Desk window opens at `/oa-connect`. It shows the expiry time and does **not** save until you click **Save**. Re-enter the Desk secret (or `OA_ADMIN_SECRET` if that is set). If the window shows the Desk login, sign in and click the bookmark again. The bookmark waits about two minutes.
 5. The OA tab shows a green or red banner. The banner never includes the token.
 6. Evaluate, Batch, and Import show the expiry banner at the top.
 
 If OA has no session, the banner says to sign in to Outdoor Analytics first. Nothing is sent.
 
-**Clear** and **Re-check token** are on the same Import card. Clear destroys the stored ciphertext (it is replaced, not left revoked-but-readable). Re-check calls OA once and updates the banner.
+**Clear** and **Re-check token** are on the same Import card. Clear asks for the same confirmation secret and destroys the stored ciphertext (it is replaced, not left revoked-but-readable). Re-check is a POST and calls OA once. If `GBA_BEARER_TOKEN` is set, sync keeps using that env token after Clear, and the banner says so.
 
 The old paste box on Import still works. Leave **Expires** blank and Desk reads `exp` from the JWT. Fill Expires only to override that time.
 
@@ -51,14 +51,18 @@ The weekly sync does not swallow an auth failure. The Import weekly card shows a
 
 - **Popup + `postMessage`, not a cross-origin fetch.** Checked 2026-10-30: `https://hub.outdooranalytics.com/` returned no `Content-Security-Policy` header and no CSP meta tag, so a bookmarklet is not blocked by CSP today and a `fetch` would not be blocked by `connect-src` either. Fetch is still the wrong tool. The Desk cookie is `SameSite=Lax`, so a cross-origin POST from OA would not send it. Opening `/oa-connect` is a top-level navigation, so the cookie is sent. The token moves in a `postMessage` body to that window. The Desk page then POSTs it to `/api/vault/oa` on the Desk origin.
 - The API rejects any `Origin` that is not the Desk origin, including `https://hub.outdooranalytics.com`. There is no CORS allow-list and no unauthenticated write.
-- Missing `Origin` is accepted only with `Authorization: Bearer <DESK_AUTH_SECRET>` (scripts). A cookie-only POST without `Origin` is rejected.
-- Desk has no role table. Set and clear use the same shared-secret gate as `/import` (`DESK_AUTH_SECRET` cookie session or bearer).
-- The token stays AES-256-GCM with `SESSION_VAULT_KEY`. The ciphertext format is unchanged.
-- `exp` is base64url-decoded. The signature is not verified.
-- `audit_log` records actor, time, and action (`oa_token_set`, `oa_token_clear`, `oa_token_failed_attempt`). The token is not stored. Responses and error strings run through redaction.
-- The connect page sends `Referrer-Policy: no-referrer`. The token is not placed in the URL, so it is not in history or in the request line of an access log.
+- Missing `Origin` is accepted only when the bearer value itself matches `DESK_AUTH_SECRET` (constant-time). A cookie plus `Authorization: Bearer junk` and no Origin is rejected. The audit actor is the credential that matched, not the header prefix.
+- Production refuses OA writes when `DESK_AUTH_SECRET` is unset (403), unless the configured Desk origin is loopback. Local dev (`NODE_ENV` not `production`) can still write without that secret.
+- Every set/clear also re-prompts. By default that is `DESK_AUTH_SECRET` again. If `OA_ADMIN_SECRET` is set, that value is required instead, so a Desk session alone cannot write. Web PM is confirming who holds the secret; switch by setting or unsetting `OA_ADMIN_SECRET`. No code change.
+- The popup accepts a `postMessage` only from `window.opener` and only from an allowed origin. It does not save until **Save** is clicked.
+- `/import` and `/oa-connect` send `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`. Referrer-Policy is `no-referrer` on every page.
+- The token stays AES-256-GCM with `SESSION_VAULT_KEY`. The ciphertext format is unchanged. Request bodies are capped at 8 KB and must be `application/json`.
+- `exp` is base64url-decoded. The signature is not verified. An `exp` more than 30 days out is stored but the banner marks it suspicious.
+- `audit_log` records actor, time, action (`oa_token_set`, `oa_token_clear`, `oa_token_failed_attempt`), `X-Real-IP`, and a truncated user agent. The token is not stored. The table keeps the newest 500 rows.
+- Failed attempts that reach the route (bad origin, bad confirm, malformed token) are audited. Anonymous requests blocked by middleware never reach the route, so they are not audited. That avoids filling the log from the public internet.
+- `public/oa-mock.html` is served only when `NODE_ENV` is not production, or the host is loopback.
 
-Actor is `desk-session`, `desk-bearer`, or `desk-open` (auth disabled). There is no per-person id in the v1 gate.
+Actor is `desk-session`, `desk-bearer`, or `desk-open` (local dev with no secret). There is still no per-person id. IP and user agent are the extra "who" fields.
 
 ## Session storage key
 
@@ -75,7 +79,9 @@ Verified 2026-10-30 from the public bundle `https://hub.outdooranalytics.com/mai
 | `OA_SESSION_STORAGE_KEY` | Key read on the OA page | `gb_session_token` |
 | `OA_EXPIRY_WARN_HOURS` | Amber banner threshold | `2` |
 | `SESSION_VAULT_KEY` | Existing AES-256-GCM key | required |
-| `DESK_AUTH_SECRET` | Existing desk gate | empty disables the gate (local only) |
+| `DESK_AUTH_SECRET` | Desk gate. Also the default re-prompt for OA set/clear | empty disables the gate for the rest of Desk; OA writes still refuse in production |
+| `OA_ADMIN_SECRET` | If set, set/clear require this instead of re-entering the Desk secret | unset (re-prompt `DESK_AUTH_SECRET`) |
+| `GBA_BEARER_TOKEN` | Optional sync override. Clear does not remove it | unset |
 
 Loopback origins (`http://127.0.0.1`, `http://localhost`) may use http so local dev works. Any other http origin is refused. When the Desk origin is loopback, that origin may also `postMessage` so the mock page can run. Production does not allow that.
 
@@ -119,12 +125,35 @@ The mock page is not Outdoor Analytics. It only proves the handoff. Do not put a
 - [ ] Weekly sync is left to fail visibly if the token is rejected. Do not hide that error.
 - [ ] `/api/trade-in/estimate` is unchanged and stays public.
 
+## Security review fixes
+
+Review of `20cfdf5` (GO after must-fixes). Mapping:
+
+| Finding | Status |
+| --- | --- |
+| M1 Bearer prefix / fail-open writes | Fixed. Bearer value is compared to the secret. Actor comes from the match. Production OA writes fail closed when the secret is unset. |
+| M2 Silent save / no `event.source` check | Fixed. Message must come from `window.opener`. Save is a click after the Chicago expiry is shown. |
+| M3 No admin identity | Fixed as a config choice. Default re-prompt of `DESK_AUTH_SECRET`. `OA_ADMIN_SECRET` switches the re-prompt. Audit stores `X-Real-IP` and a truncated user agent, never the token. |
+| M4 Missing regression tests | Fixed. Cookie + junk bearer + no Origin, production with no secret, forged `event.source`, and no save before the confirm phase. Redaction tests kept. |
+| N1 Body cap | Fixed. 8 KB JSON only. |
+| N2 Far `exp` | Fixed. Flagged on the banner when more than 30 days out. It does not authorize anything. |
+| N3 Probe on GET | Fixed. Probe is `POST /api/vault/status` with the origin gate and a per-minute limit. |
+| N4 Framing headers | Fixed. `frame-ancestors 'none'` and `X-Frame-Options: DENY` on `/import` and `/oa-connect`. Global `Referrer-Policy: no-referrer`. |
+| N5 Mock page in production | Fixed. Middleware 404s `/oa-mock.html` on a production non-loopback host. The Import link is hidden the same way. |
+| N6 Bookmarklet result source | Fixed. Result listener requires `ev.source === popup`. |
+| N7 `GBA_BEARER_TOKEN` | Fixed. Banner states that sync keeps using the env token after Clear. |
+| N8 Failed-attempt audit claim | Fixed in this doc. Middleware 401s are not audited. Route-level failures are. Audit rows are capped at 500. |
+| N9 `//evil` login redirect | Fixed. `next` must be a same-origin path. `//` and `/\` are rejected. |
+| N10 Drizzle journal gap | Not closed by inserting `0003`/`0004`. Those files use `ALTER TABLE ADD COLUMN`, which is not idempotent, and live databases already have the columns from `ensure*`. `drizzle-kit migrate` applies journal idx 0–3 (`0000`, `0001`, `0002`, `0005_oa_audit_log`) on a fresh database. `ensureOaVaultTables()` still creates `audit_log` at runtime. |
+| N11 Repo visibility | Not in this PR. Making the GitHub repo private is a settings change, not a code change. |
+
 ## Known limits
 
 - A revoked token whose `exp` is still in the future stays "connected" until something actually calls OA. Batch does that once at the start of a sheet. Evaluate uses the local cache first and does not call OA when that cache already has sold comps, so it will not discover a new 401 by itself. Use **Re-check token**, Batch, or the weekly sync to flip the banner to unauthorized.
 - The bookmarklet was checked against the public OA page (no CSP, and `sessionStorage.getItem("gb_session_token")` in the bundle). It was not clicked on a signed-in OA session.
 - Firefox can block bookmarklets when a page later adds a strict `script-src`. Chrome currently runs them. If OA adds a CSP that blocks the bookmarklet, the fallback is to paste the token on Import.
-- Desk auth is one shared secret. The audit actor is the auth method, not a person's name.
+- Desk auth is still one shared secret. The audit actor is the auth method plus `X-Real-IP` and a truncated user agent, not a person's name. Set `OA_ADMIN_SECRET` if a Desk session must not be enough to write the vault.
+- This branch is still based on `feature/sidekick`. AWS found the live Desk is newer (62 files differ, 37 live-only). Rebase onto an exported copy of that tree before any deploy. Do not deploy from this branch as-is.
 
 ## Automated tests
 

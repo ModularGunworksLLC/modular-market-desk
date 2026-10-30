@@ -7,20 +7,31 @@ export function ConnectOaCard({
   storageKey,
   deskOrigin,
   keyVerifiedInBundle,
+  showMockPage,
+  confirmRequired,
+  confirmLabel,
 }: {
   bookmarkletHref: string;
   storageKey: string;
   deskOrigin: string;
   keyVerifiedInBundle: boolean;
+  showMockPage: boolean;
+  confirmRequired: boolean;
+  confirmLabel: string;
 }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<"clear" | "probe" | null>(null);
+  const [confirmSecret, setConfirmSecret] = useState("");
 
   async function clearToken() {
     setPending("clear");
     setNotice(null);
     try {
-      const res = await fetch("/api/vault/oa", { method: "DELETE" });
+      const res = await fetch("/api/vault/oa", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmSecret }),
+      });
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
       setNotice(body?.message || (res.ok ? "OA token cleared." : "Could not clear the OA token."));
       window.dispatchEvent(new Event("desk-oa-status-changed"));
@@ -35,7 +46,7 @@ export function ConnectOaCard({
     setPending("probe");
     setNotice(null);
     try {
-      const res = await fetch("/api/vault/status?probe=1", { cache: "no-store" });
+      const res = await fetch("/api/vault/status", { method: "POST", cache: "no-store" });
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
       setNotice(body?.message || "OA status updated.");
       window.dispatchEvent(new Event("desk-oa-status-changed"));
@@ -51,8 +62,9 @@ export function ConnectOaCard({
       <h2 className="mb-1 text-sm font-semibold text-desk-text">Connect OA</h2>
       <p className="mb-3 text-xs text-desk-muted">
         Drag <span className="text-desk-text">Connect OA</span> to the bookmarks bar once. Sign in at
-        hub.outdooranalytics.com, then click the bookmark. Desk stores the session encrypted and reads
-        the expiry from the token. This link is locked to <span className="font-mono">{deskOrigin}</span>.
+        hub.outdooranalytics.com, then click the bookmark. The Desk window asks you to click Save
+        {confirmRequired ? ` and re-enter the ${confirmLabel}` : ""}. It does not store the token until
+        you do. This link is locked to <span className="font-mono">{deskOrigin}</span>.
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <a
@@ -79,6 +91,17 @@ export function ConnectOaCard({
         >
           {pending === "probe" ? "Checking…" : "Re-check token"}
         </button>
+        {confirmRequired && (
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={confirmSecret}
+            onChange={(e) => setConfirmSecret(e.target.value)}
+            placeholder={confirmLabel}
+            aria-label={confirmLabel}
+            className="rounded-md border border-desk-border bg-desk-panel px-2 py-2 font-mono text-xs"
+          />
+        )}
         <button
           type="button"
           onClick={() => void clearToken()}
@@ -87,9 +110,11 @@ export function ConnectOaCard({
         >
           {pending === "clear" ? "Clearing…" : "Clear OA token"}
         </button>
-        <a href="/oa-mock.html" className="text-xs text-desk-accent hover:underline">
-          Local test page
-        </a>
+        {showMockPage && (
+          <a href="/oa-mock.html" className="text-xs text-desk-accent hover:underline">
+            Local test page
+          </a>
+        )}
       </div>
       <p className="mt-3 text-[11px] text-desk-muted">
         Session key <code>{storageKey}</code>
