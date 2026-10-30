@@ -17,7 +17,7 @@ import { authorizeOaWriteRequest } from "@/lib/oa/desk-write-auth";
 import { OA_BODY_MAX_CHARS } from "@/lib/oa/jwt";
 import { oaClientMeta } from "@/lib/oa/request-meta";
 import { OaSaveError, clearOaToken, saveOaToken, writeOaAudit } from "@/lib/oa/vault-store";
-import { rateLimitOk } from "@/lib/trade-in/rate-limit";
+import { rateLimitDecision } from "@/lib/trade-in/rate-limit";
 import { redactLiteral } from "@/lib/vault";
 
 export const runtime = "nodejs";
@@ -73,8 +73,11 @@ async function writeToken(
 ): Promise<NextResponse> {
   const meta = oaClientMeta(request.headers);
   const ipKey = meta.ip ?? "unknown";
-  if (!rateLimitOk(`oa-write:${ipKey}`, WRITE_LIMIT, WRITE_WINDOW_MS)) {
-    await auditFailure("anonymous", "rate_limited", request);
+  const limit = rateLimitDecision(`oa-write:${ipKey}`, WRITE_LIMIT, WRITE_WINDOW_MS);
+  if (!limit.ok) {
+    if (limit.firstRejection) {
+      await auditFailure("anonymous", "rate_limited", request);
+    }
     return NextResponse.json({ ok: false, message: "Too many OA token writes. Wait a minute and try again." }, { status: 429 });
   }
 
@@ -127,27 +130,58 @@ async function readJsonLimited(
   request: Request,
 ): Promise<{ ok: true; value: unknown } | { ok: false; status: number; message: string }> {
   const ct = request.headers.get("content-type") ?? "";
-  if (!ct.toLowerCase().includes("application/json")) {
+  const media = ct.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (media !== "application/json") {
     return { ok: false, status: 415, message: "Content-Type must be application/json." };
   }
-  const declared = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(declared) && declared > OA_BODY_MAX_CHARS) {
-    return { ok: false, status: 413, message: "Request body is too large." };
+  const declaredRaw = request.headers.get("content-length");
+  if (declaredRaw != null && declaredRaw !== "") {
+    const declared = Number(declaredRaw);
+    if (!Number.isFinite(declared) || declared < 0 || declared > OA_BODY_MAX_CHARS) {
+      return { ok: false, status: 413, message: "Request body is too large." };
+    }
   }
-  let text = "";
-  try {
-    text = await request.text();
-  } catch {
-    return { ok: false, status: 400, message: "Could not read the request body." };
-  }
-  if (text.length > OA_BODY_MAX_CHARS) {
-    return { ok: false, status: 413, message: "Request body is too large." };
-  }
+  const capped = await readBodyCapped(request, OA_BODY_MAX_CHARS);
+  if (!capped.ok) return capped;
+  const text = capped.text;
   try {
     return { ok: true, value: JSON.parse(text) as unknown };
   } catch {
     return { ok: false, status: 400, message: "Invalid JSON." };
   }
+}
+
+async function readBodyCapped(
+  request: Request,
+  max: number,
+): Promise<{ ok: true; text: string } | { ok: false; status: number; message: string }> {
+  const body = request.body;
+  if (!body) return { ok: true, text: "" };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > max) {
+        await reader.cancel();
+        return { ok: false, status: 413, message: "Request body is too large." };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, status: 400, message: "Could not read the request body." };
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, text: new TextDecoder().decode(merged) };
 }
 
 function readConfirm(body: unknown): string | null {

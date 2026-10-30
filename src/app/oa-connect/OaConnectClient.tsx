@@ -16,6 +16,8 @@ export function OaConnectClient({
   const tokenRef = useRef<string | null>(null);
   const replyOrigin = useRef<string | null>(null);
   const [phase, setPhase] = useState<"waiting" | "confirm" | "saving" | "done">("waiting");
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
   const [preview, setPreview] = useState<HandoffPreview | null>(null);
   const [confirmSecret, setConfirmSecret] = useState("");
   const [message, setMessage] = useState("Waiting for Outdoor Analytics…");
@@ -23,6 +25,7 @@ export function OaConnectClient({
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
+      if (phaseRef.current === "saving" || phaseRef.current === "done") return;
       const token = acceptHandoffMessage({
         origin: event.origin,
         source: event.source,
@@ -48,7 +51,7 @@ export function OaConnectClient({
   }, [allowedOrigins]);
 
   async function onSave() {
-    if (!canSave(phase)) return;
+    if (!canSave(phaseRef.current)) return;
     const token = tokenRef.current;
     if (!token || preview?.malformed) return;
     if (confirmRequired && !confirmSecret.trim()) {
@@ -56,6 +59,7 @@ export function OaConnectClient({
       setOk(false);
       return;
     }
+    phaseRef.current = "saving";
     setPhase("saving");
     setMessage("Saving to the Session Vault…");
     let result = { ok: false, message: "OA connect failed." };

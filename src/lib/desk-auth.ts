@@ -57,13 +57,14 @@ export async function sessionTokenValid(
   return timingSafeEqualHex(token, expected);
 }
 
-export function secretsMatch(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
+/**
+ * Compare two strings without leaking length. HMAC both under a fixed key and
+ * compare the equal-length digests. The key is not a secret; it only forces
+ * a fixed-size compare.
+ */
+export async function secretsMatch(a: string, b: string): Promise<boolean> {
+  const [left, right] = await Promise.all([hmacHex("mmd-secret-eq", a), hmacHex("mmd-secret-eq", b)]);
+  return timingSafeEqualHex(left, right);
 }
 
 export type DeskCredentialMatch = "cookie" | "bearer" | "none" | "open";
@@ -83,7 +84,7 @@ export async function matchDeskCredential(opts: {
   const auth = opts.authorizationHeader?.trim() ?? "";
   let bearerOk = false;
   if (auth.toLowerCase().startsWith("bearer ")) {
-    bearerOk = secretsMatch(auth.slice(7).trim(), secret);
+    bearerOk = await secretsMatch(auth.slice(7).trim(), secret);
   }
   if (bearerOk) return "bearer";
   if (await sessionTokenValid(opts.cookieToken, secret)) return "cookie";

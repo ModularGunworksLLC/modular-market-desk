@@ -43,7 +43,7 @@ export default async function ImportDashboard() {
   const vendorOptions = presets.data.map((p) => ({ value: p.vendorName, label: p.label }));
   const bookmarklet = bookmarkletOptionsFromEnv();
   const confirm = oaAdminConfirmConfig();
-  const showMockPage = localTestPageEnabled(new URL(bookmarklet.deskOrigin).hostname, process.env.NODE_ENV);
+  const showMockPage = localTestPageEnabled(process.env.NODE_ENV, process.env.OA_MOCK_PAGE);
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">

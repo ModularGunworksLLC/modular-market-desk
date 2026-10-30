@@ -12,17 +12,15 @@ const nextConfig = {
     middlewareClientMaxBodySize: "50mb",
   },
   async headers() {
-    const noFrame = [
-      { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
-      { key: "X-Frame-Options", value: "DENY" },
-    ];
     return [
       {
         source: "/:path*",
-        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
       },
-      { source: "/import", headers: noFrame },
-      { source: "/oa-connect", headers: noFrame },
     ];
   },
 };

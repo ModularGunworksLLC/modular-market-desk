@@ -6,6 +6,7 @@ import {
   deskAuthEnabled,
   deskAuthSecret,
   mintDeskSessionToken,
+  secretsMatch,
 } from "@/lib/desk-auth";
 
 export const runtime = "nodejs";
@@ -13,15 +14,6 @@ export const runtime = "nodejs";
 const bodySchema = z.object({
   secret: z.string().min(1),
 });
-
-function secretsMatch(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
 
 export async function POST(request: Request): Promise<NextResponse> {
   if (!deskAuthEnabled()) {
@@ -36,7 +28,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const expected = deskAuthSecret()!;
   const presented = parsed.data.secret.trim();
-  if (!secretsMatch(presented, expected)) {
+  if (!(await secretsMatch(presented, expected))) {
     return NextResponse.json({ error: "Invalid desk secret." }, { status: 401 });
   }
 

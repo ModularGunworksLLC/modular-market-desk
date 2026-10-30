@@ -28,7 +28,7 @@ function LoginForm() {
         setError(body.error || "Login failed");
         return;
       }
-      router.replace(safeInternalPath(next));
+      router.replace(safeInternalPath(next, window.location.origin));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");

@@ -290,6 +290,19 @@ describe("OA token save endpoint", () => {
       }),
     );
     expect(typed.status).toBe(415);
+
+    const sneaky = await POST(
+      new Request(`${DESK}/api/vault/oa`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${SECRET}`,
+          origin: DESK,
+          "content-type": "text/plain; charset=utf-8; x=application/json",
+        },
+        body: JSON.stringify({ token: fakeJwt(Math.floor(Date.now() / 1000) + 3600), confirmSecret: SECRET }),
+      }),
+    );
+    expect(sneaky.status).toBe(415);
   });
 
   it("requires OA_ADMIN_SECRET when that variable is set", async () => {
@@ -354,10 +367,68 @@ describe("OA token save endpoint", () => {
     expect(leaked(logs.join("\n"), SECRET)).toBe(false);
   });
 
-  it("caps the audit log", async () => {
-    const { pruneOaAudit, latestOaAudit: list } = await import("@/lib/oa/vault-store");
-    await pruneOaAudit(2);
-    const rows = await list();
-    expect(rows.length).toBeLessThanOrEqual(2);
+  it("keeps set/clear rows when throttled requests flood the audit log", async () => {
+    const token = fakeJwt(Math.floor(Date.now() / 1000) + 5 * 3600);
+    const cookie = await mintDeskSessionToken(SECRET);
+    const saved = await POST(
+      new Request(`${DESK}/api/vault/oa`, {
+        method: "POST",
+        headers: {
+          origin: DESK,
+          "content-type": "application/json",
+          cookie: `desk_session=${cookie}`,
+          "x-real-ip": "198.51.100.20",
+        },
+        body: JSON.stringify({ token, confirmSecret: SECRET }),
+      }),
+    );
+    expect(saved.status).toBe(200);
+
+    const headers = {
+      origin: DESK,
+      "content-type": "application/json",
+      cookie: `desk_session=${cookie}`,
+      "x-real-ip": "198.51.100.20",
+    };
+    let throttled = 0;
+    for (let i = 0; i < 40; i++) {
+      const res = await POST(
+        new Request(`${DESK}/api/vault/oa`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ token, confirmSecret: "wrong-confirm-secret" }),
+        }),
+      );
+      if (res.status === 429) throttled++;
+    }
+    expect(throttled).toBeGreaterThan(5);
+
+    const client = createClient({ url: `file:${dbFile}` });
+    const before = await client.execute(
+      "SELECT action, count(*) AS n FROM audit_log GROUP BY action",
+    );
+    const counts = Object.fromEntries(
+      before.rows.map((row) => [String(row.action), Number(row.n)]),
+    );
+    expect(counts.oa_token_set ?? 0).toBeGreaterThan(0);
+    expect(counts.oa_token_failed_attempt ?? 0).toBeLessThan(80);
+    const limited = await client.execute(
+      "SELECT count(*) AS n FROM audit_log WHERE detail LIKE '%rate_limited%' AND detail LIKE '%198.51.100.20%'",
+    );
+    expect(Number(limited.rows[0]?.n ?? 0)).toBe(1);
+
+    const { pruneOaAudit } = await import("@/lib/oa/vault-store");
+    await pruneOaAudit(1);
+    const after = await client.execute(
+      "SELECT action, count(*) AS n FROM audit_log GROUP BY action",
+    );
+    const left = Object.fromEntries(after.rows.map((row) => [String(row.action), Number(row.n)]));
+    expect(left.oa_token_set ?? 0).toBe(counts.oa_token_set);
+    expect(left.oa_token_clear ?? 0).toBe(counts.oa_token_clear ?? 0);
+    expect(left.oa_token_failed_attempt ?? 0).toBeLessThanOrEqual(1);
+    const leakedRow = await client.execute("SELECT detail FROM audit_log");
+    const blob = leakedRow.rows.map((row) => String(row.detail)).join("\n");
+    expect(leaked(blob, token)).toBe(false);
+    client.close();
   });
 });

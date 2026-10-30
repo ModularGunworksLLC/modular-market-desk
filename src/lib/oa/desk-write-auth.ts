@@ -76,7 +76,7 @@ export async function authorizeOaWrite(input: {
     return deny(403, "missing_origin", "Refused: browser token writes must come from this Desk.");
   }
 
-  if (input.requireConfirm !== false && !confirmSecretOk(input.confirmSecret)) {
+  if (input.requireConfirm !== false && !(await confirmSecretOk(input.confirmSecret))) {
     return deny(
       403,
       "confirm_rejected",

@@ -22,7 +22,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (pathname === "/oa-mock.html" || pathname === "/oa-mock") {
-    if (!localTestPageEnabled(request.nextUrl.hostname, process.env.NODE_ENV)) {
+    if (!localTestPageEnabled(process.env.NODE_ENV, process.env.OA_MOCK_PAGE)) {
       return new NextResponse("Not found", { status: 404 });
     }
   }
@@ -66,7 +66,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const login = new URL("/login", request.url);
-  login.searchParams.set("next", safeInternalPath(pathname));
+  login.searchParams.set("next", safeInternalPath(pathname, request.nextUrl.origin));
   return NextResponse.redirect(login);
 }
 

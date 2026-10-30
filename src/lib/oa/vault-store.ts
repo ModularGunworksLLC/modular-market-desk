@@ -82,17 +82,16 @@ export function ensureOaVaultTables(): Promise<void> {
         );
         CREATE UNIQUE INDEX IF NOT EXISTS connections_vendor_kind_ux ON connections (vendor, kind);
         CREATE TABLE IF NOT EXISTS audit_log (
-          id text PRIMARY KEY NOT NULL,
+          seq integer PRIMARY KEY AUTOINCREMENT,
           actor text NOT NULL,
           action text NOT NULL,
           target text NOT NULL DEFAULT 'outdoor_analytics',
           detail text NOT NULL DEFAULT '{}',
           created_at integer DEFAULT (unixepoch()) NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log (created_at);
         `,
       )
-      .then(() => undefined)
+      .then(() => upgradeAuditSeq())
       .catch((err) => {
         tablesReady = null;
         throw err;
@@ -117,16 +116,44 @@ export async function writeOaAudit(
   await pruneOaAudit();
 }
 
-/** Keep the newest rows so a noisy client cannot grow this table without bound. */
+/**
+ * Drop old failed-attempt rows only. set and clear rows are never deleted.
+ * Order is the AUTOINCREMENT seq, not the 1-second created_at clock.
+ */
 export async function pruneOaAudit(keep = 500): Promise<void> {
   await ensureOaVaultTables();
   const n = Math.max(1, Math.floor(keep));
   await db.$client.execute({
-    sql: `DELETE FROM audit_log WHERE id NOT IN (
-      SELECT id FROM audit_log ORDER BY created_at DESC, id DESC LIMIT ?
-    )`,
+    sql: `DELETE FROM audit_log
+      WHERE action = 'oa_token_failed_attempt'
+      AND seq NOT IN (
+        SELECT seq FROM audit_log
+        WHERE action = 'oa_token_failed_attempt'
+        ORDER BY seq DESC
+        LIMIT ?
+      )`,
     args: [n],
   });
+}
+
+async function upgradeAuditSeq(): Promise<void> {
+  const info = await db.$client.execute("PRAGMA table_info(audit_log)");
+  const names = info.rows.map((row) => String((row as { name?: string }).name));
+  if (names.length === 0 || names.includes("seq")) return;
+  await db.$client.executeMultiple(`
+    CREATE TABLE audit_log_seq (
+      seq integer PRIMARY KEY AUTOINCREMENT,
+      actor text NOT NULL,
+      action text NOT NULL,
+      target text NOT NULL DEFAULT 'outdoor_analytics',
+      detail text NOT NULL DEFAULT '{}',
+      created_at integer NOT NULL DEFAULT (unixepoch())
+    );
+    INSERT INTO audit_log_seq (actor, action, target, detail, created_at)
+      SELECT actor, action, target, detail, created_at FROM audit_log ORDER BY rowid;
+    DROP TABLE audit_log;
+    ALTER TABLE audit_log_seq RENAME TO audit_log;
+  `);
 }
 
 export function scrubAuditDetail(detail: Record<string, unknown>): Record<string, unknown> {
@@ -399,7 +426,7 @@ export async function requireUsableOaToken(): Promise<string> {
 
 export async function latestOaAudit(): Promise<Array<{ action: string; actor: string; detail: string }>> {
   await ensureOaVaultTables();
-  const rows = await db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(20);
+  const rows = await db.select().from(auditLog).orderBy(desc(auditLog.seq)).limit(20);
   return rows.map((r) => ({
     action: r.action,
     actor: r.actor,

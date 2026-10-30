@@ -138,14 +138,32 @@ Review of `20cfdf5` (GO after must-fixes). Mapping:
 | N1 Body cap | Fixed. 8 KB JSON only. |
 | N2 Far `exp` | Fixed. Flagged on the banner when more than 30 days out. It does not authorize anything. |
 | N3 Probe on GET | Fixed. Probe is `POST /api/vault/status` with the origin gate and a per-minute limit. |
-| N4 Framing headers | Fixed. `frame-ancestors 'none'` and `X-Frame-Options: DENY` on `/import` and `/oa-connect`. Global `Referrer-Policy: no-referrer`. |
-| N5 Mock page in production | Fixed. Middleware 404s `/oa-mock.html` on a production non-loopback host. The Import link is hidden the same way. |
+| N4 Framing headers | Fixed, then widened in the re-review. `frame-ancestors 'none'` and `X-Frame-Options: DENY` apply to every path. Global `Referrer-Policy: no-referrer`. |
+| N5 Mock page in production | Fixed in the re-review. A production build 404s `/oa-mock.html` based on `NODE_ENV`, not the request host. `OA_MOCK_PAGE=1` is the only override. |
 | N6 Bookmarklet result source | Fixed. Result listener requires `ev.source === popup`. |
 | N7 `GBA_BEARER_TOKEN` | Fixed. Banner states that sync keeps using the env token after Clear. |
-| N8 Failed-attempt audit claim | Fixed in this doc. Middleware 401s are not audited. Route-level failures are. Audit rows are capped at 500. |
-| N9 `//evil` login redirect | Fixed. `next` must be a same-origin path. `//` and `/\` are rejected. |
+| N8 Failed-attempt audit claim | Fixed in this doc. Middleware 401s are not audited. Route-level failures are. Noisy failed-attempt rows are capped. Set and clear rows are never pruned. |
+| N9 `//evil` login redirect | Fixed, then tightened in the re-review. Control characters are rejected, and the path is resolved with `new URL` and must stay on the same origin. |
 | N10 Drizzle journal gap | Not closed by inserting `0003`/`0004`. Those files use `ALTER TABLE ADD COLUMN`, which is not idempotent, and live databases already have the columns from `ensure*`. `drizzle-kit migrate` applies journal idx 0–3 (`0000`, `0001`, `0002`, `0005_oa_audit_log`) on a fresh database. `ensureOaVaultTables()` still creates `audit_log` at runtime. |
 | N11 Repo visibility | Not in this PR. Making the GitHub repo private is a settings change, not a code change. |
+
+## Re-review fixes
+
+Re-review of `71fd08e` (clear after small fixes):
+
+| Finding | Status |
+| --- | --- |
+| NEW-1 Audit wipe via rate-limit rows | Fixed. A throttled window writes one summary row, not one per request. Prune deletes only `oa_token_failed_attempt` rows and orders them by an AUTOINCREMENT `seq`. `oa_token_set` and `oa_token_clear` are kept. |
+| NEW-2 `/%09/evil` open redirect | Fixed. `safeInternalPath` rejects `\x00-\x1f` and `\x7f`, then resolves with `new URL(next, origin)` and requires the same origin and a single leading slash. |
+| NEW-3 Mock page served by `next start` | Fixed. The gate is `NODE_ENV !== "production"` (or `OA_MOCK_PAGE=1`). It does not look at `Host`. A production build returns 404 for `/oa-mock.html`. |
+| NEW-4 Trusted `X-Real-IP` | Fixed. The value must be an IPv4 or IPv6 address or it is stored as unknown. Control characters are stripped from the IP and the user agent. Docker publishes `127.0.0.1:3010` only. The Apache example sets `RequestHeader set X-Real-IP` from the real client address and says Apache must overwrite any client-supplied value. |
+| HMAC compare | Fixed. `secretsMatch` compares fixed-length HMAC digests, including the login check. |
+| Strict Content-Type and body cap | Fixed. The media type must be exactly `application/json`. The body is read through a stream that stops at 8 KB. |
+| Bookmarklet resend during save | Fixed. Messages are ignored once Save has started. |
+| Site-wide frame headers | Fixed. `frame-ancestors 'none'` and `X-Frame-Options: DENY` are on `/:path*`. |
+| `DESK_PUBLIC_ORIGIN` example | Fixed. Marked dev-only, with a warning not to copy a loopback origin into production without a desk secret. |
+| `OaConnectClient` component test | Fixed. Covers a forged source, no save before the click, the Chicago expiry, and a resend during save. |
+| Login rate limit | Not in this change. `/api/auth/login` had no limit before this PR. |
 
 ## Known limits
 

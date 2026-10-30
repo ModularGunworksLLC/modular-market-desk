@@ -29,6 +29,13 @@
       "when": 1790000000000,
       "tag": "0005_oa_audit_log",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790000001000,
+      "tag": "0006_audit_log_seq",
+      "breakpoints": true
     }
   ]
 }

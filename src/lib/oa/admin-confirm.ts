@@ -22,7 +22,7 @@ export function oaAdminConfirmConfig(): { required: boolean; mode: OaConfirmMode
   return { required: false, mode: "none", label: "" };
 }
 
-export function confirmSecretOk(presented: string | null | undefined): boolean {
+export async function confirmSecretOk(presented: string | null | undefined): Promise<boolean> {
   const cfg = oaAdminConfirmConfig();
   if (!cfg.required) return true;
   const expected =
