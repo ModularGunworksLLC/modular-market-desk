@@ -131,4 +131,26 @@ describe("filterTextMatchesByPrice", () => {
     expect(out).toHaveLength(0);
     expect(warning).toMatch(/UPC/i);
   });
+
+  it("keeps a far-below dealer price in auction mode and flags Above Dealer Cost", () => {
+    const matches = [
+      {
+        vendorName: "lipseys",
+        sku: null,
+        upc: null,
+        manufacturer: "Walther",
+        model: "PDP F-Series",
+        productLabel: "PDP F-Series",
+        dealerPrice: 529,
+        inStock: true,
+        cheaperThanTarget: true,
+        isFirearm: true,
+      },
+    ];
+    const { matches: out, aboveDealerCost } = filterTextMatchesByPrice(matches, 699, {
+      auctionMode: true,
+    });
+    expect(out).toHaveLength(1);
+    expect(aboveDealerCost).toBe(true);
+  });
 });

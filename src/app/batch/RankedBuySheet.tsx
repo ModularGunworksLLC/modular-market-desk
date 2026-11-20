@@ -111,11 +111,16 @@ export function RankedBuySheet(props: {
               </a>
             ) : null}
           </div>
-          <Assumption label="BP" value={`${buyerPremiumPct}%`} />
-          <Assumption label="CC" value={`${purchaseCardPct}%`} />
-          <Assumption label="Profit ≥" value={`$${Math.round(targetProfit)}`} />
+          <Assumption label="Buyer premium" value={`${buyerPremiumPct}%`} />
+          <Assumption label="Buyer card" value={`${purchaseCardPct}%`} />
+          <Assumption label="Target profit" value={`$${Math.round(targetProfit)}`} />
           <Assumption label="Exit" value={channelLabel} />
         </div>
+        <p className="mt-1 text-[11px] text-desk-muted">
+          Max hammer backs out of the {channelLabel} net using this house: (max all-in − inbound) / ((1+
+          {buyerPremiumPct}%)×(1+{purchaseCardPct}%)), after the ${Math.round(targetProfit)} profit floor and the margin floor.
+          Walk-away is min(that hammer, (dealer floor − $25 − inbound) / (1+BP+card)). No walk-away without comps.
+        </p>
         {toolbar ? <div className="mt-2 flex flex-wrap items-center gap-2">{toolbar}</div> : null}
       </div>
 
@@ -166,10 +171,31 @@ export function RankedBuySheet(props: {
                       <div className="truncate font-medium text-desk-text" title={r.label}>
                         {r.label}
                       </div>
-                      <div className="truncate text-[10px] text-desk-muted" title={r.matchNote}>
+                      <div className="whitespace-normal break-words text-[10px] text-desk-muted" title={r.matchNote}>
                         {r.matchNote || "—"}
                         {r.soldCount > 0 ? ` · n=${r.soldCount}` : ""}
                       </div>
+                      {(r.accessories?.length || r.flags?.length || r.partsWarning) ? (
+                        <div className="mt-0.5 flex flex-wrap gap-1" title={[...(r.flags ?? []), ...(r.accessories ?? [])].join(", ")}>
+                          {(r.flags ?? []).map((flag) => (
+                            <span
+                              key={flag}
+                              className={`rounded px-1 py-0.5 text-[9px] uppercase ${
+                                flag === "parts"
+                                  ? "bg-desk-nogo/15 text-desk-nogo"
+                                  : "bg-desk-panel2 text-desk-muted"
+                              }`}
+                            >
+                              {flag}
+                            </span>
+                          ))}
+                          {(r.accessories ?? []).map((item) => (
+                            <span key={item} className="rounded bg-desk-panel2 px-1 py-0.5 text-[9px] text-desk-muted">
+                              w/ {item}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="pr-2 text-right tabular-nums">{usd(live)}</td>
                     <td

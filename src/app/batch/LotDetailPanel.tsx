@@ -59,7 +59,7 @@ export function LotDetailPanel(props: {
           <h3 className="truncate text-base font-semibold text-desk-text" title={row.label}>
             {row.label}
           </h3>
-          <p className="mt-0.5 truncate text-[11px] text-desk-muted" title={row.matchNote}>
+          <p className="mt-0.5 whitespace-normal break-words text-[11px] text-desk-muted" title={row.matchNote}>
             {row.matchNote || "—"}
             {row.soldCount > 0 ? ` · n=${row.soldCount}` : ""}
           </p>

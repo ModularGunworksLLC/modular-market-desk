@@ -47,6 +47,21 @@ export interface WholesaleGrid {
   cheaperThanTarget: boolean;
   matchMode: "upc" | "text";
   warning: string | null;
+  /** Auction mode kept a distributor price more than 15% under the current bid. */
+  aboveDealerCost?: boolean;
+}
+
+export function emptyWholesaleGrid(): WholesaleGrid {
+  return {
+    firearmMatches: [],
+    matches: [],
+    cheapestInStockFirearm: null,
+    suggestedHammerCeiling: null,
+    cheaperThanTarget: false,
+    matchMode: "text",
+    warning: null,
+    aboveDealerCost: false,
+  };
 }
 
 export async function crossReferenceWholesale(params: {
@@ -56,6 +71,8 @@ export async function crossReferenceWholesale(params: {
   caliber?: string;
   category?: string;
   targetAcquisitionCost: number;
+  /** When true, keep distributor hits far below the bid and flag them. */
+  auctionMode?: boolean;
 }): Promise<WholesaleGrid> {
   const upc = params.upc?.trim().replace(/^#+|#+$/g, "");
   const query: WholesaleQuery = {
@@ -72,10 +89,14 @@ export async function crossReferenceWholesale(params: {
 
   let firearmMatches = rawMatches.filter((m) => m.isFirearm);
   let textMatchWarning: string | null = null;
+  let aboveDealerCost = false;
   if (matchMode === "text" && params.targetAcquisitionCost > 0 && firearmMatches.length > 0) {
-    const filtered = filterTextMatchesByPrice(firearmMatches, params.targetAcquisitionCost);
+    const filtered = filterTextMatchesByPrice(firearmMatches, params.targetAcquisitionCost, {
+      auctionMode: params.auctionMode === true,
+    });
     firearmMatches = filtered.matches;
     textMatchWarning = filtered.warning;
+    aboveDealerCost = filtered.aboveDealerCost;
   }
   const inStockFirearms = firearmMatches.filter((m) => m.inStock).map((m) => m.dealerPrice);
   const cheapestInStockFirearm = inStockFirearms.length ? Math.min(...inStockFirearms) : null;
@@ -96,6 +117,7 @@ export async function crossReferenceWholesale(params: {
       cheapestInStockFirearm != null && cheapestInStockFirearm < params.targetAcquisitionCost,
     matchMode,
     warning,
+    aboveDealerCost,
   };
 }
 

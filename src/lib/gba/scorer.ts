@@ -13,6 +13,8 @@
  * Everything here is pure (no I/O), so it is unit-testable and safe to import anywhere.
  */
 
+import { oaMakersForIdentity, oaModelAliasFor } from "@/lib/batch/brand-lexicon";
+
 /** Desk-side identity used to resolve a catalog selection. */
 export interface GbaQuery {
   manufacturer: string;
@@ -31,6 +33,11 @@ export interface GbaQuery {
 export interface OaCaliberNode {
   Caliber?: string | null;
   CaliberID?: number | string | null;
+  /**
+   * Sold comps on this leaf. The live catalog JSON usually omits it; tests and
+   * `loadDepsAndResolve` attach it so a close score can prefer the larger sample.
+   */
+  SoldCount?: number | null;
 }
 
 /** A model node holding caliber leaves. */
@@ -68,7 +75,18 @@ export interface OaSelection {
   caliber: string;
   /** Blended confidence score in [0, 100+]. Higher is better. */
   score: number;
+  /** Sold comps on the leaf, when known. 0 means unknown or empty. */
+  soldCount?: number;
 }
+
+/** Below this blended score the match is shown but Max hammer is suppressed. */
+export const MIN_MATCH_CONFIDENCE = 70;
+
+/**
+ * When two leaves are both at or above {@link MIN_MATCH_CONFIDENCE} and their
+ * scores differ by at most this many points, the larger sold sample wins.
+ */
+export const MATCH_SCORE_TIE_MARGIN = 5;
 
 const MIN_MANUFACTURER_SCORE = 40;
 const MIN_MODEL_SCORE = 45;
@@ -304,12 +322,12 @@ const CALIBER_ALIAS_GROUPS: string[][] = [
   ["6.5 grendel", "65 grendel"],
   ["9mm", "9 mm", "9x19", "9 x 19", "9mm luger", "9 luger", "9mm parabellum", "9mm para", "9mmp", "9mm nato"],
   ["380 acp", "380 auto", "380", "9mm short", "9x17", "9mm kurz"],
-  ["40 s&w", "40 sw", "40 cal", "40 smith", "40"],
+  ["40 s&w", "40 sw", "40 cal", "40 smith"],
   ["357 sig", "357sig"],
-  ["357 magnum", "357 mag", "357"],
+  ["357 magnum", "357 mag"],
   ["38 special", "38 spl", "38 spc", "38 special +p"],
   ["10mm", "10 mm", "10mm auto"],
-  ["45 acp", "45 auto", "45acp", "45"],
+  ["45 acp", "45 auto", "45acp"],
   ["45 colt", "45 long colt", "45 lc", "45lc"],
   ["44 magnum", "44 mag", "44 rem mag"],
   ["223 rem", "223 remington", "223", "5.56", "5.56x45", "5.56 nato", "556", "5.56mm"],
@@ -354,7 +372,10 @@ export function buildCaliberTokens(caliber: string | undefined | null): string[]
     }
   }
 
-  return Array.from(forms).filter((f) => f.length >= 2);
+  // Bare 22 / 45 / 40 / 357 match the wrong cartridge (.22 LR vs .22 WMR,
+  // .45 ACP vs .45-70, .357 Mag vs .357 SIG).
+  for (const bare of ["22", "45", "40", "357"]) forms.delete(bare);
+  return Array.from(forms).filter((f) => f.length >= 2 && !["22", "45", "40", "357"].includes(f));
 }
 
 /** Whether any normalized caliber form is present in a (lowercased) title. */
@@ -459,9 +480,11 @@ export function cleanModelForOa(model: string): string {
   m = m.replace(/\b\d+\.\d+\s*[xX]\s*\d+\s*CAL\b/gi, " ");
   m = m.replace(/\b\d{2,3}CAL\b/gi, " ");
   m = m.replace(/\b10\s*-\s*22\b/gi, "10/22");
-  // Trailing caliber glued into model (Desk already has a caliber field)
+  // Trailing caliber glued into model (Desk already has a caliber field).
+  // A hyphenated model such as 1911-22 must stay intact — the 22 is the variant,
+  // not a separate ".22" cartridge stuck on the end.
   m = m.replace(
-    /\b(?:9\s*x\s*19(?:mm)?|9\s*mm(?:\s*luger)?|10\s*mm|\.?(?:22|25|32|38|357|380|40|44|45)\s*(?:lr|acp|auto|special|spl|mag(?:num)?|wmr|s\s*&\s*w|colt)?|12\s*ga(?:uge)?|20\s*ga(?:uge)?)\s*$/i,
+    /(?:^|[\s,])(?:9\s*x\s*19(?:mm)?|9\s*mm(?:\s*luger)?|10\s*mm|\.?(?:22|25|32|38|357|380|40|44|45)\s*(?:lr|acp|auto|special|spl|mag(?:num)?|wmr|s\s*&\s*w|colt)?|12\s*ga(?:uge)?|20\s*ga(?:uge)?)\s*$/i,
     " ",
   );
   m = m.replace(/[*#|]+/g, " ").replace(/\s{2,}/g, " ").trim();
@@ -667,6 +690,9 @@ function scoreModelName(modelName: string, tokens: string[], queryModel?: string
     if (mpNum && (normName.includes(`mp${mpNum}`) || normName === `mp${mpNum}`)) return 92;
   }
 
+  // 88 for the primary model number only (29-10 → 29, not 10).
+  // When both "1911" and "1911-22" clear this, preferCatalogLeaf keeps the
+  // hyphenated leaf and, on a close score, the larger sold sample.
   if (tokens.includes("1911") && /\b1911\b/i.test(name)) return 88;
 
   for (const tok of tokens) {
@@ -700,6 +726,13 @@ function scoreModelName(modelName: string, tokens: string[], queryModel?: string
   return 0;
 }
 
+/** True when the query has a hyphenated variant the catalog name does not contain. */
+function hyphenVariantMissing(queryModel: string, catalogName: string): boolean {
+  const variants = queryModel.toLowerCase().match(/\b[a-z0-9]+-[a-z0-9]+\b/g) ?? [];
+  const name = catalogName.toLowerCase();
+  return variants.some((tok) => !name.includes(tok));
+}
+
 /* ------------------------------------------------------------------ *
  * Condition mapping
  * ------------------------------------------------------------------ */
@@ -727,10 +760,26 @@ function conditionParam(key: string): "New" | "Used" {
  * Blended weights: manufacturer 25%, model 55%, caliber 20%, with a small bonus
  * for catalog-flagged common manufacturers to break ties.
  */
+function leafSoldCount(
+  cal: OaCaliberNode,
+  key: string,
+  soldCounts?: ReadonlyMap<string, number>,
+): number {
+  const fromMap = soldCounts?.get(key);
+  if (fromMap != null && Number.isFinite(fromMap)) return fromMap;
+  const raw = cal.SoldCount;
+  return raw != null && Number.isFinite(Number(raw)) ? Number(raw) : 0;
+}
+
+export function soldCountKey(conditionKey: string, modelId: number, caliberId: number): string {
+  return `${conditionKey}|${modelId}|${caliberId}`;
+}
+
 function resolveSelectionWithThresholds(
   deps: OaDependencies,
   query: GbaQuery,
   thresholds: { mfr: number; model: number; cal: number },
+  soldCounts?: ReadonlyMap<string, number>,
 ): OaSelection | null {
   const tokens = modelSearchTokens(query);
   const wantCaliber = (query.caliber ?? "").trim().length > 0;
@@ -768,6 +817,7 @@ function resolveSelectionWithThresholds(
           const calId = toInt(cal.CaliberID);
           let total = mfrScore * 0.25 + modelScore * 0.55 + calScore * 0.2;
           if (node.IsCommonManufacturer) total += 2;
+          const countKey = soldCountKey(condKey, modelId, calId);
 
           const candidate: OaSelection = {
             conditionKey: condKey,
@@ -779,8 +829,9 @@ function resolveSelectionWithThresholds(
             caliberId: calId,
             caliber: String(calName ?? ""),
             score: total,
+            soldCount: leafSoldCount(cal, countKey, soldCounts),
           };
-          if (best === null || isBetterSelection(candidate, best, query)) best = candidate;
+          if (best === null || preferCatalogLeaf(candidate, best, query)) best = candidate;
         }
       }
     }
@@ -789,26 +840,70 @@ function resolveSelectionWithThresholds(
   return best;
 }
 
-/** Prefer a higher score; on a near-tie pick the shorter catalog name (base P320 over P320 Compact). */
-function isBetterSelection(candidate: OaSelection, best: OaSelection, query: GbaQuery): boolean {
+/**
+ * Prefer `candidate` over `best`.
+ * When both scores clear the confidence gate and sit within MATCH_SCORE_TIE_MARGIN,
+ * the leaf with more sold comps wins — even if its score is a few points lower.
+ * Otherwise a clearly higher score wins, then an exact model, then the shorter name.
+ */
+export function preferCatalogLeaf(candidate: OaSelection, best: OaSelection, query: GbaQuery): boolean {
+  const cN = candidate.soldCount ?? 0;
+  const bN = best.soldCount ?? 0;
+  const queryModel = query.model ?? "";
+  const candHasVariant = !hyphenVariantMissing(queryModel, candidate.model);
+  const bestHasVariant = !hyphenVariantMissing(queryModel, best.model);
+  if (candHasVariant !== bestHasVariant) return candHasVariant;
+  const bothConfident =
+    candidate.score >= MIN_MATCH_CONFIDENCE && best.score >= MIN_MATCH_CONFIDENCE;
+  if (
+    bothConfident &&
+    Math.abs(candidate.score - best.score) <= MATCH_SCORE_TIE_MARGIN &&
+    cN !== bN
+  ) {
+    return cN > bN;
+  }
   if (candidate.score > best.score + 0.5) return true;
   if (best.score > candidate.score + 0.5) return false;
   const qn = norm(cleanModelForOa(query.model) || query.model);
   const candExact = norm(candidate.model) === qn;
   const bestExact = norm(best.model) === qn;
   if (candExact !== bestExact) return candExact;
+  if (cN !== bN) return cN > bN;
   if (candidate.model.length !== best.model.length) return candidate.model.length < best.model.length;
   return candidate.score > best.score;
 }
 
+export function isLowConfidenceMatch(score: number | null | undefined): boolean {
+  return score != null && Number.isFinite(score) && score < MIN_MATCH_CONFIDENCE;
+}
+
 /** Map desk form fields onto OA catalog IDs (strict pass, then relaxed pass). */
-export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelection | null {
+export function resolveSelection(
+  deps: OaDependencies,
+  query: GbaQuery,
+  soldCounts?: ReadonlyMap<string, number>,
+): OaSelection | null {
   const strict = { mfr: MIN_MANUFACTURER_SCORE, model: MIN_MODEL_SCORE, cal: MIN_CALIBER_SCORE };
-  const hit = resolveSelectionWithThresholds(deps, query, strict);
+  const hit = resolveSelectionWithThresholds(deps, query, strict, soldCounts);
   if (hit && !isAmbiguousManufacturerTypo(deps, query, hit)) return hit;
-  const relaxed = resolveSelectionWithThresholds(deps, query, { mfr: 25, model: 35, cal: 30 });
+  const relaxed = resolveSelectionWithThresholds(deps, query, { mfr: 25, model: 35, cal: 30 }, soldCounts);
   if (relaxed && !isAmbiguousManufacturerTypo(deps, query, relaxed)) return relaxed;
   return null;
+}
+
+/** Score every attempt and keep the leaf preferCatalogLeaf ranks first. */
+export function resolveBestAttempt(
+  deps: OaDependencies,
+  attempts: GbaQuery[],
+  soldCounts?: ReadonlyMap<string, number>,
+): OaSelection | null {
+  let best: OaSelection | null = null;
+  for (const attempt of attempts) {
+    const hit = resolveSelection(deps, attempt, soldCounts);
+    if (!hit) continue;
+    if (best == null || preferCatalogLeaf(hit, best, attempt)) best = hit;
+  }
+  return best;
 }
 
 /**
@@ -949,14 +1044,22 @@ const MANUFACTURER_CANONICAL: Record<string, string> = {
 
 /** Alternate desk queries when the first pass does not match the OA catalog (e.g. Savage → Savage Arms). */
 export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
-  const attempts: GbaQuery[] = [query];
+  const attempts: GbaQuery[] = [];
   const seen = new Set<string>();
+  const originalCaliber = (query.caliber ?? "").trim();
+  const originalCondition = (query.condition ?? "any").toLowerCase();
   const push = (q: GbaQuery) => {
+    // Never silently drop a caliber the desk already has.
+    if (originalCaliber && !(q.caliber ?? "").trim()) return;
+    // Never fall back from Used solds onto New / any.
+    const nextCond = (q.condition ?? "any").toLowerCase();
+    if (originalCondition === "used" && nextCond !== "used" && nextCond !== "lnib") return;
     const key = JSON.stringify(q);
     if (seen.has(key)) return;
     seen.add(key);
     attempts.push(q);
   };
+  push(query);
 
   if (query.condition !== "any") push({ ...query, condition: "any" });
 
@@ -1088,6 +1191,22 @@ export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
 
   const combo = `${mfr} ${cleanModelForOa(query.model)}`.trim();
   if (combo.length > query.model.length) push({ ...query, model: combo });
+
+  for (const maker of oaMakersForIdentity(mfr, model)) {
+    if (maker.toLowerCase() === mfr.toLowerCase()) continue;
+    push({ ...query, manufacturer: maker });
+  }
+  const alias = oaModelAliasFor(mfr, model);
+  if (alias && alias.model.toLowerCase() !== model.toLowerCase()) {
+    const caliber = (query.caliber ?? "").trim() || alias.caliber || undefined;
+    const rewritten: GbaQuery = {
+      ...query,
+      manufacturer: alias.manufacturer,
+      model: alias.model,
+      caliber,
+    };
+    push(rewritten);
+  }
 
   return attempts;
 }

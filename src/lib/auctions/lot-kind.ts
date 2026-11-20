@@ -21,7 +21,7 @@ const NON_GUN_GEAR_RE =
 
 /** Positive complete-firearm cues (not brand-only). */
 const FIREARM_TYPE_RE =
-  /\b(?:pistol|revolver|rifle|shotgun|carbine|handgun|firearm|\bguns?\b|bolt-?action|lever-?action|pump-?action|semi-?auto(?:matic)?|single-?shot|over[\s-]?under|side[\s-]?by[\s-]?side|AR-?15|AK-?47|AKM|1911|SKS|gatling|S\/N|Serial(?:\s*#| number)?)\b/i;
+  /\b(?:pistol|revolver|rifle|shotgun|carbine|handgun|firearm|\bguns?\b|bolt-?action|lever-?action|pump-?action|semi-?auto(?:matic)?|single-?shot|over[\s-]?under|side[\s-]?by[\s-]?side|AR-?15|AK-?47|AKM|1911|SKS|gatling|saiga|cugir|H012X|LAR-?15|WW-?15|S\/N|Serial(?:\s*#| number)?)\b/i;
 
 /** Brands that appear on both guns and ammo — never alone enough to classify as firearm. */
 const BRAND_HINT_RE =

@@ -58,14 +58,20 @@ function webEnrichBadge(phase: WebEnrichPhase | undefined | null): {
         className: "text-desk-accent",
         title: "High-conf web comps ready — advisory only; Max Bid stays OA solds",
       };
+    case "budget":
+      return {
+        label: "Daily limit",
+        className: "text-desk-nogo",
+        title: "Web-comps daily limit reached — this row was not looked up",
+      };
     case "weak":
       return {
-        label: "Weak",
+        label: "Weak — final",
         className: "text-desk-muted",
-        title: "Enrich finished but confidence too low — advisory only",
+        title: "Enrich finished below confidence. No OA Max Bid.",
       };
     case "skipped":
-      return { label: "Skipped", className: "text-desk-muted", title: "Not queued (daily budget or skipped)" };
+      return { label: "No OA Comps", className: "text-desk-muted", title: "No OA Comps (No Max Bid)" };
     default:
       return { label: "—", className: "text-desk-muted", title: "" };
   }
@@ -158,7 +164,7 @@ export function BatchSheetTable(props: {
                       <span className="ml-1 text-[10px] capitalize text-desk-muted">· {r.bestDealer}</span>
                     )}
                   </div>
-                  <div className="truncate text-[10px] text-desk-muted" title={r.error ?? r.matchNote}>
+                  <div className="whitespace-normal break-words text-[10px] text-desk-muted" title={r.error ?? r.matchNote}>
                     {r.error ? `error: ${r.error}` : r.matchNote || "—"}
                     {!fullColumns && r.soldCount > 0 ? ` · ${r.soldCount} sold` : ""}
                     {r.incrementSource ? ` · ${r.incrementSource}` : ""}

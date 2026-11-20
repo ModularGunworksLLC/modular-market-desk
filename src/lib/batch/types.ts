@@ -89,6 +89,11 @@ export interface BatchResultRow {
   } | null;
   /** Identity / OA↔web disparity warnings. */
   matchWarnings: string[];
+  /** "w/ ..." extras captured from the title. Not used in comp matching. */
+  accessories?: string[];
+  /** sporter / drilled / nsn / parts. */
+  flags?: string[];
+  partsWarning?: string | null;
   error: string | null;
 }
 

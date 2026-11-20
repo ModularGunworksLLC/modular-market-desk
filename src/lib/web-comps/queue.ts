@@ -5,6 +5,8 @@
 
 import "server-only";
 
+import { webCompsBudgetLabel } from "./queue-policy";
+import { loadQueuedItems, saveQueueItem } from "./queue-store";
 import { webCanonicalKey } from "./aggregate";
 import { enrichIdentity, loadWebPriceStats, statsAreFreshHigh } from "./ingest";
 import type { WebEnrichKeyStatus, WebEnrichPhase, WebIdentity } from "./types";
@@ -67,11 +69,17 @@ async function worker() {
     while (queue.length > 0) {
       rollDay();
       if (processedToday >= maxPerDay()) {
-        lastError = `Daily web-comps budget exhausted (${maxPerDay()}/day).`;
+        lastError = webCompsBudgetLabel(maxPerDay());
         while (queue.length) {
           const item = queue.shift()!;
           queuedKeys.delete(item.key);
-          rememberFinished(item.key, "low", 0, false);
+          rememberFinished(item.key, "budget", 0, false);
+          void saveQueueItem({
+            key: item.key,
+            identity: item.identity,
+            status: "budget",
+            detail: lastError,
+          });
         }
         break;
       }
@@ -120,6 +128,8 @@ export async function enqueueWebEnrich(identity: WebIdentity): Promise<{
   rollDay();
 
   if (processedToday >= maxPerDay()) {
+    rememberFinished(key, "budget", 0, false);
+    lastError = webCompsBudgetLabel(maxPerDay());
     return { queued: false, canonicalKey: key, reason: "daily_budget" };
   }
   if (await statsAreFreshHigh(key)) {
@@ -131,9 +141,20 @@ export async function enqueueWebEnrich(identity: WebIdentity): Promise<{
 
   queuedKeys.add(key);
   queue.push({ identity, key });
+  void saveQueueItem({ key, identity, status: "queued", detail: null });
   void worker();
   return { queued: true, canonicalKey: key, reason: "enqueued" };
 }
+
+void (async () => {
+  const pending = await loadQueuedItems();
+  for (const item of pending) {
+    if (queuedKeys.has(item.key)) continue;
+    queuedKeys.add(item.key);
+    queue.push({ identity: item.identity, key: item.key });
+  }
+  if (queue.length > 0) void worker();
+})();
 
 export function webCompsQueueStatus() {
   rollDay();

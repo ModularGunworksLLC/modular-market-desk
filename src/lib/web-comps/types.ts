@@ -35,6 +35,7 @@ export type WebEnrichPhase =
   | "running"
   | "ready"
   | "weak"
+  | "budget"
   | "skipped"
   | "idle";
 

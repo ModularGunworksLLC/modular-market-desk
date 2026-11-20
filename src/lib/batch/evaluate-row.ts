@@ -6,6 +6,8 @@
 import { z } from "zod";
 
 import { allInCost } from "@/lib/arbitrage/acquisition";
+import { dealerFloorToHammer, walkAwayHammer } from "@/lib/arbitrage/walk-away";
+import { isLowConfidenceMatch } from "@/lib/gba/scorer";
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
 import { round2 } from "@/lib/arbitrage/fees";
 import { formatNewDealerWarning } from "@/lib/arbitrage/new-floor";
@@ -16,6 +18,7 @@ import {
   walkAwayLegalBid,
 } from "@/lib/auctions/bid-increments";
 import type { BatchResultRow } from "@/lib/batch/types";
+import { inferCategoryFromTitle, parseTitleBlob } from "@/lib/batch/parse";
 import { sanitizeBatchRowIdentity } from "@/lib/batch/sanitize-identity";
 import { runEvaluation } from "@/lib/evaluate-pipeline";
 import { vendorLabel } from "@/lib/tracked-vendors";
@@ -82,7 +85,21 @@ export async function evaluateBatchRow(
   defaults: BatchDefaultsInput,
   token: string | null,
 ): Promise<BatchResultRow> {
-  const row = sanitizeBatchRowIdentity(rowInput);
+  const sanitized = sanitizeBatchRowIdentity(rowInput);
+  const fromTitle = sanitized.lotTitle?.trim() ? parseTitleBlob(sanitized.lotTitle) : null;
+  const row =
+    fromTitle && fromTitle.manufacturer && fromTitle.model
+      ? {
+          ...sanitized,
+          manufacturer: fromTitle.manufacturer,
+          model: fromTitle.model,
+          caliber: fromTitle.caliber || sanitized.caliber,
+          category: fromTitle.category || inferCategoryFromTitle(sanitized.lotTitle) || sanitized.category,
+        }
+      : sanitized;
+  const accessories = fromTitle?.accessories ?? [];
+  const flags = fromTitle?.flags ?? [];
+  const partsWarning = fromTitle?.partsWarning ?? null;
   const label = `${row.manufacturer} ${row.model}${row.caliber ? ` ${row.caliber}` : ""}`.trim();
   const schedule = normalizeBidIncrements(defaults.bidIncrements);
   const listingHints = {
@@ -126,6 +143,9 @@ export async function evaluateBatchRow(
     lot: row.lot,
     label,
     category: row.category,
+    accessories,
+    flags,
+    partsWarning,
     currentBid: row.currentBid ?? null,
     nextBid,
     inboundShip,
@@ -204,8 +224,11 @@ export async function evaluateBatchRow(
     const dealerFloor = out.wholesale.cheapestInStockFirearm;
     const bestDealerName = out.insights.cheapestInStockDealer?.vendorName ?? null;
 
-    const maxBidLocal = sold.count > 0 ? out.result.exits.local.maxBid : null;
-    const maxBidGb = sold.count > 0 ? out.result.exits.gunbroker.maxBid : null;
+    const suppressMax =
+      isLowConfidenceMatch(out.catalogMatch?.score) ||
+      /Insufficient Used data/i.test(out.sourceStatus.gba ?? "");
+    const maxBidLocal = sold.count > 0 && !suppressMax ? out.result.exits.local.maxBid : null;
+    const maxBidGb = sold.count > 0 && !suppressMax ? out.result.exits.gunbroker.maxBid : null;
     // Sheet channel drives the paddle / GO — not the max of both.
     const maxBid =
       sellChannel === "gunbroker"
@@ -216,18 +239,21 @@ export async function evaluateBatchRow(
             ? Math.max(maxBidLocal ?? 0, maxBidGb ?? 0)
             : null;
 
-    const walkAway =
-      maxBid != null && dealerFloor != null
-        ? Math.min(maxBid, dealerFloor)
-        : (maxBid ?? dealerFloor);
+    const dealerHammer = dealerFloorToHammer({
+      dealerFloor,
+      inboundShip,
+      buyerPremiumPct,
+      purchaseCardPct,
+    });
+    const walkAway = walkAwayHammer({ maxHammer: maxBid, dealerHammer });
     const walkAwayBid = walkAwayLegalBid(walkAway, schedule, listingHints);
 
     const verdictLocal =
-      sold.count > 0
+      sold.count > 0 && !suppressMax
         ? channelGoAtNext(out.result.exits.local.verdict, maxBidLocal, nextBid)
         : null;
     const verdictGb =
-      sold.count > 0
+      sold.count > 0 && !suppressMax
         ? channelGoAtNext(out.result.exits.gunbroker.verdict, maxBidGb, nextBid)
         : null;
     const verdict =
@@ -342,7 +368,7 @@ export async function evaluateBatchRow(
             divergence: out.webComps.divergence ?? null,
           }
         : null,
-      matchWarnings: out.matchWarnings ?? [],
+      matchWarnings: [...(out.matchWarnings ?? []), ...(partsWarning ? [partsWarning] : [])],
       error: null,
     };
   } catch (err) {

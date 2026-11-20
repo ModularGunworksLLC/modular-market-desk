@@ -15,6 +15,9 @@ import {
   lotKindLabel,
   type LotKind,
 } from "@/lib/auctions/lot-kind";
+import { rewriteBrandLexicon } from "@/lib/batch/brand-lexicon";
+import { extractLotAnnotations, partsWarning } from "@/lib/batch/lot-annotations";
+import { bidColumnWarnings, headerLooksLikeCompColumn, parseCsvMatrix } from "@/lib/batch/sheet-csv";
 
 export interface BatchRow {
   /** 1-based source row (excludes the header). */
@@ -39,6 +42,12 @@ export interface BatchRow {
   lotKind: LotKind;
   /** True when title is not a complete firearm (ammo, mag, gear). */
   excludeFromPricing: boolean;
+  /** "w/ ..." extras. Not used in comp matching. */
+  accessories: string[];
+  /** sporter / drilled / nsn / parts. Not used in comp matching. */
+  flags: string[];
+  /** Set when the title says parts. */
+  partsWarning: string | null;
 }
 
 export interface ParseBatchResult {
@@ -100,6 +109,9 @@ const HEADER_ALIASES: Record<Field, string[]> = {
   category: ["category", "type", "class", "producttype"],
   currentBid: [
     "currentbid",
+    "currenthammer",
+    "currentbidingested",
+    "currentbidhammer",
     "bid",
     "currentprice",
     "price",
@@ -127,8 +139,12 @@ function normHeader(text: string): string {
 }
 
 function resolveHeader(header: string): Field | null {
+  if (headerLooksLikeCompColumn(header)) return null;
   const n = normHeader(header);
   if (!n) return null;
+  if (n.includes("p25") || n.includes("median") || n.includes("maxhammer") || n.includes("walkaway")) {
+    return null;
+  }
   for (const field of Object.keys(HEADER_ALIASES) as Field[]) {
     if (HEADER_ALIASES[field].includes(n)) return field;
   }
@@ -141,55 +157,6 @@ function resolveHeader(header: string): Field | null {
   if (n === "item") return "title";
   if (n.includes("lot")) return "lot";
   return null;
-}
-
-/**
- * Pick the delimiter that yields the most columns on the header line. Auction
- * sheets can be small (3-4 columns), so a raw count beats fixed thresholds.
- */
-function pickDelimiter(headerLine: string): string {
-  const candidates = ["\t", ",", ";", "|"];
-  let best = ",";
-  let bestCount = 1;
-  for (const d of candidates) {
-    const count = splitLine(headerLine, d).length;
-    if (count > bestCount) {
-      bestCount = count;
-      best = d;
-    }
-  }
-  return best;
-}
-
-/** Minimal RFC-ish CSV line splitter that respects quoted fields. */
-function splitLine(line: string, delimiter: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]!;
-    if (inQuotes) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        cur += ch;
-      }
-    } else if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === delimiter) {
-      out.push(cur);
-      cur = "";
-    } else {
-      cur += ch;
-    }
-  }
-  out.push(cur);
-  return out.map((c) => c.trim());
 }
 
 function parseMoney(raw: string | undefined): number | null {
@@ -494,6 +461,27 @@ export interface ParsedTitle {
   model: string;
   caliber: string;
   category: string;
+  accessories: string[];
+  flags: string[];
+  partsWarning: string | null;
+}
+
+/**
+ * Title category. Handgun is not assumed here — callers fall back only when
+ * this returns "". "pistol grip" is not a handgun. AR suffixes (LAR-15, WW-15)
+ * do not need a word boundary before "ar".
+ */
+export function inferCategoryFromTitle(title: string): "handgun" | "rifle" | "shotgun" | "" {
+  const masked = title.replace(/\bpistol\s+grip\b/gi, " ");
+  const shotgun = /\b(shotgun|gauge|guage|over\/under|o\/u|double-?barrel)\b|\b(12|16|20|28|410)\s*-?\s*(ga|gauge|guage|bore)\b|\bsaiga\s*-?\s*12\b/i;
+  const rifle =
+    /\b(rifle|carbine|ar-?15|ar15|ar-?10|sks|bolt(?:\s*action)?|lever(?:\s*action)?)\b|(?:lar|ww|rf|am|stag)\s*-?\s*15|\bm\s*&\s*p\s*-?\s*15\b|\b94\s*ae\b|\b(?:model\s*)?700\b|\baxis\b|\bm77\b|\bh012x\b|\bwasr\b|\b(5\.56|\.223|\.308|\.30-30|\.30-06|\.243|\.270|\.257|\.400\s*legend|7\.62\s*x\s*39|7\.62\s*x\s*54|7\s*x\s*57|8\s*x\s*57|22-250)\b/i;
+  const handgun = /\b(pistol|handgun|revolver)\b/i;
+  if (shotgun.test(masked)) return "shotgun";
+  if (rifle.test(masked)) return "rifle";
+  if (handgun.test(masked)) return "handgun";
+  if (/\b(pump|double-?barrel)\b/i.test(masked)) return "shotgun";
+  return "";
 }
 
 /**
@@ -502,7 +490,13 @@ export interface ParsedTitle {
  * as `TRANS 4415`, and use `10-22` instead of `10/22`.
  */
 function normalizeTitleText(raw: string): string {
+  const keptHyphens: string[] = [];
   let s = raw
+    .replace(/\b((?:lar|ww|rf|am|stag)\s*-\s*15|saiga\s*-\s*\d+)\b/gi, (token) => {
+      const mark = `__HY${keptHyphens.length}__`;
+      keptHyphens.push(token.replace(/\s+/g, ""));
+      return mark;
+    })
     .replace(/\barmoty\b/gi, "Armory")
     .replace(/\bmoel\b/gi, "Model")
     // Pearce transfer / lot markers: TRANS 4415, TRANS 4401,4415
@@ -572,8 +566,10 @@ function normalizeTitleText(raw: string): string {
 
   return s
     // Collapse spaced / letter↔digit dashes (LC - 5.7, A1-FS) but KEEP caliber hyphens (.30-06, 44-40).
+    // LAR-15 / SAIGA-12 were parked in __HYn__ tokens above.
     .replace(/([A-Za-z])\s*-\s*([A-Za-z0-9])/g, "$1 $2")
     .replace(/([0-9])\s*-\s*([A-Za-z])/g, "$1 $2")
+    .replace(/__HY(\d+)__/g, (_, i: string) => keptHyphens[Number(i)] ?? "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -606,7 +602,11 @@ function findBrandHits(lower: string): BrandHit[] {
 }
 
 export function parseTitleBlob(title: string): ParsedTitle {
-  const text = normalizeTitleText(title);
+  const normalized = normalizeTitleText(title);
+  const extracted = extractLotAnnotations(normalized);
+  const lex = rewriteBrandLexicon(extracted.text);
+  const text = lex.text;
+  const annotations = extracted.annotations;
   const lower = text.toLowerCase();
 
   let manufacturer = "";
@@ -660,6 +660,12 @@ export function parseTitleBlob(title: string): ParsedTitle {
     }
   }
 
+  // Lexicon wins over the generic leading-words guess so suffixes stay out of the model.
+  if (lex.manufacturer) {
+    manufacturer = lex.manufacturer;
+    brandMatch = lex.manufacturer.toLowerCase();
+  }
+
   let caliber = "";
   let caliberRaw = "";
   for (const { re, label } of CALIBER_PATTERNS) {
@@ -671,13 +677,7 @@ export function parseTitleBlob(title: string): ParsedTitle {
     }
   }
 
-  let category = "handgun";
-  for (const { re, category: cat } of CATEGORY_HINTS) {
-    if (re.test(text)) {
-      category = cat;
-      break;
-    }
-  }
+  const category = inferCategoryFromTitle(`${text} ${annotations.accessories.join(" ")}`) || "handgun";
 
   // Model = title minus brand and caliber tokens, minus common noise words.
   let model = text;
@@ -693,8 +693,9 @@ export function parseTitleBlob(title: string): ParsedTitle {
     model = model.replace(caliberRaw, " ");
   }
   model = model
+    .replace(/\bpistol\s+grip\b/gi, " ")
     .replace(
-      /\b(new|used|nib|like new|excellent|model|pistol|handgun|rifle|shotgun|revolver|semi-?automatic|semi-?auto|semi|bolt(?:\s*action)?|lever(?:\s*action)?|pump(?:\s*action)?|action|luger|cal|caliber|gauge|guage|ga|magnum|mag|nato|wylde|scope|in box|box|additional barrel|hand-?crank|single[-\s]?action|double[-\s]?barrel|single\s+shot|single|double|over\/under|over\s*\/\s*under|o\/u|black\s*powder|set\s+of|trans|w\/.*$)\b/gi,
+      /\b(new|used|nib|like new|excellent|model|pistol|handgun|rifle|shotgun|revolver|semi-?automatic|semi-?auto|semi|bolt(?:\s*action)?|lever(?:\s*action)?|pump(?:\s*action)?|action|luger|cal|caliber|gauge|guage|ga|magnum|mag|nato|wylde|scope|in box|box|additional barrel|hand-?crank|single[-\s]?action|double[-\s]?barrel|single\s+shot|single|double|over\/under|over\s*\/\s*under|o\/u|black\s*powder|set\s+of|trans|russia|repeating\s+arms|arms\s+factory)\b/gi,
       " ",
     )
     // Keep "carbine" when it looks like a model name (LC Carbine); strip only trailing category use.
@@ -741,7 +742,20 @@ export function parseTitleBlob(title: string): ParsedTitle {
     model = "";
   }
 
-  return { manufacturer, model, caliber, category: normalizeCategory(category) || category };
+  // "SAIGA-12" is one model token. Title cleanup splits the hyphen into "SAIGA 12".
+  if (/^izhmash$/i.test(manufacturer) && /saiga\s*-?\s*12/i.test(`${text} ${model}`)) {
+    model = "SAIGA-12";
+  }
+
+  return {
+    manufacturer,
+    model,
+    caliber,
+    category: normalizeCategory(category) || category,
+    accessories: annotations.accessories,
+    flags: annotations.flags,
+    partsWarning: partsWarning(annotations.flags),
+  };
 }
 
 function normModelToken(s: string): string {
@@ -755,14 +769,13 @@ export function parseBatchSheet(
   opts?: { defaultBuyerPremiumPct?: number; defaultCategory?: string },
 ): ParseBatchResult {
   const warnings: string[] = [];
-  const clean = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = clean.split("\n").filter((l) => l.trim().length > 0);
+  const matrix = parseCsvMatrix(text);
+  const lines = matrix.rows;
   if (lines.length === 0) {
     return { rows: [], mapping: {}, warnings: ["No rows found."] };
   }
 
-  const delimiter = pickDelimiter(lines[0]!);
-  const headers = splitLine(lines[0]!, delimiter);
+  const headers = lines[0]!.map((h) => h.trim());
   const mapping: Record<string, string> = {};
   const colIndex: Partial<Record<Field, number>> = {};
 
@@ -796,7 +809,7 @@ export function parseBatchSheet(
 
   const rows: BatchRow[] = [];
   for (let i = 1; i < lines.length; i++) {
-    const cells = splitLine(lines[i]!, delimiter);
+    const cells = (lines[i] ?? []).map((c) => c.trim());
     const get = (f: Field): string =>
       colIndex[f] != null ? (cells[colIndex[f]!] ?? "").trim() : "";
 
@@ -806,24 +819,34 @@ export function parseBatchSheet(
     let model = modelCell;
     let caliber = get("caliber");
     const rawCategory = get("category");
-    let category = normalizeCategory(rawCategory) || rawCategory || opts?.defaultCategory || "handgun";
+    let category = normalizeCategory(rawCategory);
+    const explicitCategory = category === "handgun" || category === "rifle" || category === "shotgun";
+    let accessories: string[] = [];
+    let flags: string[] = [];
+    let rowPartsWarning: string | null = null;
 
     // Model-only export: one column holds brand + model + often caliber in prose.
     if (!rawTitle && !manufacturer && modelCell) {
       rawTitle = modelCell;
     }
 
-    if ((!manufacturer || !model) && rawTitle) {
-      const parsed = parseTitleBlob(rawTitle);
-      manufacturer = manufacturer || parsed.manufacturer;
-      model = model || parsed.model;
-      caliber = caliber || parsed.caliber;
-      // Prefer the description's own type when the sheet category is missing or a
-      // generic bucket (e.g. "Special Interest") that we couldn't normalize.
-      if (!["handgun", "rifle", "shotgun"].includes(category)) {
-        category = parsed.category;
+    const titleForParse = rawTitle || (!manufacturer && modelCell ? modelCell : "");
+    if (titleForParse) {
+      const parsed = parseTitleBlob(titleForParse);
+      if (!manufacturer || !model) {
+        manufacturer = manufacturer || parsed.manufacturer;
+        model = model || parsed.model;
+        caliber = caliber || parsed.caliber;
       }
+      accessories = parsed.accessories;
+      flags = parsed.flags;
+      rowPartsWarning = parsed.partsWarning;
+      if (!explicitCategory) category = parsed.category;
     }
+    if (!explicitCategory && !category) {
+      category = inferCategoryFromTitle(`${manufacturer} ${model} ${caliber}`) || opts?.defaultCategory || "handgun";
+    }
+    if (!category) category = "handgun";
 
     const currentBid = parseMoney(get("currentBid"));
     const requiredBid = parseMoney(get("requiredBid"));
@@ -850,8 +873,19 @@ export function parseBatchSheet(
       unresolved,
       lotKind,
       excludeFromPricing,
+      accessories,
+      flags,
+      partsWarning: rowPartsWarning,
     });
   }
+
+  warnings.push(
+    ...bidColumnWarnings({
+      headers,
+      mappedCurrentBid: colIndex.currentBid != null,
+      bids: rows.map((r) => r.currentBid),
+    }),
+  );
 
   const unresolvedCount = rows.filter((r) => !r.manufacturer.trim() || !r.model.trim()).length;
   const excludedCount = rows.filter((r) => r.excludeFromPricing).length;

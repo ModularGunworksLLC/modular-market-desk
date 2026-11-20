@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 
+import { persistBatchAudit } from "@/lib/batch/persist-run";
 import {
   batchDefaultsSchema,
   batchRowSchema,
@@ -40,6 +41,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const { rows, defaults } = parsed.data;
+  void persistBatchAudit(rows, defaults);
   const token = await getMarketToken();
 
   if (token) {
