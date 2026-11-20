@@ -23,13 +23,14 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
   const secret = String(formData.get("secret") ?? "").trim();
   const feedUrl = String(formData.get("feedUrl") ?? "").trim();
   const apiSid = String(formData.get("apiSid") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
   const expiresRaw = String(formData.get("expiresAt") ?? "").trim();
 
   if (!vendor) return { ok: false, message: "Vendor is required." };
   if (kindRaw !== "market_api" && kindRaw !== "vendor_session") {
     return { ok: false, message: "Invalid connection kind." };
   }
-  if (!secret) return { ok: false, message: "Paste a token or session string." };
+  if (!secret) return { ok: false, message: "Paste a token, password, or session string." };
 
   const normalized = normalizeVaultSecret(secret);
 
@@ -46,6 +47,7 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
   const meta: Record<string, unknown> = {};
   if (feedUrl) meta.feedUrl = feedUrl;
   if (apiSid) meta.apiSid = apiSid;
+  if (email) meta.email = email;
 
   try {
     const existing = await db
@@ -62,6 +64,9 @@ export async function saveConnection(_prev: ActionResult | null, formData: FormD
     }
     if (!apiSid && prevMeta.apiSid != null && meta.apiSid === undefined) {
       mergedMeta.apiSid = prevMeta.apiSid;
+    }
+    if (!email && prevMeta.email != null && meta.email === undefined) {
+      mergedMeta.email = prevMeta.email;
     }
 
     await db

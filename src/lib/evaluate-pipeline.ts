@@ -10,6 +10,7 @@
 import "server-only";
 
 import { round2 } from "@/lib/arbitrage/fees";
+import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
 import { evaluateDeal } from "@/lib/arbitrage/evaluate";
 import { defaultOutboundShip } from "@/lib/arbitrage/shipping";
 import { summarize } from "@/lib/arbitrage/stats";
@@ -25,14 +26,13 @@ import { db } from "@/lib/db";
 import { valuations } from "@/lib/db/schema";
 import { buildDealInsights, type DealInsights } from "@/lib/deal-insights";
 import { GbaApiClient, GbaApiError, type AskingCompRow, type SoldCompRow } from "@/lib/gba/client";
-import type { OaSelection } from "@/lib/gba/scorer";
+import { inferCaliberFromText, type OaNearMissSuggestion, type OaSelection } from "@/lib/gba/scorer";
 import { loadLocalMarket } from "@/lib/oa/local-comps";
-import { loadDepsAndResolve } from "@/lib/oa/resolve-local";
+import { loadDepsAndResolve, loadDepsAndSuggest } from "@/lib/oa/resolve-local";
 import { loadSoldWindowStats, pickFreshSoldStats } from "@/lib/oa/sold-windows";
 import type { EvaluateRequest } from "@/lib/validation";
 import { crossReferenceWholesale, type WholesaleGrid } from "@/lib/wholesale";
 import {
-  applyCoolingCapToSold,
   assessAskSoldDivergence,
   compareOaToWeb,
   webCanonicalKey,
@@ -40,7 +40,7 @@ import {
 import { loadWebPriceStats } from "@/lib/web-comps/ingest";
 import { enqueueWebEnrich } from "@/lib/web-comps/queue";
 import type { WebCompsSummary } from "@/lib/web-comps/types";
-import { assessMatchSuspicion } from "@/lib/match-suspicion";
+import { assessMatchSuspicion, IDENTITY_RATIO_NOGO } from "@/lib/match-suspicion";
 import { classifyLotTitle, lotKindLabel } from "@/lib/auctions/lot-kind";
 import { lookupLocalTgvStats, type TgvAdvisoryStats } from "@/lib/tgv/store";
 
@@ -53,6 +53,8 @@ export interface EvaluationOutput {
   insights: DealInsights;
   sourceStatus: Record<string, string>;
   catalogMatch: OaSelection | null;
+  /** Near-miss OA leaves when catalogMatch is null — user can click to lock IDs. */
+  catalogSuggestions: OaNearMissSuggestion[];
   soldListings: SoldCompRow[];
   askingListings: AskingCompRow[];
   compMeta: CompFilterMeta | null;
@@ -77,6 +79,12 @@ export class EvaluationError extends Error {
   }
 }
 
+function resolveQueryCaliber(body: EvaluateRequest, manufacturer: string, model: string, caliber: string): string {
+  const fromField = caliber.trim();
+  if (fromField) return fromField;
+  return inferCaliberFromText([body.lotTitle, manufacturer, model].filter(Boolean).join(" "));
+}
+
 export async function runEvaluation(
   body: EvaluateRequest,
   opts?: { persist?: boolean; token?: string | null },
@@ -88,6 +96,11 @@ export async function runEvaluation(
 
   const buyerPremiumPct =
     deskMode.workflow === "vendor" || deskMode.usedSubtype === "tradein" ? 0 : body.buyerPremiumPct;
+
+  const purchaseCardPct =
+    deskMode.workflow === "vendor" || deskMode.usedSubtype === "tradein"
+      ? 0
+      : (body.purchaseCardPct ?? DEAL_DEFAULTS.purchaseCardPct);
 
   const compCondition =
     deskMode.workflow === "vendor"
@@ -104,6 +117,7 @@ export async function runEvaluation(
     targetAcquisitionCost: body.targetAcquisitionCost,
     inboundShip: body.inboundShip,
     buyerPremiumPct,
+    purchaseCardPct,
     outboundShip,
     buyerPaysOutboundShip: body.buyerPaysOutboundShip,
     buyerPaysCardFee: body.buyerPaysCardFee,
@@ -129,6 +143,7 @@ export async function runEvaluation(
     upc: enriched.upc || undefined,
     mpn: enriched.mpn || undefined,
     catalogDescription: enriched.catalogDescription ?? undefined,
+    queryModel: enriched.model || undefined,
     dealerCost: deskMode.workflow === "vendor" ? body.targetAcquisitionCost : undefined,
     newOnlyAsking: deskMode.workflow === "vendor",
     minAskRatioOfCost: deskMode.workflow === "vendor" ? 0.75 : undefined,
@@ -201,6 +216,7 @@ export async function runEvaluation(
       insights,
       sourceStatus,
       catalogMatch: null,
+      catalogSuggestions: [],
       soldListings: [],
       askingListings: [],
       compMeta: null,
@@ -283,7 +299,9 @@ export async function runEvaluation(
         const hit = await loadDepsAndResolve({
           manufacturer: enriched.manufacturer,
           model: enriched.model,
-          caliber: enriched.caliber || undefined,
+          caliber:
+            resolveQueryCaliber(body, enriched.manufacturer, enriched.model, enriched.caliber) ||
+            undefined,
           condition: compCondition,
         });
         if (hit) {
@@ -324,7 +342,9 @@ export async function runEvaluation(
               {
                 manufacturer: enriched.manufacturer,
                 model: enriched.model,
-                caliber: enriched.caliber || undefined,
+                caliber:
+                  resolveQueryCaliber(body, enriched.manufacturer, enriched.model, enriched.caliber) ||
+                  undefined,
                 category: body.category,
                 mpn: enriched.mpn || undefined,
                 condition: compCondition,
@@ -348,7 +368,11 @@ export async function runEvaluation(
             const reason = redactSecrets(
               err instanceof GbaApiError ? err.message : (err as Error).message,
             );
-            sourceStatus.gba = `error: ${reason}`;
+            // Unauthorized / live failures should not hide a local catalog miss with a
+            // misleading "no catalog match" when the token is simply dead.
+            sourceStatus.gba = /unauthorized|401/i.test(reason)
+              ? `OA token unauthorized — local catalog miss for ${enriched.manufacturer} ${enriched.model}`.trim()
+              : `error: ${reason}`;
           }
         }
       }
@@ -410,7 +434,7 @@ export async function runEvaluation(
     }
   }
 
-  // --- Street asks: advisory + Cooling sanity vs OA solds. Never replace solds. ---
+  // --- Street asks: advisory only vs OA solds. Never rewrite Max Pay. ---
   const webIdentity = {
     manufacturer: enriched.manufacturer,
     model: enriched.model,
@@ -459,8 +483,7 @@ export async function runEvaluation(
       });
       const webMed = webComps.median.toFixed(0);
       if (webComps.divergence === "cooling") {
-        sourceStatus.web = `Cooling — street asks ($${webMed}) under sold FMV; Max Bid capped toward asks`;
-        sold = applyCoolingCapToSold(sold, webComps.median);
+        sourceStatus.web = `Cooling — street asks ($${webMed}) under sold FMV (advisory only; Max Pay stays OA)`;
         webComps.note = sourceStatus.web;
       } else if (webComps.divergence === "asks_rich") {
         sourceStatus.web = `Asks rich (street $${webMed}) — money still uses OA solds`;
@@ -556,6 +579,21 @@ export async function runEvaluation(
     cheapestWholesalePrice: cheapestInStock?.dealerPrice ?? null,
   });
 
+  if (
+    deskMode.workflow === "used" &&
+    suspicion.oaToBidRatio != null &&
+    suspicion.oaToBidRatio >= IDENTITY_RATIO_NOGO
+  ) {
+    const reason = `OA solds are ${suspicion.oaToBidRatio.toFixed(1)}× this hammer — identity too far to GO.`;
+    matchWarnings.push(reason);
+    result.verdict = "NO-GO";
+    result.verdictReasons = [...result.verdictReasons, reason];
+    result.exits.local.verdict = "NO-GO";
+    result.exits.local.verdictReasons = [...result.exits.local.verdictReasons, reason];
+    result.exits.gunbroker.verdict = "NO-GO";
+    result.exits.gunbroker.verdictReasons = [...result.exits.gunbroker.verdictReasons, reason];
+  }
+
   const insights = buildDealInsights({
     modeId,
     result,
@@ -631,6 +669,24 @@ export async function runEvaluation(
     }
   }
 
+  // Near-miss suggestions when we could not lock an OA leaf — user can click to apply.
+  let catalogSuggestions: OaNearMissSuggestion[] = [];
+  if (!catalogMatch && body.autoComps !== false) {
+    try {
+      catalogSuggestions = await loadDepsAndSuggest(
+        {
+          manufacturer: enriched.manufacturer,
+          model: enriched.model,
+          caliber: enriched.caliber || undefined,
+          condition: compCondition,
+        },
+        5,
+      );
+    } catch {
+      catalogSuggestions = [];
+    }
+  }
+
   return {
     deskMode,
     modeId,
@@ -640,6 +696,7 @@ export async function runEvaluation(
     insights,
     sourceStatus,
     catalogMatch,
+    catalogSuggestions,
     soldListings,
     askingListings,
     compMeta,

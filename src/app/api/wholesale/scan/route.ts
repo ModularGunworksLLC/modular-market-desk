@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const bodySchema = z.object({
-  vendor: z.string().optional().default("2ndamendmentwholesale"),
+  vendor: z.string().optional().default("all"),
   limit: z.number().int().min(1).max(100).optional().default(40),
   targetProfit: z.number().nonnegative().optional(),
   minMarginPct: z.number().min(0).optional(),

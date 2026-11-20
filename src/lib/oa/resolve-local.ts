@@ -7,9 +7,11 @@ import { createClient } from "@libsql/client";
 import {
   resolveQueryAttempts,
   resolveSelection,
+  suggestNearMissSelections,
   type GbaQuery,
   type OaDependencies,
   type OaManufacturerNode,
+  type OaNearMissSuggestion,
   type OaSelection,
 } from "@/lib/gba/scorer";
 import { ensureOaCatalogTables } from "@/lib/oa/sync-catalog";
@@ -73,14 +75,32 @@ async function loadDeps(): Promise<OaDependencies> {
 let depsCache: { at: number; deps: OaDependencies } | null = null;
 const DEPS_TTL_MS = 10 * 60 * 1000;
 
-export async function loadDepsAndResolve(query: GbaQuery): Promise<OaSelection | null> {
+async function getCachedDeps(): Promise<OaDependencies> {
   const now = Date.now();
   if (!depsCache || now - depsCache.at > DEPS_TTL_MS) {
     depsCache = { at: now, deps: await loadDeps() };
   }
+  return depsCache.deps;
+}
+
+export async function loadDepsAndResolve(query: GbaQuery): Promise<OaSelection | null> {
+  const deps = await getCachedDeps();
   for (const attempt of resolveQueryAttempts(query)) {
-    const hit = resolveSelection(depsCache.deps, attempt);
+    const hit = resolveSelection(deps, attempt);
     if (hit) return hit;
   }
   return null;
+}
+
+/** Near-miss OA leaves when auto-resolve fails — for click-to-apply on Evaluate. */
+export async function loadDepsAndSuggest(
+  query: GbaQuery,
+  limit = 5,
+): Promise<OaNearMissSuggestion[]> {
+  const deps = await getCachedDeps();
+  for (const attempt of resolveQueryAttempts(query)) {
+    const rows = suggestNearMissSelections(deps, attempt, limit);
+    if (rows.length > 0) return rows;
+  }
+  return suggestNearMissSelections(deps, query, limit);
 }

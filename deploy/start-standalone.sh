@@ -4,6 +4,10 @@ ROOT=/opt/market-desk-v2
 cd "$ROOT"
 cp -r .next/static .next/standalone/.next/static
 mkdir -p .next/standalone/data
+mkdir -p .next/standalone/public
+# Next standalone does not always include public/ — copy static assets needed at runtime.
+rm -rf .next/standalone/public/*
+cp -a "$ROOT/public/." .next/standalone/public/
 mkdir -p "$ROOT/data/trade-in"
 # Keep DB + trade-in photos on persistent host path.
 ln -sf "$ROOT/data/desk.db" .next/standalone/data/desk.db 2>/dev/null || true

@@ -4,46 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CLIENT_DEAL_DEFAULTS } from "@/lib/arbitrage/client-defaults";
 import { DEFAULT_BID_INCREMENTS, type BidIncrementBand } from "@/lib/auctions/bid-increments";
+import { batchExportFilename, batchResultsToCsvBlob } from "@/lib/batch/csv";
 import { parseBatchSheet, type BatchRow } from "@/lib/batch/parse";
 import type { BatchResultRow, BatchStreamEvent } from "@/lib/batch/types";
 import { loadDealerDefaults } from "@/lib/desk-defaults";
 import { parseMoneyFieldOrZero, usd } from "@/lib/format";
 import type { WebEnrichPhase } from "@/lib/web-comps/types";
 
-type SortKey = "lot" | "headroom" | "netProfit" | "maxBid" | "soldCount";
+import { BatchSheetTable } from "./BatchSheetTable";
+import { RankedBuySheet } from "./RankedBuySheet";
 
-function webEnrichBadge(phase: WebEnrichPhase | undefined | null): {
-  label: string;
-  className: string;
-  title: string;
-} {
-  switch (phase) {
-    case "oa":
-      return { label: "OA", className: "text-desk-go", title: "Using Outdoor Analytics solds" };
-    case "web":
-      return { label: "Web ✓", className: "text-desk-accent", title: "Web-validated comps applied to Max Bid" };
-    case "queued":
-      return { label: "Queued…", className: "text-desk-warn", title: "Waiting in Tavily drip queue" };
-    case "running":
-      return { label: "Enriching…", className: "text-desk-warn", title: "Tavily enrich in progress now" };
-    case "ready":
-      return {
-        label: "Ready",
-        className: "text-desk-accent",
-        title: "High-conf web comps ready — applying to sheet automatically",
-      };
-    case "weak":
-      return {
-        label: "Weak",
-        className: "text-desk-muted",
-        title: "Enrich finished but confidence too low for Max Bid",
-      };
-    case "skipped":
-      return { label: "Skipped", className: "text-desk-muted", title: "Not queued (daily budget or skipped)" };
-    default:
-      return { label: "—", className: "text-desk-muted", title: "" };
-  }
-}
+type SortKey = "lot" | "headroom" | "netProfit" | "maxBid" | "soldCount";
 
 const SAMPLE = `Lot,Title,Current Bid,Buyer Premium
 101,Glock 19 Gen5 9mm,420,18
@@ -54,24 +25,28 @@ const SAMPLE = `Lot,Title,Current Bid,Buyer Premium
 export default function BatchPage() {
   const [text, setText] = useState("");
   const [defaults, setDefaults] = useState({
-    targetProfit: String(CLIENT_DEAL_DEFAULTS.targetProfit),
+    targetProfit: "100",
     minMarginPct: String(CLIENT_DEAL_DEFAULTS.minMarginPct),
     buyerPremiumPct: "",
+    purchaseCardPct: String(CLIENT_DEAL_DEFAULTS.purchaseCardPct),
     outboundShip: "",
     inboundShip: "0",
     listingUpgrades: String(CLIENT_DEAL_DEFAULTS.listingUpgrades),
     condition: "any" as "new" | "used" | "any",
-    sellChannel: "local" as "gunbroker" | "local",
+    sellChannel: "gunbroker" as "gunbroker" | "local",
     salesTaxPct: String(CLIENT_DEAL_DEFAULTS.salesTaxPct),
     buyerPaysOutboundShip: true,
     buyerPaysCardFee: true,
     bidIncrements: DEFAULT_BID_INCREMENTS.map((b) => ({ ...b })),
   });
+  const PROFIT_CHIPS = [50, 75, 100] as const;
+  const policyBusy = useRef(false);
   const [results, setResults] = useState<Map<number, BatchResultRow>>(new Map());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [onlyGo, setOnlyGo] = useState(false);
+  const [fullColumns, setFullColumns] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("headroom");
   const [incrementHint, setIncrementHint] = useState<string | null>(null);
   const [fileStatus, setFileStatus] = useState<{
@@ -115,8 +90,9 @@ export default function BatchPage() {
       ...prev,
       targetProfit: d.targetProfit || prev.targetProfit,
       minMarginPct: d.minMarginPct || prev.minMarginPct,
+      purchaseCardPct: d.purchaseCardPct || prev.purchaseCardPct,
       // Do not overwrite sheet BP with global Settings — auction BP is per-event.
-      sellChannel: d.sellChannel === "gunbroker" ? "gunbroker" : prev.sellChannel,
+      // Sheet exit toggle is operator choice for this auction (default GB).
       bidIncrements: d.bidIncrements?.length ? d.bidIncrements : prev.bidIncrements,
     }));
     const onDefaults = (e: Event) => {
@@ -124,6 +100,7 @@ export default function BatchPage() {
         bidIncrements?: BidIncrementBand[];
         targetProfit?: string;
         minMarginPct?: string;
+        purchaseCardPct?: string;
       } | undefined;
       if (!detail) return;
       setDefaults((prev) => ({
@@ -131,6 +108,7 @@ export default function BatchPage() {
         ...(detail.bidIncrements?.length ? { bidIncrements: detail.bidIncrements } : {}),
         ...(detail.targetProfit ? { targetProfit: detail.targetProfit } : {}),
         ...(detail.minMarginPct ? { minMarginPct: detail.minMarginPct } : {}),
+        ...(detail.purchaseCardPct ? { purchaseCardPct: detail.purchaseCardPct } : {}),
       }));
     };
     window.addEventListener("desk-defaults-changed", onDefaults);
@@ -233,11 +211,13 @@ export default function BatchPage() {
           processedToday?: number;
           maxPerDay?: number;
           running?: boolean;
+          lastError?: string | null;
         } | null;
-        if (q && (q.depth || q.running)) {
+        if (q && (q.depth || q.running || q.lastError)) {
           setWebQueueBanner(
             `Web enrich: ${q.depth ?? 0} queued · ${q.processedToday ?? 0}/${q.maxPerDay ?? 50} today` +
-              (q.running ? " · running" : ""),
+              (q.running ? " · running" : "") +
+              (q.lastError ? ` · ${q.lastError}` : ""),
           );
         }
 
@@ -337,7 +317,13 @@ export default function BatchPage() {
       setText(json.batchCsv || "");
       const platform = json.platformLabel || json.platform || "auction";
       setAuctionMsg(
-        `${platform}: loaded ${json.sheetLots?.length ?? 0} firearm lots` +
+        `${platform}: loaded ${json.sheetLots?.length ?? json.loadedLots ?? 0} firearm lots` +
+          (json.loadedLots != null && json.pagesFetched != null
+            ? ` · ${json.loadedLots} total lots across ${json.pagesFetched} page${json.pagesFetched === 1 ? "" : "s"}` +
+              (json.stoppedReason && json.stoppedReason !== "complete"
+                ? ` (stopped: ${String(json.stoppedReason).replace(/_/g, " ")})`
+                : "")
+            : "") +
           (json.skipped ? ` (${json.skipped} non-firearm skipped)` : "") +
           (json.hasListingIncrements
             ? " · Listing next-bid / increments captured"
@@ -418,6 +404,73 @@ export default function BatchPage() {
     }
   }
 
+  function buildPayloadDefaults(override?: Partial<typeof defaults>) {
+    const d = { ...defaults, ...override };
+    return {
+      condition: d.condition,
+      buyerPremiumPct: parseMoneyFieldOrZero(d.buyerPremiumPct),
+      purchaseCardPct: parseMoneyFieldOrZero(d.purchaseCardPct),
+      inboundShip: parseMoneyFieldOrZero(d.inboundShip),
+      outboundShip:
+        d.outboundShip.trim() === "" ? undefined : parseMoneyFieldOrZero(d.outboundShip),
+      listingUpgrades: parseMoneyFieldOrZero(d.listingUpgrades),
+      buyerPaysOutboundShip: d.buyerPaysOutboundShip,
+      buyerPaysCardFee: d.buyerPaysCardFee,
+      targetProfit: parseMoneyFieldOrZero(d.targetProfit),
+      minMarginPct: parseMoneyFieldOrZero(d.minMarginPct),
+      sellChannel: d.sellChannel,
+      salesTaxPct: parseMoneyFieldOrZero(d.salesTaxPct),
+      bidIncrements: d.bidIncrements,
+    };
+  }
+
+  /** Re-run OA math for open sheet with new exit / profit (most accurate). */
+  async function reevalSheetPolicy(next: {
+    sellChannel?: "gunbroker" | "local";
+    targetProfit?: string;
+  }) {
+    const run = lastRunRef.current;
+    if (!run || results.size === 0 || policyBusy.current) {
+      setDefaults((d) => ({ ...d, ...next }));
+      return;
+    }
+    policyBusy.current = true;
+    const mergedDefaults = { ...defaults, ...next };
+    setDefaults(mergedDefaults);
+    setRunning(true);
+    setError(null);
+    try {
+      const payloadDefaults = buildPayloadDefaults(next);
+      lastRunRef.current = { ...run, defaults: payloadDefaults };
+      const allRows = Array.from(run.rowsByNumber.values());
+      const CHUNK = 40;
+      for (let i = 0; i < allRows.length; i += CHUNK) {
+        const chunk = allRows.slice(i, i + CHUNK);
+        const res = await fetch("/api/batch/reeval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: chunk, defaults: payloadDefaults }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(json?.error ? JSON.stringify(json.error) : `Re-eval failed (${res.status})`);
+        }
+        const patched = (json?.rows ?? []) as BatchResultRow[];
+        setResults((prev) => {
+          const m = new Map(prev);
+          for (const row of patched) m.set(row.rowNumber, row);
+          return m;
+        });
+        setProgress({ done: Math.min(i + chunk.length, allRows.length), total: allRows.length });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+      policyBusy.current = false;
+    }
+  }
+
   async function run() {
     if (!parsed || evaluable.length === 0) return;
     setRunning(true);
@@ -445,25 +498,10 @@ export default function BatchPage() {
     }));
     if (defaults.buyerPremiumPct.trim() === "") {
       setError("Enter this auction’s buyer premium % before running.");
+      setRunning(false);
       return;
     }
-    const payloadDefaults = {
-      condition: defaults.condition,
-      buyerPremiumPct: parseMoneyFieldOrZero(defaults.buyerPremiumPct),
-      inboundShip: parseMoneyFieldOrZero(defaults.inboundShip),
-      outboundShip:
-        defaults.outboundShip.trim() === ""
-          ? undefined
-          : parseMoneyFieldOrZero(defaults.outboundShip),
-      listingUpgrades: parseMoneyFieldOrZero(defaults.listingUpgrades),
-      buyerPaysOutboundShip: defaults.buyerPaysOutboundShip,
-      buyerPaysCardFee: defaults.buyerPaysCardFee,
-      targetProfit: parseMoneyFieldOrZero(defaults.targetProfit),
-      minMarginPct: parseMoneyFieldOrZero(defaults.minMarginPct),
-      sellChannel: defaults.sellChannel,
-      salesTaxPct: parseMoneyFieldOrZero(defaults.salesTaxPct),
-      bidIncrements: defaults.bidIncrements,
-    };
+    const payloadDefaults = buildPayloadDefaults();
     lastRunRef.current = {
       rowsByNumber: new Map(payloadRows.map((r) => [r.rowNumber, r])),
       defaults: payloadDefaults,
@@ -548,6 +586,17 @@ export default function BatchPage() {
     return { evaluated: all.length, go: go.length, totalHeadroom, noComps, webQueued, webReady, webDone };
   }, [results]);
 
+  function downloadCsv() {
+    if (rows.length === 0) return;
+    const blob = batchResultsToCsvBlob(rows);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = batchExportFilename({ goOnly: onlyGo });
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const setD = (k: keyof typeof defaults) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setDefaults((d) => ({ ...d, [k]: e.target.value }));
 
@@ -556,7 +605,8 @@ export default function BatchPage() {
       <div className="mb-6">
         <h1 className="text-lg font-semibold tracking-tight">Batch Buy-Sheet</h1>
         <p className="text-xs text-desk-muted">
-          Paste or upload an auction manifest — Max Bid, GO/NO-GO, and dealer floor per lot.
+          FMV → Next bid → Max bid for your profit floor → GO / NO-GO. Pick GunBroker or Local for the whole
+          sheet; Max bid and GO follow that exit.
         </p>
       </div>
 
@@ -616,7 +666,7 @@ export default function BatchPage() {
                 className="field-input flex-1 font-mono text-xs"
                 value={auctionUrl}
                 onChange={(e) => setAuctionUrl(e.target.value)}
-                placeholder="https://bids… / …bidwrangler.com/ui/auctions/… / proxibid.com/for-sale/guns…"
+                placeholder="https://bids… / hibid.com/catalog/… / …bidwrangler.com/ui/auctions/… / proxibid.com/…/event-catalog/…"
               />
             <button
               type="button"
@@ -628,8 +678,8 @@ export default function BatchPage() {
             </button>
             </div>
             <p className="text-[11px] text-desk-muted">
-              Pearce/Fowler (HiBid), Van Massey (BidWrangler), Proxibid guns categories. Load → set this auction&apos;s
-              BP → Run. Sheet shows Local and GunBroker Max Bid side-by-side.
+              HiBid (bids.* and hibid.com/catalog), BidWrangler, Proxibid event/browse catalogs. LiveAuctioneers: use the
+              HiBid listing of the same sale or paste CSV. Load → set this auction&apos;s BP → Run.
             </p>
             {auctionMsg && <p className="text-xs text-desk-text">{auctionMsg}</p>}
           </div>
@@ -686,8 +736,74 @@ export default function BatchPage() {
             </div>
           )}
 
+          <h2 className="pt-1 text-sm font-semibold text-desk-muted">Decision (whole sheet)</h2>
+          <div className="rounded-md border border-desk-accent/40 bg-desk-accent/5 p-3 space-y-3">
+            <div>
+              <p className="field-label mb-1.5">Sell exit</p>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["gunbroker", "GunBroker"],
+                    ["local", "Local"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    disabled={running}
+                    onClick={() => void reevalSheetPolicy({ sellChannel: id })}
+                    className={`rounded-md px-3 py-2 text-sm font-semibold ${
+                      defaults.sellChannel === id
+                        ? "bg-desk-accent text-white"
+                        : "border border-desk-border bg-desk-panel2 text-desk-text hover:border-desk-accent"
+                    } disabled:opacity-50`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="field-label mb-1.5">Profit floor</p>
+              <div className="flex flex-wrap gap-2">
+                {PROFIT_CHIPS.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    disabled={running}
+                    onClick={() => void reevalSheetPolicy({ targetProfit: String(n) })}
+                    className={`rounded-md px-3 py-1.5 text-sm font-semibold ${
+                      defaults.targetProfit.trim() === String(n)
+                        ? "bg-desk-accent text-white"
+                        : "border border-desk-border bg-desk-panel2 text-desk-text hover:border-desk-accent"
+                    } disabled:opacity-50`}
+                  >
+                    ${n}
+                  </button>
+                ))}
+                <div className="flex min-w-[7rem] flex-1 items-center gap-1">
+                  <span className="text-xs text-desk-muted">$</span>
+                  <input
+                    className="field-input !py-1.5"
+                    inputMode="decimal"
+                    value={defaults.targetProfit}
+                    disabled={running}
+                    onChange={(e) => setDefaults((d) => ({ ...d, targetProfit: e.target.value }))}
+                    onBlur={(e) => {
+                      if (results.size > 0) void reevalSheetPolicy({ targetProfit: e.target.value });
+                    }}
+                    placeholder="custom"
+                  />
+                </div>
+              </div>
+              <p className="mt-1.5 text-[11px] text-desk-muted">
+                Max bid / GO use this profit on the selected exit. Changing either re-runs the sheet math.
+              </p>
+            </div>
+          </div>
+
           <h2 className="pt-1 text-sm font-semibold text-desk-muted">This auction</h2>
-          <div className="rounded-md border border-desk-accent/40 bg-desk-accent/5 p-3">
+          <div className="rounded-md border border-desk-border bg-desk-panel2/40 p-3">
             <div className="grid grid-cols-2 gap-3">
               <NumField
                 label="Buyer premium % (this auction)"
@@ -695,33 +811,19 @@ export default function BatchPage() {
                 on={setD("buyerPremiumPct")}
                 placeholder="e.g. 13 or 15"
               />
-              <div>
-                <label className="field-label">Sort / legacy preference</label>
-                <select
-                  className="field-input"
-                  value={defaults.sellChannel}
-                  onChange={(e) =>
-                    setDefaults((d) => ({
-                      ...d,
-                      sellChannel: e.target.value as "gunbroker" | "local",
-                    }))
-                  }
-                >
-                  <option value="local">Prefer Local when tying</option>
-                  <option value="gunbroker">Prefer GunBroker when tying</option>
-                </select>
-              </div>
+              <NumField
+                label="Purchase card % (this auction)"
+                v={defaults.purchaseCardPct}
+                on={setD("purchaseCardPct")}
+                placeholder="3"
+              />
             </div>
             <p className="mt-2 text-[11px] text-desk-muted">
-              BP is per auction house — required. Results always show <strong>Local</strong> and{" "}
-              <strong>GunBroker</strong> Max Bid / GO. All-in = hammer × (1+BP%) + inbound. Active BP{" "}
-              <span className="font-semibold text-desk-text">
-                {defaults.buyerPremiumPct.trim() || "?"}%
-              </span>
+              BP required. Purchase card (default 3%) on hammer+premium when you pay by card; 0 for cash. All-in =
+              hammer × (1+BP%) × (1+card%) + inbound.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <NumField label="Target profit ($)" v={defaults.targetProfit} on={setD("targetProfit")} />
             <NumField label="Min margin %" v={defaults.minMarginPct} on={setD("minMarginPct")} />
             <NumField label="Inbound ship ($)" v={defaults.inboundShip} on={setD("inboundShip")} />
             <NumField label="Local sales tax %" v={defaults.salesTaxPct} on={setD("salesTaxPct")} />
@@ -752,7 +854,7 @@ export default function BatchPage() {
             </div>
           </div>
           <p className="text-[11px] text-desk-muted">
-            Per-row Current Bid from the CSV/auction ingest. GO / Max / Profit use the exit channel above.
+            Per-row Current Bid from the CSV/auction ingest. Max bid & GO follow the Decision exit above.
           </p>
 
           <button
@@ -797,7 +899,7 @@ export default function BatchPage() {
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                 <SummaryStat label="Lots evaluated" value={String(summary.evaluated)} />
                 <SummaryStat label="GO lots" value={String(summary.go)} tone="go" />
-                <SummaryStat label="Total headroom (GO)" value={usd(summary.totalHeadroom)} tone="go" />
+                <SummaryStat label="Total paddle left (GO)" value={usd(summary.totalHeadroom)} tone="go" />
                 <SummaryStat label="No comps found" value={String(summary.noComps)} tone={summary.noComps ? "nogo" : undefined} />
                 <SummaryStat
                   label="Web enriching"
@@ -817,11 +919,59 @@ export default function BatchPage() {
                 </p>
               )}
 
-              <div className="panel overflow-x-auto">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-desk-muted">Ranked buy-sheet</h3>
-                  <div className="flex items-center gap-3 text-xs">
-                    <label className="flex cursor-pointer items-center gap-1.5">
+              <RankedBuySheet
+                rows={rows}
+                sellChannel={defaults.sellChannel}
+                targetProfit={parseMoneyFieldOrZero(defaults.targetProfit)}
+                buyerPremiumPct={
+                  parseMoneyFieldOrZero(defaults.buyerPremiumPct) ||
+                  rows.find((r) => r.buyerPremiumPct != null)?.buyerPremiumPct ||
+                  0
+                }
+                purchaseCardPct={parseMoneyFieldOrZero(defaults.purchaseCardPct)}
+                auctionUrl={auctionUrl.trim() || undefined}
+                toolbar={
+                  <>
+                    <div className="flex rounded-md border border-desk-border p-0.5 text-xs">
+                      {(
+                        [
+                          ["gunbroker", "GB"],
+                          ["local", "Local"],
+                        ] as const
+                      ).map(([id, label]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          disabled={running}
+                          onClick={() => void reevalSheetPolicy({ sellChannel: id })}
+                          className={`rounded px-2.5 py-1 font-semibold ${
+                            defaults.sellChannel === id
+                              ? "bg-desk-accent text-white"
+                              : "text-desk-muted hover:text-desk-text"
+                          } disabled:opacity-50`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex rounded-md border border-desk-border p-0.5 text-xs">
+                      {PROFIT_CHIPS.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          disabled={running}
+                          onClick={() => void reevalSheetPolicy({ targetProfit: String(n) })}
+                          className={`rounded px-2.5 py-1 font-semibold ${
+                            defaults.targetProfit.trim() === String(n)
+                              ? "bg-desk-accent text-white"
+                              : "text-desk-muted hover:text-desk-text"
+                          } disabled:opacity-50`}
+                        >
+                          ${n}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs">
                       <input
                         type="checkbox"
                         className="h-3.5 w-3.5 accent-desk-accent"
@@ -830,7 +980,23 @@ export default function BatchPage() {
                       />
                       GO only
                     </label>
-                    <label className="flex items-center gap-1.5">
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 accent-desk-accent"
+                        checked={fullColumns}
+                        onChange={(e) => setFullColumns(e.target.checked)}
+                      />
+                      Legacy full table
+                    </label>
+                    <button
+                      type="button"
+                      onClick={downloadCsv}
+                      className="rounded-md border border-desk-border bg-desk-panel2 px-2.5 py-1 text-xs font-medium text-desk-accent hover:border-desk-accent"
+                    >
+                      Export CSV{onlyGo ? " (GO)" : ""} · {rows.length}
+                    </button>
+                    <label className="flex items-center gap-1.5 text-xs">
                       Sort
                       <select
                         className="field-input !w-auto !py-1 text-xs"
@@ -844,209 +1010,21 @@ export default function BatchPage() {
                         <option value="lot">Lot</option>
                       </select>
                     </label>
-                  </div>
+                  </>
+                }
+              />
+              {fullColumns ? (
+                <div className="panel mt-3 overflow-x-auto">
+                  <h3 className="mb-2 text-sm font-semibold text-desk-muted">Legacy full columns</h3>
+                  <BatchSheetTable
+                    rows={rows}
+                    fullColumns={fullColumns}
+                    incrementHint={incrementHint}
+                    sellChannel={defaults.sellChannel}
+                    targetProfit={parseMoneyFieldOrZero(defaults.targetProfit)}
+                  />
                 </div>
-                <table className="w-full min-w-[1680px] text-sm">
-                  <thead className="text-left text-xs uppercase text-desk-muted">
-                    <tr>
-                      <th className="py-1">Lot</th>
-                      <th>Item</th>
-                      <th>Local</th>
-                      <th>GB</th>
-                      <th>Trust</th>
-                      <th className="text-right">Market med</th>
-                      <th className="text-right">Decision P25</th>
-                      <th className="text-right">Current</th>
-                      <th className="text-right">Next</th>
-                      <th className="text-right">All-in@next</th>
-                      <th className="text-right">Max Local</th>
-                      <th className="text-right">Max GB</th>
-                      <th className="text-right">Walk</th>
-                      <th className="text-right">Headroom</th>
-                      <th className="text-right">P@$ Local</th>
-                      <th className="text-right">P@$ GB</th>
-                      <th className="text-right">Dealer floor</th>
-                      <th className="text-right">Comps</th>
-                    </tr>
-                  </thead>
-                  <tbody className="num">
-                    {rows.map((r) => {
-                      const webBadge = webEnrichBadge(r.webEnrich?.phase);
-                      const marketValue = r.estimatedGrossResale ?? r.soldMedian ?? null;
-                      const marketNote = r.grossResaleNote ?? undefined;
-                      const trustLabel =
-                        r.divergence === "cooling"
-                          ? "Cooling"
-                          : r.divergence === "asks_rich"
-                            ? "Asks rich"
-                            : r.divergence === "ok"
-                              ? "OK"
-                              : webBadge.label;
-                      const trustClass =
-                        r.divergence === "cooling"
-                          ? "text-desk-nogo"
-                          : r.divergence === "asks_rich"
-                            ? "text-desk-warn"
-                            : r.divergence === "ok"
-                              ? "text-desk-go"
-                              : webBadge.className;
-                      return (
-                      <tr
-                        key={r.rowNumber}
-                        className={`border-t border-desk-border ${
-                          r.verdict === "GO" ? "bg-desk-go/5" : ""
-                        }`}
-                      >
-                        <td className="py-1.5 font-sans">{r.lot}</td>
-                        <td className="max-w-[260px] font-sans">
-                          <div className="truncate" title={r.label}>
-                            {r.label}
-                            {r.bestDealer && (
-                              <span className="ml-1 text-[10px] capitalize text-desk-muted">· {r.bestDealer}</span>
-                            )}
-                          </div>
-                          <div
-                            className="truncate text-[10px] text-desk-muted"
-                            title={r.error ?? r.matchNote}
-                          >
-                            {r.error ? `error: ${r.error}` : r.matchNote || "—"}
-                            {r.incrementSource ? ` · ${r.incrementSource}` : ""}
-                            {r.askMedian != null ? ` · asks ~$${Math.round(r.askMedian)}` : ""}
-                          </div>
-                          {r.newDealerWarning && (
-                            <div
-                              className="mt-0.5 truncate text-[10px] font-semibold text-desk-nogo"
-                              title={r.newDealerWarning}
-                            >
-                              {r.newDealerWarning}
-                            </div>
-                          )}
-                          {r.matchWarnings?.length > 0 && (
-                            <div
-                              className="mt-0.5 truncate text-[10px] font-medium text-desk-nogo"
-                              title={r.matchWarnings.join(" · ")}
-                            >
-                              ⚠ {r.matchWarnings[0]}
-                              {r.matchWarnings.length > 1
-                                ? ` (+${r.matchWarnings.length - 1})`
-                                : ""}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          {r.error ? (
-                            <span className="text-[11px] text-desk-nogo" title={r.error}>
-                              err
-                            </span>
-                          ) : r.verdictLocal == null ? (
-                            <span className="text-[11px] text-desk-muted">—</span>
-                          ) : (
-                            <span
-                              className={`font-sans font-bold ${
-                                r.verdictLocal === "GO" ? "text-desk-go" : "text-desk-nogo"
-                              }`}
-                            >
-                              {r.verdictLocal}
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          {r.error ? (
-                            <span className="text-[11px] text-desk-nogo">err</span>
-                          ) : r.verdictGb == null ? (
-                            <span className="text-[11px] text-desk-muted">—</span>
-                          ) : (
-                            <span
-                              className={`font-sans font-bold ${
-                                r.verdictGb === "GO" ? "text-desk-go" : "text-desk-nogo"
-                              }`}
-                            >
-                              {r.verdictGb}
-                            </span>
-                          )}
-                        </td>
-                        <td className="font-sans">
-                          <span className={`text-[11px] font-semibold ${trustClass}`} title={webBadge.title}>
-                            {trustLabel}
-                          </span>
-                        </td>
-                        <td className="text-right" title={marketNote}>
-                          {marketValue != null ? (
-                            <div>
-                              <div className="num font-semibold text-desk-text">{usd(marketValue)}</div>
-                              <div className="text-[10px] font-sans text-desk-muted">OA med</div>
-                            </div>
-                          ) : (
-                            <span className="text-desk-muted">—</span>
-                          )}
-                        </td>
-                        <td className="text-right">
-                          {r.decisionP25 != null ? (
-                            <div>
-                              <div className="num font-semibold">{usd(r.decisionP25)}</div>
-                              <div className="text-[10px] font-sans text-desk-muted">sold P25</div>
-                            </div>
-                          ) : (
-                            <span className="text-desk-muted">—</span>
-                          )}
-                        </td>
-                        <td className="text-right">{usd(r.currentBid)}</td>
-                        <td className="text-right font-semibold">{usd(r.nextBid)}</td>
-                        <td className="text-right" title={`BP ${r.buyerPremiumPct}%`}>
-                          {usd(r.allInAtNext)}
-                        </td>
-                        <td
-                          className={`text-right font-semibold ${
-                            r.verdictLocal === "GO" ? "text-desk-go" : "text-desk-text"
-                          }`}
-                        >
-                          {usd(r.maxBidLocal)}
-                        </td>
-                        <td
-                          className={`text-right font-semibold ${
-                            r.verdictGb === "GO" ? "text-desk-go" : "text-desk-text"
-                          }`}
-                        >
-                          {usd(r.maxBidGb)}
-                        </td>
-                        <td className="text-right font-semibold">{usd(r.walkAwayBid ?? r.walkAway)}</td>
-                        <td
-                          className={`text-right font-semibold ${
-                            r.headroom == null ? "text-desk-muted" : r.headroom >= 0 ? "text-desk-go" : "text-desk-nogo"
-                          }`}
-                        >
-                          {r.headroom == null ? "—" : `${r.headroom >= 0 ? "+" : ""}${usd(r.headroom)}`}
-                        </td>
-                        <td
-                          className={`text-right ${
-                            r.netProfitLocal != null && r.netProfitLocal >= 0 ? "text-desk-go" : "text-desk-nogo"
-                          }`}
-                        >
-                          {usd(r.netProfitLocal)}
-                        </td>
-                        <td
-                          className={`text-right ${
-                            r.netProfitGb != null && r.netProfitGb >= 0 ? "text-desk-go" : "text-desk-nogo"
-                          }`}
-                        >
-                          {usd(r.netProfitGb)}
-                        </td>
-                        <td className="text-right">{usd(r.dealerFloor)}</td>
-                        <td className="text-right text-desk-muted">{r.soldCount || "—"}</td>
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <p className="mt-3 text-[11px] text-desk-muted">
-                  {incrementHint ? <span className="text-desk-text">{incrementHint}. </span> : null}
-                  <strong className="text-desk-text">Local / GB</strong> are both evaluated at <em>next</em>{" "}
-                  bid + this auction&apos;s BP. <strong className="text-desk-text">Market med</strong> = OA
-                  sold median (context). <strong className="text-desk-text">Decision P25</strong> drives Max
-                  Bid (capped when Trust = Cooling). NEW@dealer warnings mean skip used. Street asks never
-                  replace solds.
-                </p>
-              </div>
+              ) : null}
             </>
           )}
         </section>

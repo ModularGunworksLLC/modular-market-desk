@@ -4,6 +4,11 @@
  */
 
 import type { AskingCompInput, SoldCompInput } from "@/lib/comp-filter";
+import {
+  familyTokensCompatible,
+  extractFamilyTokens,
+  hasUnmatchedPremiumVariant,
+} from "@/lib/gba/scorer";
 
 export type CompMatchTier = "exact-upc" | "exact-mpn" | "family" | "thin";
 
@@ -12,6 +17,8 @@ export interface CompIdentityContext {
   mpn?: string;
   /** Catalog / ad description — used for capacity variant guards. */
   catalogDescription?: string;
+  /** Desk model string — drop solds whose titles are a different family or unmatched premium variant. */
+  queryModel?: string;
   dealerCost?: number;
   /** New vendor mode: drop used asks. */
   newOnlyAsking?: boolean;
@@ -72,11 +79,20 @@ export function titleConflictsCapacity(title: string, capacity: number): boolean
   return false;
 }
 
+function titleConflictsQueryModel(title: string, queryModel: string | undefined): boolean {
+  const q = queryModel?.trim();
+  if (!q || !title.trim()) return false;
+  if (hasUnmatchedPremiumVariant(q, title)) return true;
+  if (extractFamilyTokens(title).length === 0) return false;
+  return !familyTokensCompatible(q, title);
+}
+
 function rowPassesIdentity(
   title: string,
   ctx: CompIdentityContext,
   capacity: number | null,
 ): boolean {
+  if (titleConflictsQueryModel(title, ctx.queryModel)) return false;
   if (capacity != null && titleConflictsCapacity(title, capacity)) return false;
   return true;
 }
@@ -88,13 +104,14 @@ export function filterSoldByIdentity(
   const upc = normalizeUpcDigits(ctx.upc);
   const mpn = ctx.mpn?.trim() ?? "";
   const capacity = extractCatalogCapacity(ctx.catalogDescription);
+  const pool0 = rows.filter((r) => rowPassesIdentity(r.title ?? "", ctx, capacity));
 
   if (!upc && !mpn) {
-    return { rows, removed: 0, tier: "family" };
+    return { rows: pool0, removed: rows.length - pool0.length, tier: "family" };
   }
 
   let tier: CompMatchTier = "family";
-  let pool = rows.filter((r) => rowPassesIdentity(r.title ?? "", ctx, capacity));
+  let pool = pool0;
 
   if (upc.length >= 8) {
     const upcHits = pool.filter((r) => titleContainsUpc(r.title ?? "", upc));

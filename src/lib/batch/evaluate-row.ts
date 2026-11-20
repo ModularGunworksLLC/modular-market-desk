@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 
+import { allInCost } from "@/lib/arbitrage/acquisition";
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
 import { round2 } from "@/lib/arbitrage/fees";
 import { formatNewDealerWarning } from "@/lib/arbitrage/new-floor";
@@ -15,9 +16,12 @@ import {
   walkAwayLegalBid,
 } from "@/lib/auctions/bid-increments";
 import type { BatchResultRow } from "@/lib/batch/types";
+import { sanitizeBatchRowIdentity } from "@/lib/batch/sanitize-identity";
 import { runEvaluation } from "@/lib/evaluate-pipeline";
 import { vendorLabel } from "@/lib/tracked-vendors";
 import type { EvaluateRequest } from "@/lib/validation";
+
+export { sanitizeBatchRowIdentity } from "@/lib/batch/sanitize-identity";
 
 export const batchRowSchema = z.object({
   rowNumber: z.number().int(),
@@ -45,6 +49,7 @@ export const batchDefaultsSchema = z
   .object({
     condition: z.enum(["new", "used", "any"]).optional().default("any"),
     buyerPremiumPct: z.number().min(0).max(100).optional().default(DEAL_DEFAULTS.buyerPremiumPct),
+    purchaseCardPct: z.number().min(0).max(100).optional().default(DEAL_DEFAULTS.purchaseCardPct),
     inboundShip: z.number().nonnegative().optional().default(0),
     outboundShip: z.number().nonnegative().optional(),
     listingUpgrades: z.number().min(0).max(5).optional().default(DEAL_DEFAULTS.listingUpgrades),
@@ -52,8 +57,8 @@ export const batchDefaultsSchema = z
     buyerPaysCardFee: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysCardFee),
     targetProfit: z.number().nonnegative().optional().default(DEAL_DEFAULTS.targetProfit),
     minMarginPct: z.number().min(0).optional().default(DEAL_DEFAULTS.minMarginPct),
-    /** Kept for API compat; dual-exit always returns both channels. */
-    sellChannel: z.enum(["gunbroker", "local"]).optional().default("local"),
+    /** Kept for API compat; sheet toggle drives Max Bid / GO for this channel. */
+    sellChannel: z.enum(["gunbroker", "local"]).optional().default("gunbroker"),
     salesTaxPct: z.number().min(0).max(100).optional().default(DEAL_DEFAULTS.salesTaxPct),
     bidIncrements: z.array(batchBidIncrementBandSchema).optional(),
   })
@@ -73,10 +78,11 @@ function channelGoAtNext(
 }
 
 export async function evaluateBatchRow(
-  row: BatchRowInput,
+  rowInput: BatchRowInput,
   defaults: BatchDefaultsInput,
   token: string | null,
 ): Promise<BatchResultRow> {
+  const row = sanitizeBatchRowIdentity(rowInput);
   const label = `${row.manufacturer} ${row.model}${row.caliber ? ` ${row.caliber}` : ""}`.trim();
   const schedule = normalizeBidIncrements(defaults.bidIncrements);
   const listingHints = {
@@ -88,14 +94,31 @@ export async function evaluateBatchRow(
     (listingHints.incrementAmount != null && listingHints.incrementAmount > 0);
   const nextBid = computeNextBid(row.currentBid ?? null, schedule, listingHints);
   const buyerPremiumPct = row.buyerPremiumPct ?? defaults.buyerPremiumPct;
+  const purchaseCardPct = defaults.purchaseCardPct ?? DEAL_DEFAULTS.purchaseCardPct;
   const inboundShip = row.inboundShip ?? defaults.inboundShip;
-  const sellChannel = defaults.sellChannel ?? "local";
+  const sellChannel = defaults.sellChannel ?? "gunbroker";
 
   const allInAtNext =
-    nextBid != null ? round2(nextBid * (1 + buyerPremiumPct / 100) + inboundShip) : null;
+    nextBid != null
+      ? round2(
+          allInCost({
+            targetAcquisitionCost: nextBid,
+            buyerPremiumPct,
+            purchaseCardPct,
+            inboundShip,
+          }),
+        )
+      : null;
   const allInAtCurrent =
     row.currentBid != null
-      ? round2(row.currentBid * (1 + buyerPremiumPct / 100) + inboundShip)
+      ? round2(
+          allInCost({
+            targetAcquisitionCost: row.currentBid,
+            buyerPremiumPct,
+            purchaseCardPct,
+            inboundShip,
+          }),
+        )
       : null;
 
   const base: BatchResultRow = {
@@ -105,9 +128,13 @@ export async function evaluateBatchRow(
     category: row.category,
     currentBid: row.currentBid ?? null,
     nextBid,
+    inboundShip,
     allInAtNext,
     allInAtCurrent,
+    allInAtMaxGb: null,
+    allInAtMaxLocal: null,
     buyerPremiumPct,
+    purchaseCardPct,
     sellChannel,
     walkAwayBid: null,
     verdict: null,
@@ -159,6 +186,7 @@ export async function evaluateBatchRow(
     targetAcquisitionCost: actionHammer,
     inboundShip,
     buyerPremiumPct,
+    purchaseCardPct,
     outboundShip: defaults.outboundShip ?? defaultOutboundShip(row.category),
     buyerPaysOutboundShip: defaults.buyerPaysOutboundShip,
     buyerPaysCardFee: defaults.buyerPaysCardFee,
@@ -178,10 +206,15 @@ export async function evaluateBatchRow(
 
     const maxBidLocal = sold.count > 0 ? out.result.exits.local.maxBid : null;
     const maxBidGb = sold.count > 0 ? out.result.exits.gunbroker.maxBid : null;
+    // Sheet channel drives the paddle / GO — not the max of both.
     const maxBid =
-      maxBidLocal != null || maxBidGb != null
-        ? Math.max(maxBidLocal ?? 0, maxBidGb ?? 0)
-        : null;
+      sellChannel === "gunbroker"
+        ? maxBidGb
+        : sellChannel === "local"
+          ? maxBidLocal
+          : maxBidLocal != null || maxBidGb != null
+            ? Math.max(maxBidLocal ?? 0, maxBidGb ?? 0)
+            : null;
 
     const walkAway =
       maxBid != null && dealerFloor != null
@@ -198,11 +231,15 @@ export async function evaluateBatchRow(
         ? channelGoAtNext(out.result.exits.gunbroker.verdict, maxBidGb, nextBid)
         : null;
     const verdict =
-      verdictLocal === "GO" || verdictGb === "GO"
-        ? "GO"
-        : verdictLocal != null || verdictGb != null
-          ? "NO-GO"
-          : null;
+      sellChannel === "gunbroker"
+        ? verdictGb
+        : sellChannel === "local"
+          ? verdictLocal
+          : verdictLocal === "GO" || verdictGb === "GO"
+            ? "GO"
+            : verdictLocal != null || verdictGb != null
+              ? "NO-GO"
+              : null;
 
     const headroom =
       maxBid != null && nextBid != null ? Math.round((maxBid - nextBid) * 100) / 100 : null;
@@ -238,6 +275,28 @@ export async function evaluateBatchRow(
       maxBid,
       maxBidLocal,
       maxBidGb,
+      allInAtMaxGb:
+        maxBidGb != null
+          ? round2(
+              allInCost({
+                targetAcquisitionCost: maxBidGb,
+                buyerPremiumPct,
+                purchaseCardPct,
+                inboundShip,
+              }),
+            )
+          : null,
+      allInAtMaxLocal:
+        maxBidLocal != null
+          ? round2(
+              allInCost({
+                targetAcquisitionCost: maxBidLocal,
+                buyerPremiumPct,
+                purchaseCardPct,
+                inboundShip,
+              }),
+            )
+          : null,
       walkAway,
       walkAwayBid,
       nextBid,

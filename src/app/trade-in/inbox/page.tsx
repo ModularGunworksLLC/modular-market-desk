@@ -183,11 +183,14 @@ export default function TradeInInboxPage() {
                   <span className="text-xs text-desk-go">Handled</span>
                 )}
               </div>
-              <p className="font-mono text-desk-go">
+              <p className="font-mono text-sm text-desk-text">
                 {selected.estimateLabel ||
                   (selected.estimateP25 != null
-                    ? `Estimated trade interest ~$${selected.estimateP25.toFixed(2)}`
+                    ? `Customer ceiling ~$${selected.estimateP25.toFixed(2)}`
                     : "No estimate")}
+              </p>
+              <p className="text-[11px] text-desk-muted">
+                Shown number is dual-exit safe (Local tax + GB fees, $100 profit floor) — not raw market P25.
               </p>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                 <dt className="text-desk-muted">Customer</dt>

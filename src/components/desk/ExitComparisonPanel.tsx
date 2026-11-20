@@ -150,11 +150,19 @@ export function Field(props: {
   label: string;
   v: string;
   on: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  autoComplete?: string;
+  name?: string;
 }) {
   return (
     <div>
       <label className="field-label">{props.label}</label>
-      <input className="field-input" value={props.v} onChange={props.on} />
+      <input
+        className="field-input"
+        name={props.name}
+        autoComplete={props.autoComplete ?? "off"}
+        value={props.v}
+        onChange={props.on}
+      />
     </div>
   );
 }
@@ -192,11 +200,20 @@ export function FieldHint(props: {
   v: string;
   on: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onBlur?: () => void;
+  autoComplete?: string;
+  name?: string;
 }) {
   return (
     <div>
       <label className="field-label">{props.label}</label>
-      <input className="field-input" value={props.v} onChange={props.on} onBlur={props.onBlur} />
+      <input
+        className="field-input"
+        name={props.name}
+        autoComplete={props.autoComplete ?? "off"}
+        value={props.v}
+        onChange={props.on}
+        onBlur={props.onBlur}
+      />
       <p className="mt-0.5 text-[10px] leading-snug text-desk-muted">{props.hint}</p>
     </div>
   );

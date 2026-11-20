@@ -56,9 +56,27 @@ describe("routeGunBroker", () => {
   });
 });
 
-describe("allInCost applies buyer premium then inbound", () => {
-  it("$500 hammer + 18% premium + $25 inbound = $615", () => {
-    expect(allInCost({ targetAcquisitionCost: 500, buyerPremiumPct: 18, inboundShip: 25 })).toBe(615);
+describe("allInCost applies buyer premium then purchase card then inbound", () => {
+  it("$500 hammer + 18% premium + $25 inbound = $615 (no card)", () => {
+    expect(
+      allInCost({
+        targetAcquisitionCost: 500,
+        buyerPremiumPct: 18,
+        purchaseCardPct: 0,
+        inboundShip: 25,
+      }),
+    ).toBe(615);
+  });
+  it("$500 hammer + 18% BP + 3% card + $25 inbound = $643.45", () => {
+    // invoice 590, card 17.7 → 607.7 + 25 = 632.7? Wait: 500*1.18*1.03 + 25 = 590*1.03 + 25 = 607.7 + 25 = 632.7
+    expect(
+      allInCost({
+        targetAcquisitionCost: 500,
+        buyerPremiumPct: 18,
+        purchaseCardPct: 3,
+        inboundShip: 25,
+      }),
+    ).toBeCloseTo(632.7, 5);
   });
 });
 
@@ -70,6 +88,17 @@ describe("maxBid inverts the net to a hammer ceiling", () => {
     // bestNet 800, target 75 -> maxAllIn 725 ; hammer = (725 - 25)/1.18 = 593.22
     const mb = maxBid({ bestNet: 800, targetProfit: 75, inboundShip: 25, buyerPremiumPct: 18 });
     expect(mb).toBeCloseTo(593.22, 1);
+  });
+  it("solves backward through premium + purchase card", () => {
+    // maxAllIn 725; hammer = 725 / (1.18 * 1.03) ≈ 596.58
+    const mb = maxBid({
+      bestNet: 800,
+      targetProfit: 75,
+      inboundShip: 0,
+      buyerPremiumPct: 18,
+      purchaseCardPct: 3,
+    });
+    expect(mb).toBeCloseTo(725 / (1.18 * 1.03), 2);
   });
   it("applies min margin floor when tighter than profit target", () => {
     // bestNet 800, targetProfit 50 -> fromProfit 750
@@ -113,6 +142,7 @@ describe("evaluateDeal end-to-end", () => {
     targetAcquisitionCost: 400,
     inboundShip: 25,
     buyerPremiumPct: 0,
+    purchaseCardPct: 0,
     outboundShip: 30,
     buyerPaysOutboundShip: true,
     buyerPaysCardFee: true,
@@ -139,6 +169,7 @@ describe("evaluateDeal end-to-end", () => {
         minMarginPct: input.minMarginPct,
         inboundShip: input.inboundShip,
         buyerPremiumPct: input.buyerPremiumPct,
+        purchaseCardPct: input.purchaseCardPct,
       }),
     );
     expect(r.effectiveMaxHammer).toBe(r.profitMaxHammer);

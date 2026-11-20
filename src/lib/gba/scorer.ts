@@ -83,6 +83,195 @@ export function norm(text: string | null | undefined): string {
   return (text ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+/**
+ * Levenshtein edit distance between two strings.
+ * Used for typo-tolerant manufacturer/model/caliber matching on Evaluate submit.
+ */
+export function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const prev = new Array<number>(cols);
+  const cur = new Array<number>(cols);
+  for (let j = 0; j < cols; j++) prev[j] = j;
+  for (let i = 1; i < rows; i++) {
+    cur[0] = i;
+    const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j < cols; j++) {
+      const cost = ca === b.charCodeAt(j - 1) ? 0 : 1;
+      cur[j] = Math.min(
+        (prev[j] ?? 0) + 1,
+        (cur[j - 1] ?? 0) + 1,
+        (prev[j - 1] ?? 0) + cost,
+      );
+    }
+    for (let j = 0; j < cols; j++) prev[j] = cur[j] ?? 0;
+  }
+  return prev[b.length] ?? b.length;
+}
+
+/** Max allowed edits for typo match — short stubs must not invent a brand. */
+export function maxTypoDistance(normalizedLen: number): number {
+  if (normalizedLen < 3) return 0;
+  if (normalizedLen <= 5) return 1;
+  return 2;
+}
+
+/** True when `query` is a close misspelling of `candidate` (both already normalized). */
+export function isNearMiss(query: string, candidate: string): boolean {
+  if (!query || !candidate) return false;
+  if (query === candidate) return true;
+  const maxDist = maxTypoDistance(query.length);
+  if (maxDist <= 0) return false;
+  if (Math.abs(query.length - candidate.length) > maxDist) return false;
+  return editDistance(query, candidate) <= maxDist;
+}
+
+/**
+ * Model near-miss: allow SP10l→SP101, but not P320→P220 / CSX→CS9 / PPS→PPQ.
+ * Same-length digit runs that differ are different guns, not typos.
+ * Letter-only names (Commando vs Commander) allow a single edit, not two.
+ */
+export function isModelNearMiss(query: string, candidate: string): boolean {
+  if (!query || !candidate) return false;
+  if (query === candidate) return true;
+  const qDigits = query.replace(/\D/g, "");
+  const cDigits = candidate.replace(/\D/g, "");
+  if (qDigits.length >= 2 && cDigits.length >= 2 && qDigits.length === cDigits.length && qDigits !== cDigits) {
+    return false;
+  }
+  if (!qDigits !== !cDigits) return false;
+  if (!qDigits && !cDigits) {
+    if (query.length <= 4 && candidate.length <= 4) return false;
+    if (Math.abs(query.length - candidate.length) > 1) return false;
+    return editDistance(query, candidate) <= 1;
+  }
+  return isNearMiss(query, candidate);
+}
+
+/** First 2+ digit run in a model string (29-10 → 29, P320 → 320). */
+export function primaryModelNumber(model: string | undefined): string | null {
+  const nums = (model ?? "").match(/\d+/g) ?? [];
+  return nums.find((n) => n.length >= 2) ?? nums[0] ?? null;
+}
+
+/**
+ * Letter+digit family codes (P320, P220, G19, SD40VE) plus 3–4 letter codes (CSX, PPS).
+ * Used so a P320 cannot score against a P220 just because both start with P.
+ */
+export function extractFamilyTokens(text: string): string[] {
+  const raw = (text ?? "").toLowerCase();
+  if (!raw.trim()) return [];
+  const out = new Set<string>();
+  const compact = raw.replace(/[^a-z0-9]+/g, "");
+  if (/^[a-z]{3,4}$/.test(compact)) out.add(compact);
+  for (const m of raw.matchAll(/\b[a-z]{1,4}\d{2,5}[a-z]{0,4}\b/g)) {
+    out.add(m[0]!);
+  }
+  for (const m of compact.matchAll(/[a-z]{1,4}\d{2,5}[a-z]{0,4}/g)) {
+    out.add(m[0]!);
+  }
+  // G4X / GX4 / P22Q — one digit between letters
+  for (const m of raw.matchAll(/\b[a-z]{1,3}\d[a-z]{1,3}\b/g)) {
+    out.add(m[0]!);
+  }
+  for (const m of compact.matchAll(/[a-z]{1,3}\d[a-z]{1,3}/g)) {
+    out.add(m[0]!);
+  }
+  return [...out];
+}
+
+const LETTER_CODE_GENERIC = new Set([
+  "gen",
+  "mag",
+  "auto",
+  "std",
+  "sub",
+  "tac",
+  "pro",
+  "the",
+  "and",
+  "for",
+  "new",
+  "used",
+  "with",
+  "el",
+  "le",
+  "la",
+  "de",
+]);
+
+/** 3–4 letter model codes (CSX, PPS, CCP, RAMI) — not generic English stubs. */
+export function distinctiveLetterCodes(text: string): string[] {
+  return (text ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => /^[a-z]{3,4}$/.test(t) && !LETTER_CODE_GENERIC.has(t));
+}
+
+export function familyTokensCompatible(queryModel: string, catalogOrTitle: string): boolean {
+  const qLetters = distinctiveLetterCodes(queryModel);
+  if (qLetters.length > 0) {
+    const catalogLower = catalogOrTitle.toLowerCase();
+    const cLetters = distinctiveLetterCodes(catalogOrTitle);
+    const letterHit = qLetters.some(
+      (t) => cLetters.includes(t) || new RegExp(`\\b${escapeRegExp(t)}\\b`).test(catalogLower),
+    );
+    if (!letterHit) return false;
+  }
+
+  const q = extractFamilyTokens(queryModel);
+  if (q.length === 0) return true;
+  const c = extractFamilyTokens(catalogOrTitle);
+  if (c.some((t) => q.includes(t))) return true;
+  const cn = catalogOrTitle.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return q.some((t) => cn.includes(t));
+}
+
+/** Compact / Commander / etc. on the desk must appear on the catalog leaf. */
+const SIZE_TOKENS = [
+  "subcompact",
+  "sub-compact",
+  "sub compact",
+  "compact",
+  "commander",
+  "commando",
+  "officer",
+  "centennial",
+  "ladysmith",
+];
+
+export function missingQuerySizeToken(queryModel: string, catalogName: string): boolean {
+  const q = queryModel.toLowerCase();
+  const c = catalogName.toLowerCase();
+  return SIZE_TOKENS.some((s) => q.includes(s) && !c.includes(s));
+}
+
+/** Collector / competition P320-class names that must not price a duty gun. */
+const PREMIUM_VARIANT_RE =
+  /\b(?:x-?five|x5|legion|axg|spectre|txg|equinox|custom\s*works)\b/i;
+
+export function hasUnmatchedPremiumVariant(queryModel: string, catalogOrTitle: string): boolean {
+  if (!PREMIUM_VARIANT_RE.test(catalogOrTitle)) return false;
+  return !PREMIUM_VARIANT_RE.test(queryModel);
+}
+
+/** Recover a caliber glued into the model line when the caliber field was left blank. */
+export function inferCaliberFromText(text: string): string {
+  const lower = (text ?? "").toLowerCase();
+  if (!lower.trim()) return "";
+  for (const group of CALIBER_ALIAS_GROUPS) {
+    const canonical = group[0] ?? "";
+    if (!canonical) continue;
+    for (const form of group) {
+      if (caliberInTitle(form, lower)) return canonical;
+    }
+  }
+  return "";
+}
+
 function toInt(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? Math.trunc(n) : 0;
@@ -101,6 +290,18 @@ function escapeRegExp(text: string): string {
  * ------------------------------------------------------------------ */
 
 const CALIBER_ALIAS_GROUPS: string[][] = [
+  ["22-250", "22 250", ".22-250", "22250"],
+  ["22 hornet", ".22 hornet", "22hornet"],
+  ["7mm rem mag", "7mm remington magnum", "7mm remington mag", "7mm rem mag", "7mm rem", "7 mm rem mag", "7mm mag"],
+  ["7mm-08", "7mm 08", "7mm08", "7mm-08 rem"],
+  ["35 rem", ".35 rem", "35 remington", ".35 remington"],
+  ["9x18", "9 x 18", "9mm makarov", "9x18 makarov"],
+  ["25 acp", "25 auto", ".25 acp", "6.35", "6.35mm", "6.35 browning"],
+  ["32 acp", "32 auto", ".32 acp", "7.65", "7.65mm", "7.65 browning"],
+  ["38 super", ".38 super", "38 super auto"],
+  ["38 s&w", ".38 s&w", "38 sw"],
+  ["45-70", "45 70", ".45-70", "4570"],
+  ["6.5 grendel", "65 grendel"],
   ["9mm", "9 mm", "9x19", "9 x 19", "9mm luger", "9 luger", "9mm parabellum", "9mm para", "9mmp", "9mm nato"],
   ["380 acp", "380 auto", "380", "9mm short", "9x17", "9mm kurz"],
   ["40 s&w", "40 sw", "40 cal", "40 smith", "40"],
@@ -114,9 +315,10 @@ const CALIBER_ALIAS_GROUPS: string[][] = [
   ["223 rem", "223 remington", "223", "5.56", "5.56x45", "5.56 nato", "556", "5.56mm"],
   ["308 win", "308 winchester", "308", "7.62x51", "7.62 nato", "762x51"],
   ["30-06", "30 06", "3006", "30-06 springfield"],
+  ["30-30", "30 30", "3030", "30-30 win"],
   ["300 blackout", "300 blk", "300 aac", "300aac", "300  blackout"],
   ["7.62x39", "7.62 x 39", "762x39", "7.62 soviet"],
-  ["22 lr", "22lr", "22 long rifle", "22"],
+  ["22 lr", "22lr", "22 long rifle"],
   ["22 wmr", "22 magnum", "22 mag", "22wmr"],
   ["6.5 creedmoor", "6.5 cm", "65 creedmoor", "6.5creedmoor"],
   ["12 gauge", "12ga", "12 ga", "12 g"],
@@ -158,6 +360,12 @@ export function buildCaliberTokens(caliber: string | undefined | null): string[]
 /** Whether any normalized caliber form is present in a (lowercased) title. */
 function caliberInTitle(form: string, title: string): boolean {
   if (form.length < 2) return false;
+  const compactForm = form.replace(/[^a-z0-9]/g, "");
+  // Bare 2–3 digit forms must not match hyphenated cousins (22 vs 22-250, 45 vs 45-70).
+  if (/^\d{2,3}$/.test(compactForm)) {
+    const re = new RegExp(`(?<!\\d)${compactForm}(?![\\d-])`, "i");
+    return re.test(title);
+  }
   if (title.includes(form)) return true;
   if (title.includes(form.replace(/-/g, " "))) return true;
   if (title.replace(/\s+/g, "").includes(form.replace(/\s+/g, ""))) return true;
@@ -244,6 +452,13 @@ export function cleanModelForOa(model: string): string {
   m = m.replace(/\s*\/\s*\.?45\s*L?C\b/gi, " ");
   m = m.replace(/^\s*Firearms\s+/i, "");
   m = m.replace(/\bFirearms\b/gi, " ");
+  // Auction action / transfer noise that sometimes survives parse
+  m = m.replace(/\bTRANS\b[\s:,#-]*[\d]+(?:\s*[,/]\s*[\d]+)*/gi, " ");
+  m = m.replace(/\b(?:semi-?automatic|semi-?auto|semi|bolt(?:\s*action)?|lever(?:\s*action)?|pump(?:\s*action)?)\b/gi, " ");
+  // Glued auction calibers left in the model field (308CAL, 7.62X39CAL)
+  m = m.replace(/\b\d+\.\d+\s*[xX]\s*\d+\s*CAL\b/gi, " ");
+  m = m.replace(/\b\d{2,3}CAL\b/gi, " ");
+  m = m.replace(/\b10\s*-\s*22\b/gi, "10/22");
   // Trailing caliber glued into model (Desk already has a caliber field)
   m = m.replace(
     /\b(?:9\s*x\s*19(?:mm)?|9\s*mm(?:\s*luger)?|10\s*mm|\.?(?:22|25|32|38|357|380|40|44|45)\s*(?:lr|acp|auto|special|spl|mag(?:num)?|wmr|s\s*&\s*w|colt)?|12\s*ga(?:uge)?|20\s*ga(?:uge)?)\s*$/i,
@@ -286,6 +501,53 @@ export function modelQueryVariants(model: string): string[] {
   if (/\bm?1911\b/i.test(cleaned)) {
     push("M1911");
     push("1911");
+  }
+
+  // Taurus "Circuit Judge" auction lines → OA "Judge"; Rossi keeps Circuit Judge
+  if (/\bcircuit\s+judge\b/i.test(cleaned)) {
+    push("Circuit Judge");
+    push("Judge");
+  }
+
+  // Ruger American family: bare AMERICAN often needs AMERICAN RIFLE in OA
+  if (/^american$/i.test(cleaned)) {
+    push("American Rifle");
+    push("American");
+  }
+
+  // Baby Browning / Nomad lines
+  if (/baby\s+browning/i.test(cleaned)) {
+    push("Baby Browning");
+    push("1906");
+  }
+  if (/^nomad$/i.test(cleaned)) push("Nomad");
+
+  // Springfield XD family
+  if (/\bxd\s*9\b/i.test(cleaned) || /^xd9$/i.test(cleaned)) {
+    push("XD9");
+    push("XD 9");
+    push("XD Service");
+    push("XD");
+  }
+  if (/\bxd\s*45\b/i.test(cleaned) || /^xd45$/i.test(cleaned)) {
+    push("XD45");
+    push("XD 45");
+    push("XD Service");
+    push("XD");
+  }
+  if (/\bhellcat\b/i.test(cleaned)) push("Hellcat");
+  if (/\bprodigy|prodgy\b/i.test(cleaned)) push("Prodigy");
+
+  // Savage 93R17 family
+  if (/93\s*r\s*17/i.test(cleaned)) {
+    push("93R17");
+    push("93R17 F");
+    push("93R17 FV");
+  }
+
+  // Remington 887 Nitro Mag
+  if (/887|nitromag/i.test(cleaned)) {
+    push("887");
   }
 
   return out;
@@ -356,10 +618,48 @@ export function modelSearchTokens(query: GbaQuery): string[] {
  * Component scorers
  * ------------------------------------------------------------------ */
 
-function scoreModelName(modelName: string, tokens: string[]): number {
-  if (tokens.length === 0) return 0;
+function scoreCaliber(caliberName: string | null | undefined, query: GbaQuery): number {
+  const wanted = (query.caliber ?? "").trim();
+  if (!wanted) return 50;
+  if (!caliberName) return 10;
+  const title = caliberName.toLowerCase();
+  const forms = buildCaliberTokens(wanted);
+  if (forms.some((f) => caliberInTitle(f, title))) return 100;
+  // Last resort: short calibers only allow a single edit (e.g. "9mm" vs "9mn").
+  const qn = norm(wanted);
+  const cn = norm(caliberName);
+  if (qn.length >= 4 && isNearMiss(qn, cn)) return 55;
+  return 0;
+}
+
+function scoreManufacturer(mfrName: string, query: GbaQuery): number {
+  const q = norm(query.manufacturer);
+  const n = norm(mfrName);
+  if (!q) return 0;
+  if (q === n) return 100;
+  if (q.length >= 3 && (n.includes(q) || q.includes(n))) return 100;
+  const qTokens = (query.manufacturer ?? "").toLowerCase().split(/\s+/).filter((t) => t.length >= 3);
+  const lowerName = mfrName.toLowerCase();
+  if (qTokens.length > 0 && qTokens.every((t) => lowerName.includes(t))) return 80;
+  // Typo pass: "Rugr" → "Ruger". Tiny stubs (len < 3) never invent a brand.
+  if (isNearMiss(q, n)) return 70;
+  return 0;
+}
+
+/**
+ * Score a catalog model name against desk tokens, with a typo fallback on the
+ * normalized model string when token scoring finds nothing.
+ */
+function scoreModelName(modelName: string, tokens: string[], queryModel?: string): number {
+  if (tokens.length === 0 && !(queryModel ?? "").trim()) return 0;
   const name = modelName.toLowerCase();
   const normName = norm(name);
+  const qModel = queryModel ?? "";
+  if (qModel.trim() && !familyTokensCompatible(qModel, modelName)) return 0;
+  if (qModel.trim() && hasUnmatchedPremiumVariant(qModel, modelName)) return 0;
+  if (qModel.trim() && missingQuerySizeToken(qModel, modelName)) return 0;
+  const qn = norm(cleanModelForOa(qModel) || qModel);
+  if (qn.length >= 2 && normName === qn) return 100;
 
   // M&P45 catalog vs desk tokens "m&p" + "45" or compact "m&p45"
   if (normName.includes("mp") && /\bm&p\b/i.test(name + " " + tokens.join(" "))) {
@@ -371,6 +671,8 @@ function scoreModelName(modelName: string, tokens: string[]): number {
 
   for (const tok of tokens) {
     if (/^\d+$/.test(tok)) {
+      const primary = primaryModelNumber(queryModel);
+      if (primary && tok !== primary) continue;
       if (normName.includes(`g${tok}`) || normName.includes(`glock${tok}`)) return 92;
       if (new RegExp(`\\b${escapeRegExp(tok)}\\b`).test(name)) return 88;
     }
@@ -384,29 +686,17 @@ function scoreModelName(modelName: string, tokens: string[]): number {
     if (/^\d+$/.test(tok)) continue;
     if (name.includes(tok) || normName.includes(tok.replace(/\s+/g, ""))) matched += 1;
   }
-  if (matched === 0) return 0;
-  return Math.min(75, (matched / Math.max(1, tokens.length)) * 100);
-}
+  if (matched > 0) {
+    return Math.min(75, (matched / Math.max(1, tokens.length)) * 100);
+  }
 
-function scoreCaliber(caliberName: string | null | undefined, query: GbaQuery): number {
-  const wanted = (query.caliber ?? "").trim();
-  if (!wanted) return 50;
-  if (!caliberName) return 10;
-  const title = caliberName.toLowerCase();
-  const forms = buildCaliberTokens(wanted);
-  if (forms.some((f) => caliberInTitle(f, title))) return 100;
-  if (forms.includes("45") && /45|\.45/.test(title)) return 90;
-  return 0;
-}
-
-function scoreManufacturer(mfrName: string, query: GbaQuery): number {
-  const q = norm(query.manufacturer);
-  const n = norm(mfrName);
-  if (!q) return 0;
-  if (q === n || n.includes(q) || q.includes(n)) return 100;
-  const qTokens = (query.manufacturer ?? "").toLowerCase().split(/\s+/).filter((t) => t.length >= 3);
-  const lowerName = mfrName.toLowerCase();
-  if (qTokens.length > 0 && qTokens.every((t) => lowerName.includes(t))) return 80;
+  // Typo fallback: compare cleaned desk model to catalog (e.g. "SP10l" → "SP101").
+  if (qn.length >= 3 && isModelNearMiss(qn, normName)) return 60;
+  // Also try each significant token as a near-miss against the full catalog name.
+  for (const tok of tokens) {
+    const tn = norm(tok);
+    if (tn.length >= 3 && isModelNearMiss(tn, normName)) return 58;
+  }
   return 0;
 }
 
@@ -461,12 +751,14 @@ function resolveSelectionWithThresholds(
 
       for (const modelNode of models) {
         const modelName = String(modelNode.Model ?? "");
-        const modelScore = scoreModelName(modelName, tokens);
+        const modelScore = scoreModelName(modelName, tokens, query.model);
         if (modelScore < thresholds.model) continue;
 
         const modelId = toInt(modelNode.ModelID);
         const calibers = modelNode.Calibers;
         if (!Array.isArray(calibers) || calibers.length === 0) continue;
+        // Bare "700" must not guess .22-250 vs 7mm Rem Mag.
+        if (!wantCaliber && calibers.length > 1) continue;
 
         for (const cal of calibers) {
           const calName = cal.Caliber ?? null;
@@ -477,19 +769,18 @@ function resolveSelectionWithThresholds(
           let total = mfrScore * 0.25 + modelScore * 0.55 + calScore * 0.2;
           if (node.IsCommonManufacturer) total += 2;
 
-          if (best === null || total > best.score) {
-            best = {
-              conditionKey: condKey,
-              conditionParam: conditionParam(condKey),
-              manufacturerId: mfrId,
-              manufacturer: mfrName,
-              modelId,
-              model: modelName,
-              caliberId: calId,
-              caliber: String(calName ?? ""),
-              score: total,
-            };
-          }
+          const candidate: OaSelection = {
+            conditionKey: condKey,
+            conditionParam: conditionParam(condKey),
+            manufacturerId: mfrId,
+            manufacturer: mfrName,
+            modelId,
+            model: modelName,
+            caliberId: calId,
+            caliber: String(calName ?? ""),
+            score: total,
+          };
+          if (best === null || isBetterSelection(candidate, best, query)) best = candidate;
         }
       }
     }
@@ -498,12 +789,132 @@ function resolveSelectionWithThresholds(
   return best;
 }
 
+/** Prefer a higher score; on a near-tie pick the shorter catalog name (base P320 over P320 Compact). */
+function isBetterSelection(candidate: OaSelection, best: OaSelection, query: GbaQuery): boolean {
+  if (candidate.score > best.score + 0.5) return true;
+  if (best.score > candidate.score + 0.5) return false;
+  const qn = norm(cleanModelForOa(query.model) || query.model);
+  const candExact = norm(candidate.model) === qn;
+  const bestExact = norm(best.model) === qn;
+  if (candExact !== bestExact) return candExact;
+  if (candidate.model.length !== best.model.length) return candidate.model.length < best.model.length;
+  return candidate.score > best.score;
+}
+
 /** Map desk form fields onto OA catalog IDs (strict pass, then relaxed pass). */
 export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelection | null {
   const strict = { mfr: MIN_MANUFACTURER_SCORE, model: MIN_MODEL_SCORE, cal: MIN_CALIBER_SCORE };
   const hit = resolveSelectionWithThresholds(deps, query, strict);
-  if (hit) return hit;
-  return resolveSelectionWithThresholds(deps, query, { mfr: 25, model: 35, cal: 30 });
+  if (hit && !isAmbiguousManufacturerTypo(deps, query, hit)) return hit;
+  const relaxed = resolveSelectionWithThresholds(deps, query, { mfr: 25, model: 35, cal: 30 });
+  if (relaxed && !isAmbiguousManufacturerTypo(deps, query, relaxed)) return relaxed;
+  return null;
+}
+
+/**
+ * True when the query manufacturer is only a typo-near-miss of 2+ catalog brands
+ * that each have a viable model — do not auto-pick in that case.
+ */
+function isAmbiguousManufacturerTypo(
+  deps: OaDependencies,
+  query: GbaQuery,
+  hit: OaSelection,
+): boolean {
+  if (scoreManufacturer(hit.manufacturer, query) !== 70) return false;
+  const tokens = modelSearchTokens(query);
+  const viable = new Set<number>();
+  for (const condKey of oaConditions(query)) {
+    const nodes = deps[condKey];
+    if (!Array.isArray(nodes)) continue;
+    for (const node of nodes) {
+      const mfrName = String(node.Manufacturer ?? "");
+      if (scoreManufacturer(mfrName, query) !== 70) continue;
+      const mfrId = toInt(node.ManufacturerID);
+      const models = node.Models;
+      if (!Array.isArray(models)) continue;
+      for (const modelNode of models) {
+        const modelScore = scoreModelName(String(modelNode.Model ?? ""), tokens, query.model);
+        if (modelScore >= MIN_MODEL_SCORE) {
+          viable.add(mfrId);
+          break;
+        }
+      }
+    }
+  }
+  return viable.size > 1;
+}
+
+/** Lightweight near-miss row for the Evaluate UI when auto-resolve fails. */
+export type OaNearMissSuggestion = {
+  manufacturer: string;
+  model: string;
+  caliber: string;
+  modelId: number;
+  caliberId: number;
+  conditionParam: "New" | "Used";
+  score: number;
+};
+
+/**
+ * Top near-miss catalog leaves when resolveSelection returns null.
+ * Used so the user can click a suggestion instead of guessing spelling.
+ */
+export function suggestNearMissSelections(
+  deps: OaDependencies,
+  query: GbaQuery,
+  limit = 5,
+): OaNearMissSuggestion[] {
+  const tokens = modelSearchTokens(query);
+  const wantCaliber = (query.caliber ?? "").trim().length > 0;
+  const ranked: OaNearMissSuggestion[] = [];
+
+  for (const condKey of oaConditions(query)) {
+    const nodes = deps[condKey];
+    if (!Array.isArray(nodes)) continue;
+    for (const node of nodes) {
+      const mfrName = String(node.Manufacturer ?? "");
+      const mfrScore = scoreManufacturer(mfrName, query);
+      // Soft gate: allow weak manufacturer for suggestions
+      if (mfrScore < 25 && !isNearMiss(norm(query.manufacturer), norm(mfrName))) continue;
+      const models = node.Models;
+      if (!Array.isArray(models)) continue;
+      for (const modelNode of models) {
+        const modelName = String(modelNode.Model ?? "");
+        const modelScore = scoreModelName(modelName, tokens, query.model);
+        if (modelScore < 20) continue;
+        const calibers = modelNode.Calibers;
+        if (!Array.isArray(calibers) || calibers.length === 0) continue;
+        for (const cal of calibers) {
+          const calName = cal.Caliber != null ? String(cal.Caliber) : "";
+          const calScore = scoreCaliber(calName || null, query);
+          if (wantCaliber && calScore < 20) continue;
+          const total =
+            Math.max(mfrScore, 25) * 0.25 + modelScore * 0.55 + Math.max(calScore, 20) * 0.2;
+          ranked.push({
+            manufacturer: mfrName,
+            model: modelName,
+            caliber: calName,
+            modelId: toInt(modelNode.ModelID),
+            caliberId: toInt(cal.CaliberID),
+            conditionParam: conditionParam(condKey),
+            score: total,
+          });
+        }
+      }
+    }
+  }
+
+  ranked.sort((a, b) => b.score - a.score);
+  const out: OaNearMissSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const row of ranked) {
+    const key = `${row.modelId}:${row.caliberId}:${row.conditionParam}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /** Desk shorthand → OA catalog manufacturer spellings. */
@@ -514,12 +925,11 @@ const MANUFACTURER_CANONICAL: Record<string, string> = {
   hk: "Heckler & Koch",
   "heckler and koch": "Heckler & Koch",
   sig: "Sig Sauer",
-  fnh: "FN",
   "taurus intl": "Taurus",
   "rock island": "Rock Island Armory",
   ria: "Rock Island Armory",
   psa: "Palmetto State Armory",
-  "palmetto": "Palmetto State Armory",
+  palmetto: "Palmetto State Armory",
   cz: "CZ",
   canik: "Canik",
   ruger: "Ruger",
@@ -530,6 +940,11 @@ const MANUFACTURER_CANONICAL: Record<string, string> = {
   walther: "Walther",
   stoeger: "Stoeger",
   savage: "Savage Arms",
+  "h&r": "H&R 1871",
+  "harrington & richardson": "H&R 1871",
+  "harrington and richardson": "H&R 1871",
+  fnh: "FNH",
+  fn: "FNH",
 };
 
 /** Alternate desk queries when the first pass does not match the OA catalog (e.g. Savage → Savage Arms). */
@@ -559,6 +974,13 @@ export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
   }
 
   const model = query.model.trim();
+  if (!(query.caliber ?? "").trim()) {
+    const inferred = inferCaliberFromText(model);
+    if (inferred) {
+      push({ ...query, caliber: inferred });
+      if (query.condition !== "any") push({ ...query, caliber: inferred, condition: "any" });
+    }
+  }
   for (const variant of modelQueryVariants(model)) {
     if (variant === model) continue;
     push({ ...query, model: variant });
@@ -606,6 +1028,54 @@ export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
   if (/rock island/i.test(mfr)) {
     push({ ...query, manufacturer: "Armscor" });
     push({ ...query, manufacturer: "Rock Island Armory" });
+    push({ ...query, manufacturer: "ARMSCOR/RIA" });
+  }
+
+  if (/harrington|h\s*&\s*r|^h&r$/i.test(mfr)) {
+    push({ ...query, manufacturer: "H&R 1871" });
+    push({ ...query, manufacturer: "H&R 1871", condition: "any" });
+    push({ ...query, manufacturer: "New England Firearms (NEF)" });
+  }
+
+  // FN Baby Browning is under FNH in OA (not Browning)
+  if (/baby\s*browning/i.test(model) || (/browning/i.test(mfr) && /baby/i.test(model))) {
+    push({ ...query, manufacturer: "FNH", model: "Baby Browning" });
+    push({ ...query, manufacturer: "FNH", model: "Baby Browning", condition: "any" });
+    push({ ...query, manufacturer: "FNH", model: "Baby Browning", caliber: undefined });
+  }
+
+  // Springfield XD9 / XD45 auction shorthand → XD / XD Service family
+  if (/^xd\s*9$/i.test(model) || /^xd9$/i.test(model)) {
+    for (const variant of ["XD Service", "XD", "XD Compact", "XD Subcompact", "XD Tactical"]) {
+      push({ ...query, model: variant });
+      push({ ...query, model: variant, caliber: undefined });
+    }
+  }
+  if (/^xd\s*45$/i.test(model) || /^xd45$/i.test(model)) {
+    for (const variant of ["XD Service", "XD", "XD Compact", "XD Subcompact", "XD Tactical"]) {
+      push({ ...query, model: variant });
+      push({ ...query, model: variant, caliber: undefined });
+    }
+  }
+
+  // Savage 93R17 often lacks the stock letter suffix in auction titles
+  if (/^93\s*r\s*17$/i.test(model.replace(/\s+/g, "")) || /^93r17$/i.test(model)) {
+    for (const variant of ["93R17 F", "93R17 FV", "93R17 FV-SR", "93R17 FXP", "93 F"]) {
+      push({ ...query, model: variant });
+      push({ ...query, manufacturer: "Savage", model: variant });
+      push({ ...query, manufacturer: "Savage Arms", model: variant });
+    }
+  }
+
+  // Pearce "BLACK MARK" → Buck Mark; Custom II → 1911 family
+  if (/black\s*mark|buck\s*mark/i.test(model)) {
+    push({ ...query, model: "Buck Mark" });
+    push({ ...query, model: "Buck Mark", caliber: undefined });
+  }
+  if (/custom\s*ii/i.test(model)) {
+    push({ ...query, model: "1911" });
+    push({ ...query, model: "1911 Stainless II" });
+    push({ ...query, model: "Custom II", caliber: query.caliber || ".45 ACP" });
   }
 
   // Caliber mismatches often block otherwise-good models — try model-only.

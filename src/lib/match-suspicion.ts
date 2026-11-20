@@ -1,9 +1,12 @@
 /**
  * Flag suspicious OA identity matches: lot bid/cost nowhere near OA solds,
- * and/or web street prices disagree with OA. Advisory only — does not blend prices.
+ * and/or web street prices disagree with OA. Warnings at 2.5×; verdict NO-GO at 4×.
  */
 
 import type { WebCompsSummary } from "@/lib/web-comps/types";
+
+/** OA median / hammer at or above this → used-mode GO is withheld (likely wrong leaf). */
+export const IDENTITY_RATIO_NOGO = 4;
 
 export type MatchSuspicion = {
   suspicious: boolean;

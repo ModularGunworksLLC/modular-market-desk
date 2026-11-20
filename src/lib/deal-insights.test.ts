@@ -20,6 +20,7 @@ function minimalResult(overrides: Partial<EvaluationResult> = {}): EvaluationRes
       targetAcquisitionCost: 260,
       inboundShip: 0,
       buyerPremiumPct: 0,
+      purchaseCardPct: 0,
       outboundShip: 30,
       buyerPaysOutboundShip: true,
       buyerPaysCardFee: true,

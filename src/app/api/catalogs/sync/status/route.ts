@@ -1,5 +1,5 @@
 /**
- * GET /api/catalogs/sync/status?vendor=2ndamendmentwholesale|chattanooga
+ * GET /api/catalogs/sync/status?vendor=lipseys|2ndamendmentwholesale|chattanooga
  * Pre-flight check before pulling a distributor feed.
  */
 
@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { resolveChattanoogaCredentials } from "@/lib/chattanooga/sync";
 import { getPresetForVendor } from "@/lib/catalog-queries";
 import { getVendorApiConnection } from "@/lib/connections";
+import { resolveLipseysCredentials } from "@/lib/lipseys/sync";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,26 @@ export async function GET(request: Request): Promise<NextResponse> {
     .trim()
     .toLowerCase();
   const issues: string[] = [];
+
+  if (vendor === "lipseys") {
+    const creds = await resolveLipseysCredentials();
+    if (!creds) {
+      issues.push(
+        "Missing Lipsey's email/password. Vault: vendor=lipseys, kind=market_api, Email field + password as secret — or set LIPSEYS_EMAIL + LIPSEYS_PASSWORD in .env.",
+      );
+    }
+    return NextResponse.json({
+      ok: issues.length === 0,
+      vendor,
+      hasToken: Boolean(creds?.password),
+      hasEmail: Boolean(creds?.email),
+      hasFeedUrl: true,
+      hasPreset: true,
+      credentialSource: creds?.source ?? null,
+      label: "Lipsey's",
+      issues,
+    });
+  }
 
   if (vendor === "chattanooga") {
     const creds = await resolveChattanoogaCredentials();

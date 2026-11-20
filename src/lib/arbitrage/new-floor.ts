@@ -36,15 +36,18 @@ export function formatNewDealerWarning(params: {
   return `NEW @ ${vendor} $${floor.toFixed(2)} — all-in${ctx} is within $${NEW_FLOOR_BUFFER} of new wholesale; skip used.`;
 }
 
-/** Invert all-in ceiling to a hammer / cash offer (before premium). */
+/** Invert all-in ceiling to a hammer / cash offer (before premium + purchase card). */
 export function hammerFromMaxAllIn(
   maxAllIn: number,
   inboundShip: number,
   buyerPremiumPct: number,
+  purchaseCardPct = 0,
 ): number {
   if (!Number.isFinite(maxAllIn) || maxAllIn <= 0) return 0;
   const premiumRate = Math.max(0, buyerPremiumPct) / 100;
-  const hammer = (maxAllIn - Math.max(0, inboundShip)) / (1 + premiumRate);
+  const cardRate = Math.max(0, purchaseCardPct) / 100;
+  const hammer =
+    (maxAllIn - Math.max(0, inboundShip)) / ((1 + premiumRate) * (1 + cardRate));
   return round2(Math.max(0, hammer));
 }
 
@@ -54,6 +57,7 @@ export function effectiveHammerCeiling(params: {
   dealerFloor: number | null | undefined;
   inboundShip: number;
   buyerPremiumPct: number;
+  purchaseCardPct?: number;
   applyNewFloor: boolean;
 }): number {
   let cap = Math.max(0, params.profitMaxHammer);
@@ -61,7 +65,12 @@ export function effectiveHammerCeiling(params: {
 
   const maxAllIn = newFloorAllInCeiling(params.dealerFloor);
   if (maxAllIn != null && maxAllIn > 0) {
-    const floorHammer = hammerFromMaxAllIn(maxAllIn, params.inboundShip, params.buyerPremiumPct);
+    const floorHammer = hammerFromMaxAllIn(
+      maxAllIn,
+      params.inboundShip,
+      params.buyerPremiumPct,
+      params.purchaseCardPct ?? 0,
+    );
     cap = Math.min(cap, floorHammer);
   }
   return round2(Math.max(0, cap));

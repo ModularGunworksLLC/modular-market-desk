@@ -4,14 +4,15 @@ import { NextResponse } from "next/server";
 import {
   AuctionIngestError,
   auctionPlatformLabel,
-  detectAuctionPlatform,
+  defaultIngestPages,
+  detectAuctionTarget,
   ingestAuction,
   lotsToBatchCsv,
 } from "@/lib/auctions/ingest";
 import { errorMessage } from "@/lib/api-error";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 const bodySchema = z.object({
   url: z.string().url(),
@@ -28,10 +29,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const platform = detectAuctionPlatform(parsed.data.url);
-    const defaultPages = platform === "proxibid" ? 5 : platform === "bidwrangler" ? 40 : 12;
+    const target = detectAuctionTarget(parsed.data.url);
     const ingested = await ingestAuction(parsed.data.url, {
-      maxPages: parsed.data.maxPages ?? defaultPages,
+      maxPages: parsed.data.maxPages ?? defaultIngestPages(target),
     });
     const forSheet = parsed.data.firearmsOnly ? ingested.firearmLots : ingested.lots;
     const csv = lotsToBatchCsv(forSheet, parsed.data.buyerPremiumPct);

@@ -246,6 +246,7 @@ const BRANDS: string[] = [
   "national ordnance",
   "charles daly",
   "jc higgins",
+  "j.c. higgins",
   "just right carbine",
   "bearman industries",
   "rg industries",
@@ -259,6 +260,9 @@ const BRANDS: string[] = [
   "raven arms",
   "adler hunting arms",
   "sun city machinery",
+  "davis industries",
+  "essex gun works",
+  "double star",
   "sig sauer",
   "bond arms",
   "high standard",
@@ -287,6 +291,7 @@ const BRANDS: string[] = [
   "browning",
   "beretta",
   "benelli",
+  "franchi",
   "stoeger",
   "bergara",
   "tikka",
@@ -297,6 +302,7 @@ const BRANDS: string[] = [
   "glock",
   "walther",
   "taurus",
+  "braztech",
   "canik",
   "kimber",
   "colt",
@@ -347,6 +353,17 @@ const BRANDS: string[] = [
   "iwi",
   "steyr",
   "anderson",
+  "retay",
+  "yildiz",
+  "hatfield",
+  "mauser",
+  "interarms",
+  "noble",
+  "optima",
+  "amt",
+  "girsan",
+  "moore",
+  "spanish",
   "ar-15",
 ];
 
@@ -398,30 +415,47 @@ const BRAND_ALIASES: Record<string, string> = {
   "hopkins and allen": "Hopkins & Allen",
   eaa: "EAA",
   cai: "CAI",
+  braztech: "Braztech",
 };
 
 /** Common caliber/gauge tokens, most-specific first. */
 const CALIBER_PATTERNS: { re: RegExp; label: string }[] = [
   { re: /\b6\.5\s*creedmoor\b/i, label: "6.5 Creedmoor" },
+  { re: /\b6\.5\s*grendel\b/i, label: "6.5 Grendel" },
   { re: /\b300\s*(blackout|blk|aac)\b/i, label: "300 Blackout" },
   { re: /\b5\.56(\s*nato|x45)?\b/i, label: "5.56" },
   { re: /\b5\.7(x28)?\b/i, label: "5.7x28" },
   { re: /\b7\.62\s*x?\s*39\b/i, label: "7.62x39" },
   { re: /\b7\.62\s*x?\s*51\b/i, label: "7.62x51" },
+  { re: /\b7\s*mm-?08\b/i, label: "7mm-08" },
+  { re: /\b7\s*mm(?:\s*(?:rem(?:ington)?)?)?(?:\s*mag(?:num)?)?\b/i, label: "7mm Rem Mag" },
+  { re: /\b\.?22-250\b/i, label: ".22-250" },
+  { re: /\b\.?45\s*\/\s*\.?410\b/i, label: ".45 Colt" },
+  { re: /\b\.?300\s*rum\b/i, label: ".300 RUM" },
+  { re: /\b\.?338(\s*win)?\b/i, label: ".338 Win" },
+  { re: /\b\.?25-06\b/i, label: ".25-06" },
+  { re: /\b\.?17\s*(hmr|hornet)?\b/i, label: ".17 HMR" },
   { re: /\b\.?308(\s*win)?\b/i, label: ".308" },
   { re: /\b\.?223(\s*(rem|wylde))?\b/i, label: ".223" },
   { re: /\b\.?30-30\b/i, label: ".30-30" },
   { re: /\b\.?30-06\b/i, label: ".30-06" },
   { re: /\b\.?270(\s*win)?\b/i, label: ".270" },
   { re: /\b\.?243\b/i, label: ".243" },
+  { re: /\b\.?35\s*rem(?:ington)?\b/i, label: ".35 Rem" },
+  { re: /\b9\s*x\s*18\b/i, label: "9x18" },
   { re: /\b(9\s*mm(\s*luger)?|9\s*x\s*19)\b/i, label: "9mm" },
+  { re: /\b\.?45-70\b/i, label: ".45-70" },
   { re: /\b\.?45\s*colt\b/i, label: ".45 Colt" },
   { re: /\b\.?45\s*(acp|auto)\b/i, label: ".45 ACP" },
   { re: /\b\.?40\s*(s&w|sw|cal)?\b/i, label: ".40 S&W" },
   { re: /\b\.?380(\s*(acp|auto))?\b/i, label: ".380 ACP" },
   { re: /\b\.?357\s*(mag|magnum|sig)\b/i, label: ".357" },
+  { re: /\b\.?38\s*super\b/i, label: ".38 Super" },
   { re: /\b\.?38\s*(special|spl|spc)\b/i, label: ".38 Special" },
   { re: /\b10\s*mm\b/i, label: "10mm" },
+  { re: /\b6\.35(\s*mm)?\b/i, label: ".25 ACP" },
+  { re: /\b\.?25\s*(acp|auto)\b/i, label: ".25 ACP" },
+  { re: /\b\.?32\s*(acp|auto)\b/i, label: ".32 ACP" },
   { re: /\b\.?44-40\b/i, label: ".44-40" },
   { re: /\b\.?44\s*(mag|magnum|rem\s*mag)\b/i, label: ".44 Magnum" },
   { re: /\b\.?22\s*hornet\b/i, label: ".22 Hornet" },
@@ -437,7 +471,8 @@ const CALIBER_PATTERNS: { re: RegExp; label: string }[] = [
 const CATEGORY_HINTS: { re: RegExp; category: string }[] = [
   { re: /\b(pistol|handgun|revolver)\b/i, category: "handgun" },
   { re: /\b(shotgun|gauge|guage|\bga\b|over\/under|o\/u|pump|double-?barrel)\b/i, category: "shotgun" },
-  { re: /\b(rifle|carbine|ar-?15|ar15|ar-?10|bolt\s*action|lever\s*action)\b/i, category: "rifle" },
+  // Auction sheets often use bare BOLT / LEVER / SEMI instead of "bolt action rifle".
+  { re: /\b(rifle|carbine|ar-?15|ar15|ar-?10|sks|bolt(?:\s*action)?|lever(?:\s*action)?)\b/i, category: "rifle" },
 ];
 
 /**
@@ -461,12 +496,81 @@ export interface ParsedTitle {
   category: string;
 }
 
-/** Title cleanup before brand/model split (typos, dash spacing, ACP glued to digits). */
+/**
+ * Title cleanup before brand/model split.
+ * Auction CSVs (esp. Pearce / HiBid) glue caliber as `308CAL`, append lot junk
+ * as `TRANS 4415`, and use `10-22` instead of `10/22`.
+ */
 function normalizeTitleText(raw: string): string {
-  return raw
+  let s = raw
     .replace(/\barmoty\b/gi, "Armory")
     .replace(/\bmoel\b/gi, "Model")
-    .replace(/\b(\d{2,3})ACP\b/gi, "$1 ACP")
+    // Pearce transfer / lot markers: TRANS 4415, TRANS 4401,4415
+    .replace(/\bTRANS\b[\s:,#-]*[\d]+(?:\s*[,/]\s*[\d]+)*/gi, " ")
+    .replace(/\bCIRCUT\b/gi, "Circuit") // Pearce typo
+    .replace(/\bPRODGY\b/gi, "Prodigy")
+    .replace(/\bSINGLR\b/gi, "Single")
+    .replace(/\b(\d{2,3})ACP\b/gi, "$1 ACP");
+
+  // Glued metric + CAL: 7.62X39CAL → 7.62x39 (optional trailing .)
+  s = s.replace(/\b(\d+\.\d+)\s*[xX]\s*(\d+)\s*CAL\.?\b/gi, "$1x$2");
+  // Dual-cal Judge lines: 45/410CAL → .45/.410
+  s = s.replace(/\b\.?(45)\s*\/\s*\.?(410)\s*CAL\.?\b/gi, ".$1/.$2");
+  // Named magnums glued: 22MAG, 338WIN, 300 REM ULTRA, 38SPE.
+  s = s.replace(/\b\.?22\s*MAG(?:NUM)?\b/gi, ".22 WMR");
+  s = s.replace(/\b\.?338\s*WIN(?:CHESTER)?\b/gi, ".338 Win");
+  s = s.replace(/\b300\s*REM(?:INGTON)?\s*ULTRA(?:\s*MAG(?:NUM)?)?\b/gi, ".300 RUM");
+  s = s.replace(/\b\.?38\s*SPE(?:C(?:IAL)?)?\.?\b/gi, ".38 Special");
+  s = s.replace(/\b\.?25-06\s*CAL\.?\b/gi, ".25-06");
+  s = s.replace(/\b25-06CAL\.?\b/gi, ".25-06");
+  // Rimfire / common handgun shorts glued to CAL (optional trailing .) — do not touch "22 Cal"
+  s = s.replace(/\b\.?22CAL\.?\b/gi, ".22 LR");
+  s = s.replace(/\b\.?17CAL\.?\b/gi, ".17 HMR");
+  s = s.replace(/\b\.?380CAL\.?\b/gi, ".380 ACP");
+  s = s.replace(/\b\.?45CAL\.?\b/gi, ".45 ACP");
+  s = s.replace(/\b\.?40CAL\.?\b/gi, ".40 S&W");
+  s = s.replace(/\b\.?25CAL\.?\b/gi, ".25 ACP");
+  s = s.replace(/\b\.?32CAL\.?\b/gi, ".32 ACP");
+  s = s.replace(/\b\.?41CAL\.?\b/gi, ".41");
+  s = s.replace(/\b\.?50CAL\.?\b/gi, ".50");
+  s = s.replace(/\b9MMCAL\.?\b/gi, "9mm");
+  s = s.replace(/\b7\.65CAL\.?\b/gi, ".32 ACP");
+  // 556CAL / 223CAL style NATO shorts
+  s = s.replace(/\b556CAL\.?\b/gi, "5.56");
+  s = s.replace(/\b223CAL\.?\b/gi, ".223");
+  // Generic ###CAL / ###CAL. (glued only) → .### so existing caliber patterns can match
+  s = s.replace(/\b(\d{2,3})CAL\.?\b/gi, ".$1");
+  // Decimal glued: 7.62CAL → 7.62
+  s = s.replace(/\b(\d+\.\d+)CAL\.?\b/gi, "$1");
+
+  // Ruger 10-22 / Marlin 1894-style: keep caliber hyphens, fix model slash forms
+  s = s.replace(/\b10\s*-\s*22\b/gi, "10/22");
+  s = s.replace(/\b22\s*-\s*250\b/gi, "22-250");
+  s = s.replace(/\b25\s*-\s*06\b/gi, "25-06");
+  s = s.replace(/\b30\s*-\s*06\b/gi, "30-06");
+  s = s.replace(/\b30\s*-\s*30\b/gi, "30-30");
+  s = s.replace(/\b45\s*-\s*70\b/gi, "45-70");
+
+  // Collapse double dots from ###CAL expansion (5..56, 6..35) BEFORE metric→ACP maps
+  s = s.replace(/(\d)\.{2,}(\d)/g, "$1.$2");
+  s = s.replace(/\b6[,.]35(?:\s*mm)?\b/gi, ".25 ACP");
+  // Remington "7 SEVEN" marketing → Model Seven
+  s = s.replace(/\b7\s+SEVEN\b/gi, "Seven");
+  // Baby Browning stays; XD9 / XD45 spacing for OA
+  s = s.replace(/\bXD\s*9\b/gi, "XD9");
+  s = s.replace(/\bXD\s*45\b/gi, "XD45");
+  s = s.replace(/\bT\/?CR22\b/gi, "TCR22");
+  s = s.replace(/\bBODY\s*GUARD\b/gi, "Bodyguard");
+  // Pearce / OCR leftovers
+  s = s.replace(/\bBLACK\s+MARK\b/gi, "Buck Mark");
+  s = s.replace(/\bACPSEMI\b/gi, "ACP SEMI");
+  s = s.replace(/\b([A-Z]{2,})SEMI\b/gi, "$1 SEMI");
+  s = s.replace(/\bM887\b/gi, "887");
+  // Bare "45" / "9" after 1911 / Custom often means the cartridge
+  s = s.replace(/\b(CUSTOM(?:\s+II)?|1911|M1911)\s+45\b/gi, "$1 .45 ACP");
+  s = s.replace(/\b(CUSTOM(?:\s+II)?|1911|M1911)\s+9\b/gi, "$1 9mm");
+
+  return s
     // Collapse spaced / letter↔digit dashes (LC - 5.7, A1-FS) but KEEP caliber hyphens (.30-06, 44-40).
     .replace(/([A-Za-z])\s*-\s*([A-Za-z0-9])/g, "$1 $2")
     .replace(/([0-9])\s*-\s*([A-Za-z])/g, "$1 $2")
@@ -479,6 +583,9 @@ const IMPORTER_MAKE_PAIRS: Array<{ importer: string; make: string; alias?: strin
   { importer: "stoeger", make: "llama", alias: "Llama" },
   { importer: "churchill", make: "akkar", alias: "Akkar" },
   { importer: "american tactical", make: "gsg", alias: "GSG" },
+  // Braztech marks on Taurus/Rossi Circuit Judge auction lines
+  { importer: "braztech", make: "taurus", alias: "Taurus" },
+  { importer: "braztech", make: "rossi", alias: "Rossi" },
 ];
 
 type BrandHit = { brand: string; index: number; length: number };
@@ -587,7 +694,7 @@ export function parseTitleBlob(title: string): ParsedTitle {
   }
   model = model
     .replace(
-      /\b(new|used|nib|like new|excellent|model|pistol|handgun|rifle|shotgun|revolver|semi-?automatic|semi-?auto|luger|cal|caliber|gauge|guage|ga|magnum|mag|nato|wylde|scope|in box|box|additional barrel|hand-?crank|single-?action|double-?barrel|single shot|over\/under|o\/u|w\/.*$)\b/gi,
+      /\b(new|used|nib|like new|excellent|model|pistol|handgun|rifle|shotgun|revolver|semi-?automatic|semi-?auto|semi|bolt(?:\s*action)?|lever(?:\s*action)?|pump(?:\s*action)?|action|luger|cal|caliber|gauge|guage|ga|magnum|mag|nato|wylde|scope|in box|box|additional barrel|hand-?crank|single[-\s]?action|double[-\s]?barrel|single\s+shot|single|double|over\/under|over\s*\/\s*under|o\/u|black\s*powder|set\s+of|trans|w\/.*$)\b/gi,
       " ",
     )
     // Keep "carbine" when it looks like a model name (LC Carbine); strip only trailing category use.
@@ -603,7 +710,42 @@ export function parseTitleBlob(title: string): ParsedTitle {
     model = caliber;
   }
 
+  // Braztech-marked Judge lines with no Taurus/Rossi token → Rossi Circuit Judge (OA leaf).
+  if (/^braztech$/i.test(manufacturer) && /\bcircuit\s+judge\b/i.test(model)) {
+    manufacturer = "Rossi";
+  } else if (/^braztech$/i.test(manufacturer) && /\bjudge\b/i.test(model)) {
+    manufacturer = "Taurus";
+  }
+
+  // Bare "SKS …" titles: SKS is the model, not a maker (OA: Norinco/Tula/Izhevsk SKS).
+  if (/^sks$/i.test(manufacturer)) {
+    manufacturer = "Norinco";
+    model = "SKS";
+  }
+
+  // "SKS TYPE 56" / "TYPE 56" Chinese SKS variant
+  if (/type\s*56/i.test(`${manufacturer} ${model}`)) {
+    manufacturer = /norinco/i.test(manufacturer) ? manufacturer : "Norinco";
+    model = "Type 56";
+    if (!caliber) caliber = "7.62x39";
+  }
+
+  // FN-made Baby Browning is cataloged under FNH, not Browning
+  if (/baby\s+browning/i.test(model)) {
+    manufacturer = "FNH";
+    model = "Baby Browning";
+  }
+
+  // Avoid model==caliber stubs like "12ga" / ".338 Win" with no real model token
+  if (model && caliber && normModelToken(model) === normModelToken(caliber)) {
+    model = "";
+  }
+
   return { manufacturer, model, caliber, category: normalizeCategory(category) || category };
+}
+
+function normModelToken(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 // --- Sheet parsing ------------------------------------------------------------

@@ -1,20 +1,21 @@
 /**
- * HiBid-style auction lot ingest (Pearce / Fowler / bids.*.com).
- * Uses public HTML list pages with pagination — no browser session.
+ * HiBid white-label ingest (Pearce / Fowler / Christy's / bids.*.com).
+ * Handles the older `class="title"` tile and the newer `lot-tile-two` / `lot-title` tile.
  */
 
+import { fetchAuctionPage, assertAuctionHttpOk } from "@/lib/auctions/http";
+import {
+  buildIngestResult,
+  cleanLotTitle,
+  isPlaceholderLot,
+  parseMoney,
+  stripTags,
+  toAuctionKind,
+} from "@/lib/auctions/util";
 import { AuctionIngestError, type AuctionIngestResult, type AuctionLot } from "@/lib/auctions/types";
-import { classifyLotTitle } from "@/lib/auctions/lot-kind";
 
 export { AuctionIngestError } from "@/lib/auctions/types";
 export { lotsToBatchCsv } from "@/lib/auctions/csv";
-
-function classifyTitle(title: string): AuctionLot["kind"] {
-  const kind = classifyLotTitle(title);
-  // AuctionLot kind has no "accessory" — map to other for ingest metadata.
-  if (kind === "accessory") return "other";
-  return kind;
-}
 
 type LotBidMeta = {
   requiredBid: number | null;
@@ -23,7 +24,7 @@ type LotBidMeta = {
 };
 
 /** Pull per-lot required_bid / bid_increment_amount from embedded HiBid Apollo JSON. */
-function extractLotBidMetaFromHtml(html: string): Map<string, LotBidMeta> {
+export function extractLotBidMetaFromHtml(html: string): Map<string, LotBidMeta> {
   const map = new Map<string, LotBidMeta>();
   const re = /"lot_number"\s*:\s*"?(\d+)"?/g;
   let m: RegExpExecArray | null;
@@ -56,20 +57,50 @@ function extractLotBidMetaFromHtml(html: string): Map<string, LotBidMeta> {
   return map;
 }
 
-function extractLotsFromHtml(html: string, baseUrl: string): AuctionLot[] {
+function extractHibidCardTitle(chunk: string): string | null {
+  const lotTitle =
+    chunk.match(/class="lot-title"[^>]*>([\s\S]*?)<\/div>\s*<div class="lotDescription"/i) ??
+    chunk.match(/class="lot-title"[^>]*>([\s\S]*?)<\/div>/i);
+  if (lotTitle?.[1]) {
+    const text = cleanLotTitle(stripTags(lotTitle[1]).replace(/Lot\s+\d+/i, ""));
+    if (text.length >= 3) return text;
+  }
+  const old = chunk.match(/class="title">([^<]+)/);
+  if (old?.[1]) {
+    const text = cleanLotTitle(old[1]);
+    if (text.length >= 3) return text;
+  }
+  const alt = chunk.match(/<img[^>]+alt="([^"]+)"/i);
+  if (alt?.[1] && !/logo|spacer|pixel|blank/i.test(alt[1])) {
+    const text = cleanLotTitle(alt[1]);
+    if (text.length >= 3) return text;
+  }
+  return null;
+}
+
+function extractHibidCardBid(chunk: string): number | null {
+  const tile = chunk.match(/class="tile-two-winning-bid">\s*\$?\s*([\d,]+(?:\.\d{2})?)/i);
+  if (tile?.[1]) return parseMoney(tile[1]);
+  const old = chunk.match(/class="winning-bid-amount">\$([\d,]+\.\d{2})/);
+  if (old?.[1]) return parseMoney(old[1]);
+  return null;
+}
+
+/** Pure: white-label lot cards + Apollo bid meta → AuctionLot[]. */
+export function extractHibidWhiteLabelLots(html: string, baseUrl: string): AuctionLot[] {
   const bidMeta = extractLotBidMetaFromHtml(html);
   const lots: AuctionLot[] = [];
-  const cardRe = /data-lotnumber="(\d+)"[\s\S]*?<\/div><\/div><\/div>/g;
+  const re = /data-lotnumber="(\d+)"/gi;
   let block: RegExpExecArray | null;
-  while ((block = cardRe.exec(html)) !== null) {
-    const chunk = block[0];
+  while ((block = re.exec(html)) !== null) {
     const lot = block[1];
-    if (!lot) continue;
-    const titleM = chunk.match(/class="title">([^<]+)/);
-    if (!titleM?.[1]) continue;
-    const title = titleM[1].trim().replace(/&amp;/g, "&").replace(/&#39;/g, "'");
-    const bidM = chunk.match(/class="winning-bid-amount">\$([\d,]+\.\d{2})/);
-    const bidsM = chunk.match(/<strong>Bids:<\/strong><span>(\d+)<\/span>/);
+    if (!lot || isPlaceholderLot(lot)) continue;
+    const next = html.indexOf("data-lotnumber=", block.index + 16);
+    const chunk = html.slice(block.index, next === -1 ? Math.min(html.length, block.index + 12000) : next);
+    const title = extractHibidCardTitle(chunk);
+    if (!title) continue;
+
+    const bidsM = chunk.match(/<strong>Bids:<\/strong>\s*<span>(\d+)<\/span>/i);
     const imgMs = [...chunk.matchAll(/<img[^>]+src="([^"]+)"/gi)]
       .map((m) => m[1])
       .filter((u): u is string => Boolean(u));
@@ -95,20 +126,89 @@ function extractLotsFromHtml(html: string, baseUrl: string): AuctionLot[] {
     }
 
     const meta = bidMeta.get(lot);
-    const cardBid = bidM?.[1] ? parseFloat(bidM[1].replace(/,/g, "")) : null;
     lots.push({
       lot,
       title,
-      currentBid: cardBid ?? meta?.highBid ?? null,
+      currentBid: extractHibidCardBid(chunk) ?? meta?.highBid ?? null,
       requiredBid: meta?.requiredBid ?? null,
       bidIncrementAmount: meta?.bidIncrementAmount ?? null,
       bidCount: bidsM?.[1] ? parseInt(bidsM[1], 10) : 0,
       imageUrls: [...new Set(imageUrls)].slice(0, 6),
-      kind: classifyTitle(title),
+      kind: toAuctionKind(title),
       detailUrl,
     });
   }
   return lots;
+}
+
+/**
+ * Jina-reader markdown of HiBid white-label list pages:
+ *   Lot 10:Glock 17 9x19 Pistol
+ *   $725.00
+ *   **Bids:**20
+ *   [View Lot Details Now](https://bids…/lot/…)
+ */
+export function extractHibidMarkdownLots(markdown: string, baseUrl: string): AuctionLot[] {
+  const lots: AuctionLot[] = [];
+  const re = /^Lot\s+(\d+):\s*(.+)$/gm;
+  const matches = [...markdown.matchAll(re)];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i]!;
+    const lot = m[1];
+    if (!lot || isPlaceholderLot(lot)) continue;
+    const title = cleanLotTitle(m[2] ?? "");
+    if (title.length < 3) continue;
+    if (/auction information|shipping information/i.test(title)) continue;
+
+    const start = m.index ?? 0;
+    const end = matches[i + 1]?.index ?? markdown.length;
+    const chunk = markdown.slice(start, end);
+    const moneyMs = [...chunk.matchAll(/\$([0-9,]+(?:\.\d{2})?)/g)];
+    const lastMoney = moneyMs.length > 0 ? moneyMs[moneyMs.length - 1]?.[1] : null;
+    const bidsM = chunk.match(/\*\*Bids:\*\*\s*(\d+)/i) ?? chunk.match(/Bids:\*\*\s*(\d+)/i);
+    const hrefM =
+      chunk.match(/\((https?:\/\/[^)\s]+\/lot\/[^)\s]+)\)/i) ??
+      chunk.match(/\((https?:\/\/[^)\s]*lot-details[^)\s]*)\)/i);
+    const imgM = chunk.match(/!\[.*?\]\((https?:\/\/[^)\s]+)\)/);
+
+    let detailUrl: string | undefined;
+    const href = hrefM?.[1];
+    if (href) {
+      try {
+        detailUrl = new URL(href, baseUrl).toString();
+      } catch {
+        detailUrl = href;
+      }
+    }
+
+    const imageUrls: string[] = [];
+    if (imgM?.[1] && !/spacer|pixel|blank|logo/i.test(imgM[1])) {
+      try {
+        imageUrls.push(new URL(imgM[1], baseUrl).toString());
+      } catch {
+        imageUrls.push(imgM[1]);
+      }
+    }
+
+    lots.push({
+      lot,
+      title,
+      currentBid: parseMoney(lastMoney),
+      requiredBid: null,
+      bidIncrementAmount: null,
+      bidCount: bidsM?.[1] ? parseInt(bidsM[1], 10) : 0,
+      imageUrls,
+      kind: toAuctionKind(title),
+      detailUrl,
+    });
+  }
+  return lots;
+}
+
+function extractHibidLots(body: string, baseUrl: string): AuctionLot[] {
+  const htmlLots = extractHibidWhiteLabelLots(body, baseUrl);
+  if (htmlLots.length > 0) return htmlLots;
+  return extractHibidMarkdownLots(body, baseUrl);
 }
 
 function normalizeAuctionUrl(raw: string): URL {
@@ -121,82 +221,127 @@ function normalizeAuctionUrl(raw: string): URL {
   if (!/^https?:$/i.test(u.protocol)) {
     throw new AuctionIngestError("Auction URL must be http(s).");
   }
-  // Strip hash; keep path
   u.hash = "";
   return u;
 }
 
+/** HiBid list filters (`end_time_from:now`, category, search) hide lots — ingest the whole sale. */
+const HIBID_BROWSE_PARAMS = new Set([
+  "filter",
+  "status",
+  "q",
+  "query",
+  "search",
+  "sort",
+  "sortdir",
+  "category",
+]);
+
+export function hibidAuctionHadBrowseFilter(raw: string): boolean {
+  try {
+    const u = new URL(raw.trim());
+    return [...u.searchParams.keys()].some((k) => HIBID_BROWSE_PARAMS.has(k.toLowerCase()));
+  } catch {
+    return false;
+  }
+}
+
+export function hibidWhiteLabelPageUrl(auctionUrl: string, page: number, pageSize: number): string {
+  const u = normalizeAuctionUrl(auctionUrl);
+  for (const key of [...u.searchParams.keys()]) {
+    u.searchParams.delete(key);
+  }
+  u.searchParams.set("page", String(page));
+  u.searchParams.set("pageSize", String(pageSize));
+  return u.toString();
+}
+
 /**
- * Fetch paginated HiBid catalog pages and return classified lots.
+ * Fetch paginated HiBid white-label list pages and return classified lots.
  */
 export async function ingestHibidAuction(
   auctionUrl: string,
   opts?: { maxPages?: number; pageSize?: number },
 ): Promise<AuctionIngestResult> {
   const base = normalizeAuctionUrl(auctionUrl);
-  const maxPages = opts?.maxPages ?? 12;
+  const maxPages = Math.min(Math.max(opts?.maxPages ?? 40, 1), 60);
+  // Many white-label houses show 24–48 tiles; requesting 100 is fine but do NOT
+  // treat a short page as end-of-catalog (that was the "first page only" bug).
   const pageSize = opts?.pageSize ?? 100;
   const warnings: string[] = [];
   const all: AuctionLot[] = [];
   const seen = new Set<string>();
+  let pagesFetched = 0;
+  let stoppedReason: AuctionIngestResult["stoppedReason"] = "complete";
+
+  if (hibidAuctionHadBrowseFilter(auctionUrl)) {
+    warnings.push("Ignored HiBid list filters (open-now / category / search) so the full catalog is loaded.");
+  }
 
   for (let page = 1; page <= maxPages; page++) {
-    const pageUrl = new URL(base.toString());
-    pageUrl.searchParams.set("page", String(page));
-    pageUrl.searchParams.set("pageSize", String(pageSize));
+    const pageUrl = hibidWhiteLabelPageUrl(auctionUrl, page, pageSize);
 
-    const resp = await fetch(pageUrl.toString(), {
-      headers: {
-        "User-Agent": "ModularMarketDesk/1.0 (FFL buy-sheet; +https://modulargunworks.com)",
-        Accept: "text/html,application/xhtml+xml",
-      },
-      redirect: "follow",
-    });
-
-    if (!resp.ok) {
+    const resp = await fetchAuctionPage(pageUrl);
+    pagesFetched = page;
+    if (resp.status < 200 || resp.status >= 300) {
       if (page === 1) {
-        throw new AuctionIngestError(`Auction host returned HTTP ${resp.status}`, 502);
+        assertAuctionHttpOk(resp.status, page, "HiBid");
       }
       warnings.push(`Stopped pagination at page ${page} (HTTP ${resp.status}).`);
+      stoppedReason = "http_error";
       break;
     }
 
-    const html = await resp.text();
-    const lots = extractLotsFromHtml(html, pageUrl.toString());
+    if (page === 1 && resp.via === "jina") {
+      warnings.push("HiBid blocked the desk IP — loaded lots via reader fallback.");
+    }
+
+    // Prefer HTML cards; fall back to markdown (Jina). Never treat empty extract
+    // on page 2+ as end-of-catalog if we already have lots — retry markdown path.
+    let lots = extractHibidWhiteLabelLots(resp.html, pageUrl);
+    if (lots.length === 0) {
+      lots = extractHibidMarkdownLots(resp.html, pageUrl);
+    }
     if (lots.length === 0) {
       if (page === 1) {
         warnings.push(
           "No lot cards matched HiBid markup — site layout may have changed; try CSV upload on /batch.",
         );
+        stoppedReason = "empty_page";
+        break;
       }
+      // Empty extract after we already have lots: stop (likely last page or bad reader).
+      warnings.push(`No lots parsed on page ${page} — stopped after ${all.length} lots.`);
+      stoppedReason = "empty_page";
       break;
     }
 
+    let added = 0;
     for (const lot of lots) {
       if (seen.has(lot.lot)) continue;
-      if (["0", "00", "000"].includes(lot.lot)) continue;
       seen.add(lot.lot);
       all.push(lot);
+      added += 1;
     }
 
-    // Less than a full page → done
-    if (lots.length < pageSize / 2) break;
+    if (added === 0) {
+      stoppedReason = "no_new_lots";
+      break;
+    }
+    if (page === maxPages) {
+      stoppedReason = "page_cap";
+      warnings.push(`Hit page cap (${maxPages}) with ${all.length} lots — raise maxPages if the sale is larger.`);
+    }
   }
 
-  const firearmLots = all.filter((l) => l.kind === "firearm");
-  const skipped = all.length - firearmLots.length;
-  const hasListingIncrements = all.some(
-    (l) => (l.requiredBid != null && l.requiredBid > 0) || (l.bidIncrementAmount != null && l.bidIncrementAmount > 0),
-  );
-
-  return {
-    auctionUrl: base.toString(),
+  const listUrl = hibidWhiteLabelPageUrl(auctionUrl, 1, pageSize);
+  return buildIngestResult({
+    auctionUrl: listUrl,
     host: base.host,
     platform: "hibid",
     lots: all,
-    firearmLots,
-    skipped,
     warnings,
-    hasListingIncrements,
-  };
+    pagesFetched,
+    stoppedReason,
+  });
 }

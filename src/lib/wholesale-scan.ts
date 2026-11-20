@@ -5,18 +5,18 @@
 
 import "server-only";
 
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, inArray } from "drizzle-orm";
 
 import { DEAL_DEFAULTS } from "@/lib/arbitrage/constants";
 import { getMarketToken } from "@/lib/connections";
 import { db } from "@/lib/db";
 import { catalogItems } from "@/lib/db/schema";
 import { runEvaluation } from "@/lib/evaluate-pipeline";
-import { inferCategoryFromText } from "@/lib/wholesale-scan-infer";
-import { isLikelyFirearm, minFirearmPriceFloor } from "@/lib/wholesale-match";
-import { isTrackedVendor } from "@/lib/tracked-vendors";
+import { isTrackedVendor, TRACKED_VENDORS } from "@/lib/tracked-vendors";
+import { pickScanCandidates, type ScanCatalogRow } from "@/lib/wholesale-scan-candidates";
 
 export interface ScanOptions {
+  /** Tracked vendor slug, or "all" for every imported distributor. */
   vendor?: string;
   /** Max catalog rows to evaluate (GBA calls are slow). */
   limit?: number;
@@ -54,38 +54,44 @@ export interface ScanSummary {
   tokenMissing: boolean;
 }
 
+const ALL_VENDORS = "all";
+const CATALOG_FETCH_CAP = 40_000;
+
 export async function scanWholesaleDeals(opts: ScanOptions = {}): Promise<ScanSummary> {
-  const vendor = (opts.vendor ?? "2ndamendmentwholesale").trim().toLowerCase();
-  if (!isTrackedVendor(vendor)) {
-    throw new Error(`Unsupported vendor "${vendor}".`);
+  const vendorRaw = (opts.vendor ?? ALL_VENDORS).trim().toLowerCase();
+  const scanAll = vendorRaw === ALL_VENDORS || vendorRaw === "";
+  if (!scanAll && !isTrackedVendor(vendorRaw)) {
+    throw new Error(`Unsupported vendor "${vendorRaw}".`);
   }
 
+  const vendor = scanAll ? ALL_VENDORS : vendorRaw;
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 100);
   const token = await getMarketToken();
+
+  const vendorFilter = scanAll
+    ? inArray(catalogItems.vendorName, [...TRACKED_VENDORS])
+    : eq(catalogItems.vendorName, vendor);
 
   const rows = await db
     .select()
     .from(catalogItems)
-    .where(and(eq(catalogItems.vendorName, vendor), eq(catalogItems.inStock, true), gt(catalogItems.dealerPrice, 0)))
-    .limit(2000);
+    .where(and(vendorFilter, eq(catalogItems.inStock, true), gt(catalogItems.dealerPrice, 0)))
+    .limit(CATALOG_FETCH_CAP);
 
-  const candidates = rows
-    .map((r) => {
-      const catalog = {
-        manufacturer: r.manufacturer,
-        model: r.model,
-        description: r.description,
-        category: r.category,
-        dealerPrice: Number(r.dealerPrice),
-      };
-      const category = inferCategoryFromText(r.category, r.description, r.model);
-      const floor = minFirearmPriceFloor(category);
-      if (catalog.dealerPrice < floor) return null;
-      if (!isLikelyFirearm(catalog, { manufacturer: r.manufacturer, model: r.model, category })) return null;
-      return { r, category };
-    })
-    .filter((x): x is NonNullable<typeof x> => x != null)
-    .slice(0, limit);
+  const mapped: ScanCatalogRow[] = rows.map((r) => ({
+    vendorName: r.vendorName,
+    sku: r.sku,
+    upc: r.upc,
+    manufacturer: r.manufacturer,
+    model: r.model,
+    description: r.description,
+    category: r.category,
+    caliber: r.caliber,
+    dealerPrice: Number(r.dealerPrice),
+    inStock: r.inStock,
+  }));
+
+  const candidates = pickScanCandidates(mapped, limit);
 
   const results: ScanResultRow[] = [];
 
@@ -121,7 +127,7 @@ export async function scanWholesaleDeals(opts: ScanOptions = {}): Promise<ScanSu
         {
           workflow: "vendor" as const,
           usedSubtype: "auction" as const,
-          sourceDealer: vendor,
+          sourceDealer: r.vendorName,
           manufacturer: r.manufacturer,
           model: r.model || productLabel,
           upc: r.upc ?? "",
@@ -132,6 +138,7 @@ export async function scanWholesaleDeals(opts: ScanOptions = {}): Promise<ScanSu
           targetAcquisitionCost: dealerPrice,
           inboundShip: opts.inboundShip ?? 0,
           buyerPremiumPct: 0,
+          purchaseCardPct: 0,
           listingUpgrades: DEAL_DEFAULTS.listingUpgrades,
           buyerPaysOutboundShip: DEAL_DEFAULTS.buyerPaysOutboundShip,
           buyerPaysCardFee: DEAL_DEFAULTS.buyerPaysCardFee,

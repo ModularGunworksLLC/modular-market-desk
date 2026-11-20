@@ -8,6 +8,8 @@ export type ClientDealDefaults = {
   targetProfit: number;
   minMarginPct: number;
   buyerPremiumPct: number;
+  /** Auction purchase card % on hammer+premium (default on for auction/batch). */
+  purchaseCardPct: number;
   listingUpgrades: number;
   outboundShip: number;
   salesTaxPct: number;
@@ -19,6 +21,7 @@ export const CLIENT_DEAL_DEFAULTS: ClientDealDefaults = {
   targetProfit: 50,
   minMarginPct: 15,
   buyerPremiumPct: 18,
+  purchaseCardPct: 3,
   listingUpgrades: 3,
   outboundShip: 30,
   salesTaxPct: 9,

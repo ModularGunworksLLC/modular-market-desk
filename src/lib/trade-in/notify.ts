@@ -64,7 +64,9 @@ export async function sendTradeInNotification(payload: TradeInMailPayload): Prom
     payload.caliber ? `Caliber: ${payload.caliber}` : null,
     `Serial: ${payload.serialNumber}`,
     payload.estimateLabel ||
-      (payload.estimateP25 != null ? `Estimate: ~$${payload.estimateP25.toFixed(2)}` : "Estimate: unavailable"),
+      (payload.estimateP25 != null
+        ? `Customer ceiling ~$${payload.estimateP25.toFixed(2)}`
+        : "Estimate: unavailable"),
     "",
     `Customer: ${payload.customerName}`,
     `Email: ${payload.customerEmail}`,
@@ -73,7 +75,7 @@ export async function sendTradeInNotification(payload: TradeInMailPayload): Prom
     "",
     `Inbox (full-res): ${inboxUrl}`,
     "",
-    "Soft estimate only — not a binding offer.",
+    "Customer saw a dual-exit safe ceiling ($100 profit floor after local tax / GB fees) — not a binding offer.",
   ].filter((x): x is string => x != null);
 
   const attachments: { filename: string; content: Buffer; contentType: string }[] = [];

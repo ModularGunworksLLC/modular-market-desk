@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assessMatchSuspicion } from "./match-suspicion";
+import { assessMatchSuspicion, IDENTITY_RATIO_NOGO } from "./match-suspicion";
 
 describe("assessMatchSuspicion", () => {
   it("flags OA median far above lot bid (ammo/wrong leaf)", () => {
@@ -34,5 +34,14 @@ describe("assessMatchSuspicion", () => {
     });
     expect(s.suspicious).toBe(true);
     expect(s.warnings.some((w) => /Web street/i.test(w))).toBe(true);
+  });
+
+  it("4× OA/hammer is the GO withhold threshold", () => {
+    expect(IDENTITY_RATIO_NOGO).toBe(4);
+    const warn = assessMatchSuspicion({ bidOrCost: 100, oaMedian: 300, oaCount: 20 });
+    expect(warn.suspicious).toBe(true);
+    expect(warn.oaToBidRatio! < IDENTITY_RATIO_NOGO).toBe(true);
+    const kill = assessMatchSuspicion({ bidOrCost: 65, oaMedian: 411, oaCount: 29 });
+    expect(kill.oaToBidRatio!).toBeGreaterThanOrEqual(IDENTITY_RATIO_NOGO);
   });
 });

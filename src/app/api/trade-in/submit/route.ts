@@ -7,9 +7,10 @@ import { db } from "@/lib/db";
 import { tradeInPhotos, tradeInRequests } from "@/lib/db/schema";
 import { estimateTradeInInterest } from "@/lib/trade-in/estimate";
 import { ensureTradeInTables } from "@/lib/trade-in/ensure";
+import { ledgerHandoffConfigured, notifyLedgerTradeIn } from "@/lib/trade-in/ledger-handoff";
 import { sendTradeInNotification, tradeInNotifyConfigured } from "@/lib/trade-in/notify";
 import { clientIp, rateLimitOk } from "@/lib/trade-in/rate-limit";
-import { saveTradeInPhotos, TRADE_IN_MAX_PHOTO_BYTES } from "@/lib/trade-in/storage";
+import { saveTradeInPhotos, TRADE_IN_MAX_PHOTO_BYTES, TradeInPhotoError } from "@/lib/trade-in/storage";
 import { turnstileConfigured, verifyTurnstile } from "@/lib/trade-in/turnstile";
 
 export const runtime = "nodejs";
@@ -112,7 +113,7 @@ export async function POST(request: Request) {
       notes,
       estimateP25: estimate.estimateP25,
       estimateSoldCount: estimate.soldCount,
-      estimateLabel: estimate.label || null,
+      estimateLabel: estimate.staffLabel || estimate.label || null,
       oaModelId: estimate.oaModelId,
       oaCaliberId: estimate.oaCaliberId,
       notifySent: false,
@@ -147,7 +148,7 @@ export async function POST(request: Request) {
           customerEmail,
           customerPhone,
           notes,
-          estimateLabel: estimate.label || null,
+          estimateLabel: estimate.staffLabel || estimate.label || null,
           estimateP25: estimate.estimateP25,
           thumbs: saved.map((p) => ({ thumbName: p.thumbName, originalName: p.originalName })),
         });
@@ -171,19 +172,49 @@ export async function POST(request: Request) {
         .where(eq(tradeInRequests.id, requestId));
     }
 
+    if (ledgerHandoffConfigured()) {
+      const ledger = await notifyLedgerTradeIn({
+        deskRequestId: requestId,
+        customerName,
+        customerEmail,
+        customerPhone,
+        manufacturer,
+        model,
+        serialNumber,
+        caliber,
+        notes,
+        estimateLabel: estimate.staffLabel || estimate.label || null,
+        estimateP25: estimate.estimateP25,
+      });
+      if (!ledger.ok) {
+        console.error("[trade-in/submit] ledger handoff", ledger.error);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       id: requestId,
-      estimateLabel: estimate.label || null,
+      estimateLabel: estimate.staffLabel || estimate.label || null,
       notifyQueued: !notifyError || notifyError.includes("not configured"),
       message:
         "Thanks — we received your request. We will contact you after reviewing the photos. This estimate is not a binding offer.",
     });
   } catch (err) {
     console.error("[trade-in/submit]", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Submit failed" },
-      { status: 500 },
-    );
+    if (err instanceof TradeInPhotoError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    const msg = err instanceof Error ? err.message : "Submit failed";
+    // Photo decode failures that slipped past the typed error should still be 400s, not opaque 500s.
+    if (/heif|heic|iref|security limit|unsupported image|invalid input|could not process photo/i.test(msg)) {
+      return NextResponse.json(
+        {
+          error:
+            "One of the photos could not be read. On iPhone, switch Camera → Formats → Most Compatible (JPEG), or upload a screenshot, then try again.",
+        },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

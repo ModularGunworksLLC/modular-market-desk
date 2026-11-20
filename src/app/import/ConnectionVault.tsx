@@ -63,6 +63,7 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
             />
             <datalist id="vault-vendor-options">
               <option value="outdoor_analytics" />
+              <option value="lipseys" />
               <option value="chattanooga" />
               <option value="2ndamendmentwholesale" />
             </datalist>
@@ -78,6 +79,16 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
         <div>
           <label className="field-label">Label</label>
           <input className="field-input" name="label" placeholder="Outdoor Analytics / Chattanooga" />
+        </div>
+        <div>
+          <label className="field-label">Email (Lipsey&apos;s)</label>
+          <input
+            className="field-input font-mono text-xs"
+            name="email"
+            type="email"
+            placeholder="Dealer login email for Lipsey's API"
+            autoComplete="off"
+          />
         </div>
         <div>
           <label className="field-label">API SID (Chattanooga)</label>
@@ -101,7 +112,7 @@ export function ConnectionVault({ connections }: { connections: ConnectionView[]
           <textarea
             className="field-input min-h-[80px] font-mono text-xs"
             name="secret"
-            placeholder="OA bearer, Chattanooga API_TOKEN, or cookie string..."
+            placeholder="OA bearer, Lipsey's password, Chattanooga API_TOKEN, or cookie string..."
           />
         </div>
         <div>

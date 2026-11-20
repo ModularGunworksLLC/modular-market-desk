@@ -38,6 +38,7 @@ export async function searchOrganic(
   const resp = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(20_000),
     body: JSON.stringify({
       api_key: key,
       query,

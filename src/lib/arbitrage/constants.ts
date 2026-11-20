@@ -35,6 +35,8 @@ export const DEAL_DEFAULTS = {
   targetProfit: num("DEAL_TARGET_PROFIT", 50),
   minMarginPct: num("DEAL_MIN_MARGIN_PCT", 15),
   buyerPremiumPct: num("DEAL_DEFAULT_BUYER_PREMIUM_PCT", 18),
+  /** Card on auction purchase invoice (hammer+premium). 0 for cash / trade-in. */
+  purchaseCardPct: num("DEAL_DEFAULT_PURCHASE_CARD_PCT", 3),
   listingUpgrades: num("DEAL_DEFAULT_LISTING_UPGRADE", 3),
   outboundShip: num("DEAL_DEFAULT_OUTBOUND_SHIP", 30),
   /** Default local sales tax percent (Alabama). */
@@ -49,6 +51,7 @@ export const DEAL_DEFAULT_FALLBACKS = {
   targetProfit: 50,
   minMarginPct: 15,
   buyerPremiumPct: 18,
+  purchaseCardPct: 3,
   listingUpgrades: 3,
   outboundShip: 30,
   salesTaxPct: 9,

@@ -11,6 +11,22 @@ describe("parseTitleBlob", () => {
     expect(p.category).toBe("handgun");
   });
 
+  it("keeps a duty Sig P320 as P320 9mm, not a P220 sibling", () => {
+    const p = parseTitleBlob("Sig Sauer P320 9mm");
+    expect(p.manufacturer).toBe("Sig Sauer");
+    expect(p.model.replace(/\s+/g, "").toUpperCase()).toBe("P320");
+    expect(p.caliber).toBe("9mm");
+  });
+
+  it("extracts cartridges that used to collapse onto the wrong leaf", () => {
+    expect(parseTitleBlob("Remington Model 700 7mm REM Mag Rifle").caliber).toBe("7mm Rem Mag");
+    expect(parseTitleBlob("Remington Model 700 22-250 Rem Rifle").caliber).toBe(".22-250");
+    expect(parseTitleBlob("Marlin 336 .35 Rem Rifle").caliber).toBe(".35 Rem");
+    expect(parseTitleBlob("CZ 82 9x18 Pistol").caliber).toBe("9x18");
+    expect(parseTitleBlob("Mauser 1914 6.35mm Pistol").caliber).toBe(".25 ACP");
+    expect(parseTitleBlob("Beretta 92 Compact 9mm").model.toLowerCase()).toContain("compact");
+  });
+
   it("handles multi-word brands and normalizes aliases", () => {
     const p = parseTitleBlob("Smith & Wesson M&P Shield 9mm");
     expect(p.manufacturer).toBe("Smith & Wesson");
@@ -29,6 +45,48 @@ describe("parseTitleBlob", () => {
     expect(p.manufacturer).toBe("Mossberg");
     expect(p.caliber).toBe("12ga");
     expect(p.category).toBe("shotgun");
+  });
+
+  it("cleans Pearce TRANS junk and glued ###CAL calibers", () => {
+    const ruger = parseTitleBlob("RUGER AMERICAN 308CAL BOLT TRANS 4415");
+    expect(ruger.manufacturer).toBe("Ruger");
+    expect(ruger.model.toUpperCase()).toBe("AMERICAN");
+    expect(ruger.caliber).toBe(".308");
+    expect(ruger.category).toBe("rifle");
+    expect(ruger.model).not.toMatch(/TRANS|CAL|BOLT/i);
+
+    const sks = parseTitleBlob("SKS 7.62X39CAL SEMI TRANS 4403");
+    expect(sks.manufacturer).toBe("Norinco");
+    expect(sks.model.toUpperCase()).toBe("SKS");
+    expect(sks.caliber).toBe("7.62x39");
+
+    const glock = parseTitleBlob("GLOCK 42 .380CAL SEMI TRANS 4410");
+    expect(glock.manufacturer).toBe("Glock");
+    expect(glock.model).toMatch(/42/);
+    expect(glock.caliber).toBe(".380 ACP");
+    expect(glock.model).not.toMatch(/SEMI|TRANS/i);
+
+    const xpr = parseTitleBlob("WINCHESTER XPR 270CAL BOLT TRANS 4412");
+    expect(xpr.manufacturer).toBe("Winchester");
+    expect(xpr.model.toUpperCase()).toBe("XPR");
+    expect(xpr.caliber).toBe(".270");
+    expect(xpr.category).toBe("rifle");
+  });
+
+  it("normalizes 10-22, Circuit Judge, and Braztech importer lines", () => {
+    const ten = parseTitleBlob("RUGER 10-22 .22CAL SEMI TRANS 4420");
+    expect(ten.manufacturer).toBe("Ruger");
+    expect(ten.model).toContain("10/22");
+    expect(ten.caliber).toBe(".22 LR");
+
+    const judge = parseTitleBlob("TAURUS CIRCUIT JUDGE 45/410CAL TRANS 4401");
+    expect(judge.manufacturer).toBe("Taurus");
+    expect(judge.model.toUpperCase()).toContain("JUDGE");
+    expect(judge.caliber).toBe(".45 Colt");
+
+    const braz = parseTitleBlob("BRAZTECH CIRCUIT JUDGE 45/410CAL");
+    expect(braz.manufacturer).toBe("Rossi");
+    expect(braz.model.toUpperCase()).toContain("CIRCUIT");
   });
 });
 

@@ -45,6 +45,54 @@ export type SavedPhoto = {
   byteSize: number;
 };
 
+/** User-facing error for bad phone photos (HEIC decode limits, corrupt files, etc.). */
+export class TradeInPhotoError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TradeInPhotoError";
+  }
+}
+
+function friendlyDecodeError(originalName: string, err: unknown): TradeInPhotoError {
+  const raw = err instanceof Error ? err.message : String(err);
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("heif") ||
+    lower.includes("heic") ||
+    lower.includes("iref") ||
+    lower.includes("security limit") ||
+    lower.includes("unsupported image") ||
+    lower.includes("invalid input") ||
+    lower.includes("vips")
+  ) {
+    return new TradeInPhotoError(
+      `Could not read photo "${originalName}". On iPhone, use JPEG (Settings → Camera → Formats → Most Compatible) or take a screenshot, then upload again.`,
+    );
+  }
+  return new TradeInPhotoError(`Could not process photo "${originalName}". Try a different JPEG or PNG.`);
+}
+
+async function toJpegBuffers(buffer: Buffer, originalName: string): Promise<{ fullBuf: Buffer; thumbBuf: Buffer }> {
+  try {
+    const pipeline = () =>
+      sharp(buffer, {
+        failOn: "none",
+        // Some phone HEICs exceed default decoder safety caps; still size-capped by MAX_BYTES.
+        unlimited: true,
+        limitInputPixels: 40_000_000,
+      }).rotate();
+
+    const fullBuf = await pipeline().jpeg({ quality: 88, mozjpeg: true }).toBuffer();
+    const thumbBuf = await pipeline()
+      .resize({ width: MAX_EDGE, height: MAX_EDGE, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 78, mozjpeg: true })
+      .toBuffer();
+    return { fullBuf, thumbBuf };
+  } catch (err) {
+    throw friendlyDecodeError(originalName, err);
+  }
+}
+
 export async function saveTradeInPhotos(
   requestId: string,
   files: { buffer: Buffer; originalName: string; mimeType: string }[],
@@ -55,23 +103,20 @@ export async function saveTradeInPhotos(
   let i = 0;
   for (const f of files) {
     if (f.buffer.byteLength > MAX_BYTES) {
-      throw new Error(`Photo "${f.originalName}" exceeds 8MB limit`);
+      throw new TradeInPhotoError(`Photo "${f.originalName}" exceeds 8MB limit`);
     }
-    if (!f.mimeType.startsWith("image/")) {
-      throw new Error(`File "${f.originalName}" is not an image`);
+    const mime = (f.mimeType || "").toLowerCase();
+    const looksImage =
+      mime.startsWith("image/") ||
+      mime === "application/octet-stream" ||
+      /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(f.originalName);
+    if (!looksImage) {
+      throw new TradeInPhotoError(`File "${f.originalName}" is not an image`);
     }
     i += 1;
     const storedName = `full-${String(i).padStart(2, "0")}.jpg`;
     const thumbName = `thumb-${String(i).padStart(2, "0")}.jpg`;
-    const fullBuf = await sharp(f.buffer)
-      .rotate()
-      .jpeg({ quality: 88, mozjpeg: true })
-      .toBuffer();
-    const thumbBuf = await sharp(f.buffer)
-      .rotate()
-      .resize({ width: MAX_EDGE, height: MAX_EDGE, fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 78, mozjpeg: true })
-      .toBuffer();
+    const { fullBuf, thumbBuf } = await toJpegBuffers(f.buffer, f.originalName);
     await writeFile(path.join(dir, storedName), fullBuf);
     await writeFile(path.join(dir, thumbName), thumbBuf);
     out.push({

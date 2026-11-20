@@ -9,6 +9,7 @@ interface SyncStatus {
   ok: boolean;
   hasToken: boolean;
   hasSid?: boolean;
+  hasEmail?: boolean;
   hasFeedUrl: boolean;
   hasPreset: boolean;
   credentialSource?: string | null;
@@ -73,8 +74,8 @@ export function CatalogSync() {
     <section className="panel">
       <h2 className="mb-3 text-sm font-semibold text-desk-muted">API catalog sync</h2>
       <p className="mb-3 text-sm text-desk-muted">
-        Pull live dealer catalogs into SQLite for wholesale floors on Evaluate. Chattanooga uses your
-        CSSI API SID/token; 2AW uses the CSV feed URL.
+        Pull live dealer catalogs into SQLite for wholesale floors on Evaluate. Lipsey&apos;s uses
+        email/password (session Token). Chattanooga uses CSSI API SID/token; 2AW uses the CSV feed URL.
       </p>
 
       <label className="field-label">Vendor</label>
@@ -100,7 +101,7 @@ export function CatalogSync() {
       {status?.ok && (
         <p className="mb-3 text-sm text-desk-go">
           Ready
-          {vendor === "chattanooga" && status.credentialSource
+          {status.credentialSource && (vendor === "lipseys" || vendor === "chattanooga")
             ? ` — credentials from ${status.credentialSource}`
             : " — token / feed configured"}
           .
@@ -116,7 +117,9 @@ export function CatalogSync() {
       </button>
       {msg && <p className={`mt-2 text-sm ${ok ? "text-desk-go" : "text-desk-nogo"}`}>{msg}</p>}
       <p className="mt-2 text-[11px] text-desk-muted">
-        Chattanooga: vault vendor <code>chattanooga</code>, paste API token + SID (or{" "}
+        Lipsey&apos;s: vault vendor <code>lipseys</code>, email + password (or{" "}
+        <code>LIPSEYS_EMAIL</code> / <code>LIPSEYS_PASSWORD</code> in <code>.env</code>). Chattanooga:
+        vault vendor <code>chattanooga</code>, paste API token + SID (or{" "}
         <code>CHATTANOOGA_API_SID</code> / <code>CHATTANOOGA_API_TOKEN</code> in <code>.env</code>). 2AW:
         vendor <code>2ndamendmentwholesale</code> + feed URL.
       </p>

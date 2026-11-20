@@ -62,6 +62,7 @@ function evaluateScenario(
     minMarginPct: input.minMarginPct,
     inboundShip: input.inboundShip,
     buyerPremiumPct: input.buyerPremiumPct,
+    purchaseCardPct: input.purchaseCardPct,
   };
 
   return {
@@ -107,6 +108,7 @@ function buildExitDecision(params: {
     dealerFloor: params.opts?.dealerFloor,
     inboundShip: params.input.inboundShip,
     buyerPremiumPct: params.input.buyerPremiumPct,
+    purchaseCardPct: params.input.purchaseCardPct,
     applyNewFloor: params.workflow === "used",
   });
   const { verdict, reasons } = decideVerdictFull({

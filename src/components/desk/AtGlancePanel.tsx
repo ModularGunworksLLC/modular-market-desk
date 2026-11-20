@@ -48,15 +48,15 @@ function liquidityLabel(soldCount: number): { text: string; hot: boolean } {
   if (soldCount >= 40) return { text: "Sells often in this market", hot: true };
   if (soldCount >= 15) return { text: "Moderate sold activity", hot: true };
   if (soldCount >= 5) return { text: "Thin sold sample — be careful near ceiling", hot: false };
-  return { text: "Very few sold comps — high uncertainty", hot: false };
+  return { text: "Very few sold comps (n<5) — do not trust Max Pay", hot: false };
 }
 
 function shortSourceLine(sourceStatus?: string | null, soldCount?: number, webComps?: WebCompsSummary | null): string {
   if (webComps?.divergence === "cooling" && webComps.median != null) {
-    return `Cooling · street asks ~$${Math.round(webComps.median)} under sold FMV`;
+    return `Cooling · street asks ~$${Math.round(webComps.median)} under sold FMV (advisory)`;
   }
   if (webComps?.source === "insufficient") {
-    return webComps.note || "No OA solds — street asks advisory only";
+    return webComps.note || "No OA solds — street asks advisory only (not Max Pay)";
   }
   const raw = (sourceStatus ?? "").trim();
   if (!raw) {
@@ -64,11 +64,11 @@ function shortSourceLine(sourceStatus?: string | null, soldCount?: number, webCo
   }
   if (/local cache/i.test(raw) || /Local OA/i.test(raw)) {
     const n = soldCount != null ? ` · n=${soldCount}` : "";
-    return `OA local solds${n}`;
+    return `local OA${n}`;
   }
   if (/live/i.test(raw)) {
     const n = soldCount != null ? ` · n=${soldCount}` : "";
-    return `OA live solds${n}`;
+    return `OA live${n}`;
   }
   if (raw.length > 90) return `${raw.slice(0, 87)}…`;
   return raw;
@@ -90,6 +90,8 @@ export interface AtGlancePanelProps {
   onLiveBidChange: (v: string) => void;
   buyerPremiumPct: number;
   inboundShip: number;
+  /** Auction purchase card % on hammer+premium. */
+  purchaseCardPct?: number;
 }
 
 export function AtGlancePanel(props: AtGlancePanelProps) {
@@ -108,17 +110,20 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
     onLiveBidChange,
     buyerPremiumPct,
     inboundShip,
+    purchaseCardPct: purchaseCardPctProp,
   } = props;
 
   const isVendor = deskMode.workflow === "vendor";
   const isTradeIn = deskMode.usedSubtype === "tradein";
   const liveHammer = parseMoneyFieldOrZero(liveBid);
+  const purchaseCardPct = isTradeIn || isVendor ? 0 : (purchaseCardPctProp ?? result.input.purchaseCardPct ?? 0);
 
   const liveResult = evaluateDeal(
     {
       ...result.input,
       targetAcquisitionCost: isVendor ? result.input.targetAcquisitionCost : liveHammer,
       buyerPremiumPct: isTradeIn ? 0 : buyerPremiumPct,
+      purchaseCardPct,
       inboundShip,
     },
     sold,
@@ -151,6 +156,7 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
     : allInCost({
         targetAcquisitionCost: liveHammer,
         buyerPremiumPct: isTradeIn ? 0 : buyerPremiumPct,
+        purchaseCardPct,
         inboundShip,
       });
   const dealerVendor = insights?.cheapestInStockDealer
@@ -191,7 +197,7 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
     ].filter(Boolean);
     if (webComps?.divergence === "cooling") {
       goReasons.push(
-        `Clears $${result.input.targetProfit} min profit at Cooling-capped P25 (${goExits.join(" + ") || "check exits"}).`,
+        `Clears $${result.input.targetProfit} min profit at OA sold P25 (${goExits.join(" + ") || "check exits"}). Street asks look cooling — advisory only.`,
       );
     } else {
       goReasons.push(
@@ -224,9 +230,18 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
       ? allInCost({
           targetAcquisitionCost: ceiling,
           buyerPremiumPct: isTradeIn ? 0 : buyerPremiumPct,
+          purchaseCardPct,
           inboundShip,
         })
       : null;
+
+  const thinComps = !isVendor && sold.count > 0 && sold.count < 5;
+  const headroomVsLive =
+    !isVendor && liveHammer > 0 && ceiling > 0 ? round2ish(ceiling - liveHammer) : null;
+
+  function round2ish(n: number): number {
+    return Math.round(n * 100) / 100;
+  }
 
   return (
     <div className="space-y-3">
@@ -282,14 +297,68 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
 
         {!isVendor && (
           <div className="mt-4 space-y-3">
-            <p className="text-xs uppercase tracking-widest text-desk-muted">
-              {heroLabel} — both exits (fees in)
-            </p>
+            {sold.count > 0 && (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="rounded-md border border-desk-border bg-desk-panel2/80 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-muted">
+                    Market FMV
+                  </p>
+                  <p className="num text-2xl font-black text-desk-text">{usd(sold.p25)}</p>
+                  <p className="mt-0.5 text-[11px] text-desk-muted">
+                    OA sold P25 · typ {usd(sold.median)} · n={sold.count}
+                    {thinComps ? (
+                      <span className="ml-1 font-semibold text-desk-warn">· thin — do not trust</span>
+                    ) : null}
+                  </p>
+                </div>
+                <div className="rounded-md border border-desk-border bg-desk-panel2/80 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-muted">
+                    All-in at this bid
+                  </p>
+                  <p className="num text-2xl font-black text-desk-text">
+                    {liveHammer > 0 ? usd(liveAllIn) : "—"}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-desk-muted">
+                    Hammer + BP {isTradeIn ? 0 : buyerPremiumPct}%
+                    {purchaseCardPct > 0 ? ` + card ${purchaseCardPct}%` : ""} + inbound
+                    {liveHammer > 0 ? ` · bid ${usd(liveHammer)}` : " · enter a bid below"}
+                  </p>
+                </div>
+                <div className="rounded-md border border-desk-accent/40 bg-desk-accent/10 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-accent">
+                    Max I can pay
+                  </p>
+                  <p className={`num text-2xl font-black ${viable ? "text-desk-go" : "text-desk-nogo"}`}>
+                    {usd(ceiling)}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-desk-muted">
+                    Best exit hammer after fees + ${result.input.targetProfit} profit
+                    {maxBidAllIn != null ? ` · OTD ${usd(maxBidAllIn)}` : ""}
+                    {headroomVsLive != null
+                      ? ` · headroom ${headroomVsLive >= 0 ? "+" : ""}${usd(headroomVsLive)}`
+                      : ""}
+                  </p>
+                </div>
+              </div>
+            )}
+            {thinComps ? (
+              <p className="rounded-md border border-desk-warn/40 bg-desk-warn/10 px-3 py-2 text-xs font-semibold text-desk-warn">
+                Thin comps (n={sold.count} &lt; 5) — Max Pay is shown but do not trust it without more solds.
+              </p>
+            ) : null}
             {newDealerWarning ? (
               <p className="rounded-md border border-desk-nogo/40 bg-desk-nogo/15 px-3 py-2 text-xs font-semibold text-desk-nogo">
                 {newDealerWarning}
               </p>
             ) : null}
+            <details className="rounded-md border border-desk-border bg-desk-panel2/50 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-widest text-desk-muted">
+                Details — Local / GunBroker exits
+              </summary>
+              <div className="mt-3 space-y-3">
+            <p className="text-xs uppercase tracking-widest text-desk-muted">
+              {heroLabel} by exit
+            </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="rounded-md border border-desk-border bg-desk-panel2/80 px-3 py-3">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-muted">
@@ -336,23 +405,8 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
                 </p>
               </div>
             </div>
-            {sold.count > 0 && sold.median > 0 && (
-              <div className="rounded-md border border-desk-accent/40 bg-desk-accent/10 px-3 py-3">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-desk-accent">
-                  Assessed market value
-                </p>
-                <p className="num text-3xl font-black text-desk-text">{usd(sold.median)}</p>
-                <p className="mt-1 text-xs text-desk-muted">
-                  OA sold median · n={sold.count} — before fees. Max Bids above use conservative P25 after
-                  fees.
-                </p>
               </div>
-            )}
-            {maxBidAllIn != null && sold.count > 0 && (
-              <p className="text-xs text-desk-muted">
-                All-in at best Max Bid (premium + inbound): {usd(maxBidAllIn)}
-              </p>
-            )}
+            </details>
           </div>
         )}
 
@@ -395,7 +449,16 @@ export function AtGlancePanel(props: AtGlancePanelProps) {
               GB net ≈ <span className="num font-semibold">{usd(result.chosen.routeA.net)}</span>
               <span className="text-desk-muted">
                 {" "}
-                (profit target ${result.input.targetProfit})
+                → max after ${result.input.targetProfit} profit
+                {sold.count > 0 ? (
+                  <>
+                    {" "}
+                    (Local {usd(ceilingExits.local.maxBid)} · GB {usd(ceilingExits.gunbroker.maxBid)})
+                  </>
+                ) : null}
+                {" · "}
+                BP {isTradeIn ? 0 : buyerPremiumPct}%
+                {purchaseCardPct > 0 ? ` · card ${purchaseCardPct}%` : ""} · inbound {usd(inboundShip)}
               </span>
             </p>
             <p className={`mt-1 text-xs ${liq.hot ? "text-desk-muted" : "text-desk-warn"}`}>

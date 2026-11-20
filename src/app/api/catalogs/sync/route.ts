@@ -1,13 +1,14 @@
 /**
  * POST /api/catalogs/sync
  * Pull a distributor API/feed catalog into catalog_items.
- * Body: { vendor?: "2ndamendmentwholesale" | "chattanooga" }
+ * Body: { vendor?: "lipseys" | "2ndamendmentwholesale" | "chattanooga" }
  */
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { syncChattanoogaCatalog, ChattanoogaApiError } from "@/lib/chattanooga/sync";
+import { syncLipseysCatalog, LipseysApiError } from "@/lib/lipseys/sync";
 import { syncTawCatalog, TawFeedError } from "@/lib/taw/feed";
 import { API_SYNC_VENDORS } from "@/lib/tracked-vendors";
 import { errorMessage } from "@/lib/api-error";
@@ -36,18 +37,24 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const result = vendor === "chattanooga" ? await syncChattanoogaCatalog() : await syncTawCatalog();
+    const result =
+      vendor === "lipseys"
+        ? await syncLipseysCatalog()
+        : vendor === "chattanooga"
+          ? await syncChattanoogaCatalog()
+          : await syncTawCatalog();
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     const message = errorMessage(err);
     let status = 500;
-    if (err instanceof TawFeedError || err instanceof ChattanoogaApiError) {
+    if (err instanceof TawFeedError || err instanceof ChattanoogaApiError || err instanceof LipseysApiError) {
       status = err.status ?? 502;
       if (
         message.includes("No active 2AW API token") ||
         message.includes("Missing 2AW feed URL") ||
         message.includes("No CSV preset") ||
-        message.includes("Missing Chattanooga API credentials")
+        message.includes("Missing Chattanooga API credentials") ||
+        message.includes("Missing Lipsey's API credentials")
       ) {
         status = 409;
       }

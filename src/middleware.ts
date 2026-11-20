@@ -27,6 +27,10 @@ export async function middleware(request: NextRequest) {
   if (pathname === "/trade-in" || pathname === "/api/trade-in/estimate" || pathname === "/api/trade-in/submit") {
     return NextResponse.next();
   }
+  // HEIC→JPEG converter used by the public trade-in form (must not require desk login).
+  if (pathname === "/vendor/heic2any.min.js" || pathname.startsWith("/vendor/")) {
+    return NextResponse.next();
+  }
   // Do not treat /trade-in/inbox as public via startsWith(/trade-in)
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
     return NextResponse.next();

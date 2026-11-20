@@ -129,6 +129,8 @@ export async function ingestBidWranglerAuction(
   const warnings: string[] = [];
   const all: AuctionLot[] = [];
   const seen = new Set<string>();
+  let pagesFetched = 0;
+  let stoppedReason: AuctionIngestResult["stoppedReason"] = "complete";
 
   // Prefer items endpoint (paginated). Fall back to embedded items on auction payload.
   let page = 1;
@@ -147,22 +149,35 @@ export async function ingestBidWranglerAuction(
       throw err;
     }
 
+    pagesFetched = page;
     const items: BwItem[] = Array.isArray(payload)
       ? (payload as BwItem[])
       : Array.isArray((payload as { items?: BwItem[] }).items)
         ? ((payload as { items: BwItem[] }).items)
         : [];
 
-    if (items.length === 0) break;
+    if (items.length === 0) {
+      stoppedReason = page === 1 ? "empty_page" : "no_new_lots";
+      break;
+    }
 
+    let added = 0;
     for (const item of items) {
       const lot = itemToLot(item, origin);
       if (!lot || seen.has(lot.lot)) continue;
       seen.add(lot.lot);
       all.push(lot);
+      added += 1;
     }
 
-    if (items.length < 25) break;
+    if (added === 0) {
+      stoppedReason = "no_new_lots";
+      break;
+    }
+    if (page === maxPages) {
+      stoppedReason = "page_cap";
+      warnings.push(`Hit page cap (${maxPages}) with ${all.length} lots.`);
+    }
     page += 1;
   }
 
@@ -172,6 +187,7 @@ export async function ingestBidWranglerAuction(
       items_count?: number;
       name?: string;
     };
+    pagesFetched = Math.max(pagesFetched, 1);
     const items = Array.isArray(auction.items) ? auction.items : [];
     if (items.length === 0 && all.length === 0) {
       throw new AuctionIngestError(
@@ -189,6 +205,9 @@ export async function ingestBidWranglerAuction(
       warnings.push(
         `Only ${all.length} of ${auction.items_count} lots on first auction payload — items pagination may be limited.`,
       );
+      stoppedReason = "page_cap";
+    } else {
+      stoppedReason = "complete";
     }
   }
 
@@ -208,5 +227,8 @@ export async function ingestBidWranglerAuction(
     skipped: all.length - firearmLots.length,
     warnings,
     hasListingIncrements,
+    loadedLots: all.length,
+    pagesFetched: Math.max(pagesFetched, 1),
+    stoppedReason,
   };
 }

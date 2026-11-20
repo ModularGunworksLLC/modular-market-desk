@@ -8,6 +8,7 @@ import { desc, eq, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { webPriceObservations, webPriceStats } from "@/lib/db/schema";
+import { ensureMarketDataBankTables } from "@/lib/market-sync/ensure";
 
 import {
   aggregatePrices,
@@ -110,6 +111,7 @@ export type EnrichResult = {
 
 /** Call Tavily, parse prices, upsert observations, recompute stats. */
 export async function enrichIdentity(identity: WebIdentity): Promise<EnrichResult> {
+  await ensureMarketDataBankTables();
   const key = webCanonicalKey(identity);
   if (!tavilyConfigured()) {
     return {

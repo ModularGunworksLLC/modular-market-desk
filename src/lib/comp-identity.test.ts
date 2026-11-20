@@ -98,4 +98,15 @@ describe("filterSoldByIdentity", () => {
     expect(kept).toHaveLength(1);
     expect(kept[0]!.price).toBe(350);
   });
+
+  it("drops P220 and XFIVE titles when the desk model is a duty P320", () => {
+    const sold: SoldCompInput[] = [
+      { price: 715, salesDate: "2026-01-01", listingType: "Auction", title: "SIG SAUER P220 .45 ACP USED" },
+      { price: 890, salesDate: "2026-01-02", listingType: "Auction", title: "SIG P320 XFIVE LEGION 9MM" },
+      { price: 425, salesDate: "2026-01-03", listingType: "Auction", title: "SIG SAUER P320 9MM NITRON" },
+    ];
+    const { rows: kept } = filterSoldByIdentity(sold, { queryModel: "P320" });
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.price).toBe(425);
+  });
 });

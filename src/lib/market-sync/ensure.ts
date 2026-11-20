@@ -1,12 +1,28 @@
 /**
  * Ensure market data bank tables/columns exist (Lightsail SQLite, no migrate step required).
+ *
+ * Important: DBs created from drizzle/0002_web_comps.sql lack `source`/`kind`/`geo`.
+ * CREATE INDEX on those columns must run AFTER the ALTERs, or the whole batch fails
+ * and Tavily ingest stays queued forever with SQLITE_ERROR: no such column: source.
  */
 
 import "server-only";
 
 import { db } from "@/lib/db";
 
+let ensured: Promise<void> | null = null;
+
 export async function ensureMarketDataBankTables(): Promise<void> {
+  if (!ensured) {
+    ensured = migrate().catch((err) => {
+      ensured = null;
+      throw err;
+    });
+  }
+  await ensured;
+}
+
+async function migrate(): Promise<void> {
   await db.$client.executeMultiple(`
     CREATE TABLE IF NOT EXISTS market_sync_runs (
       id text PRIMARY KEY NOT NULL,
@@ -39,7 +55,6 @@ export async function ensureMarketDataBankTables(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS web_price_obs_key_idx ON web_price_observations (canonical_key);
     CREATE INDEX IF NOT EXISTS web_price_obs_domain_idx ON web_price_observations (source_domain);
-    CREATE INDEX IF NOT EXISTS web_price_obs_source_idx ON web_price_observations (source);
     CREATE UNIQUE INDEX IF NOT EXISTS web_price_obs_uniq
       ON web_price_observations (canonical_key, source_url, price);
 
@@ -73,5 +88,13 @@ export async function ensureMarketDataBankTables(): Promise<void> {
     } catch {
       // column already exists
     }
+  }
+
+  try {
+    await db.$client.execute(
+      "CREATE INDEX IF NOT EXISTS web_price_obs_source_idx ON web_price_observations (source)",
+    );
+  } catch {
+    // ignore if table/column still missing
   }
 }

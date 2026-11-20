@@ -24,6 +24,11 @@ export interface DealInput {
   inboundShip: number;
   /** Auction buyer's premium percent (0 for a straight wholesaler buy). */
   buyerPremiumPct: number;
+  /**
+   * Card fee on the purchase invoice (hammer + premium), percent.
+   * Auction houses often charge ~3% when you pay by card. 0 for cash / wholesaler.
+   */
+  purchaseCardPct: number;
   /** Typical outbound ship on the listing (for display); may be paid by buyer. */
   outboundShip: number;
   /** When true, outbound ship is not deducted from GunBroker net (buyer pays). */

@@ -15,6 +15,13 @@ export interface AuctionLot {
   detailUrl?: string;
 }
 
+export type AuctionStoppedReason =
+  | "complete"
+  | "no_new_lots"
+  | "http_error"
+  | "page_cap"
+  | "empty_page";
+
 export interface AuctionIngestResult {
   auctionUrl: string;
   host: string;
@@ -25,6 +32,12 @@ export interface AuctionIngestResult {
   warnings: string[];
   /** True when any lot carried listing next-bid / increment fields. */
   hasListingIncrements: boolean;
+  /** Total lots after dedupe (same as lots.length). */
+  loadedLots: number;
+  /** How many list pages were fetched. */
+  pagesFetched: number;
+  /** Why pagination stopped — shown in the Batch UI. */
+  stoppedReason: AuctionStoppedReason;
 }
 
 export class AuctionIngestError extends Error {

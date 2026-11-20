@@ -519,7 +519,7 @@ export const tradeInRequests = sqliteTable(
     customerEmail: text("customer_email").notNull(),
     customerPhone: text("customer_phone").notNull(),
     notes: text("notes"),
-    /** Soft USED sold P25 from local OA bank — not a binding offer. */
+    /** Customer-facing dual-exit safe ceiling (not raw market P25). */
     estimateP25: real("estimate_p25"),
     estimateSoldCount: integer("estimate_sold_count"),
     estimateLabel: text("estimate_label"),

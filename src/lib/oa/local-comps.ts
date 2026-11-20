@@ -123,10 +123,14 @@ export async function loadLocalMarket(args: {
     enrichNotes: [...(args.enrichNotes ?? []), "Source: local OA sync cache"],
   });
 
-  // If filter wiped everything but we have stored percentiles, use those
+  // If filter wiped everything but we have stored percentiles, use those —
+  // unless identity already stripped rows (unfiltered OA parent stats would
+  // re-inflate XFive/wrong-leaf medians).
   let sold = filtered.sold;
   let asking = filtered.asking;
-  if (sold.count === 0 && (stat.soldCount ?? 0) > 0 && stat.soldP25 != null) {
+  const identityStripped =
+    (filtered.meta.identityRemovedSold ?? 0) > 0 || (filtered.meta.identityRemovedAsking ?? 0) > 0;
+  if (sold.count === 0 && !identityStripped && (stat.soldCount ?? 0) > 0 && stat.soldP25 != null) {
     sold = {
       count: stat.soldCount,
       low: stat.soldLow ?? stat.soldP25,
@@ -137,7 +141,7 @@ export async function loadLocalMarket(args: {
       avg: stat.soldAvg ?? stat.soldMedian ?? stat.soldP25,
     };
   }
-  if (asking.count === 0 && (stat.askingCount ?? 0) > 0 && stat.askingMedian != null) {
+  if (asking.count === 0 && !identityStripped && (stat.askingCount ?? 0) > 0 && stat.askingMedian != null) {
     asking = {
       count: stat.askingCount,
       low: stat.askingLow ?? stat.askingMedian,

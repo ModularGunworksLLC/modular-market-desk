@@ -22,6 +22,7 @@
     "oa:sync": "tsx scripts/sync-oa-full.ts",
     "tgv:sync": "tsx scripts/sync-tgv-gaps.ts",
     "flip:check": "tsx scripts/gba-flip-check.ts",
+    "lipseys:sync": "tsx scripts/sync-lipseys.ts",
     "import:catalogs": "tsx scripts/import-catalogs.ts",
     "pearce:ai-resolve": "tsx scripts/ai-resolve-no-comps.mjs",
     "pearce:bid-pass": "node scripts/build-bid-pass-list.mjs",

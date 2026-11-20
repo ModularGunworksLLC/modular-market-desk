@@ -208,6 +208,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
 
               <div>
+                <label className="field-label">Purchase card % (auction)</label>
+                <p className="mb-1 text-[11px] text-desk-muted">
+                  Card fee on hammer + premium when you pay the auction house. Default 3%. Set 0 for cash.
+                </p>
+                <input
+                  className="field-input"
+                  value={defaults.purchaseCardPct}
+                  onChange={(e) => setDefaults((d) => ({ ...d, purchaseCardPct: e.target.value }))}
+                  onBlur={() => persist(defaults)}
+                />
+              </div>
+
+              <div>
                 <label className="field-label">Auction bid increments (fallback)</label>
                 <p className="mb-2 text-[11px] text-desk-muted">
                   Used when a batch CSV has no listing next-bid. Auction URL ingest prefers HiBid{" "}

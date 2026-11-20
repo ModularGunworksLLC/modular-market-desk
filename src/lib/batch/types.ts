@@ -11,11 +11,19 @@ export interface BatchResultRow {
   currentBid: number | null;
   /** Next legal hammer (listing required_bid or schedule). */
   nextBid: number | null;
+  /** Inbound shipping used in all-in math (usually $0 on this sheet). */
+  inboundShip: number;
   /** Dealer all-in at next bid: next × (1+BP%) + inbound. */
   allInAtNext: number | null;
   /** Dealer all-in at current bid (if everyone stops). */
   allInAtCurrent: number | null;
+  /** What you pay if you bid Max GB hammer: that hammer × (1+BP%) + inbound. */
+  allInAtMaxGb: number | null;
+  /** What you pay if you bid Max Local hammer. */
+  allInAtMaxLocal: number | null;
   buyerPremiumPct: number;
+  /** Purchase card % on hammer+premium (auction all-in). */
+  purchaseCardPct: number;
   /** @deprecated Prefer maxBidLocal / maxBidGb — kept for sort defaults. */
   sellChannel: "gunbroker" | "local";
   /** Max Bid floored to a legal increment step (best of the two exits). */
@@ -41,7 +49,7 @@ export interface BatchResultRow {
   soldCount: number;
   soldP25: number | null;
   soldMedian: number | null;
-  /** Decision sold P25 (after Cooling cap if applied). */
+  /** Decision sold P25 (OA solds — web/TGV never rewrite Max Pay). */
   decisionP25: number | null;
   /**
    * Market median sold (OA) — context only; Max Bid uses Decision P25 after fees.

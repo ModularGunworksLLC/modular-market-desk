@@ -27,6 +27,8 @@ export const evaluateSchema = z.object({
   targetAcquisitionCost: z.number().nonnegative().optional().default(0),
   inboundShip: z.number().nonnegative().default(0),
   buyerPremiumPct: z.number().min(0).max(100).default(0),
+  /** Card on purchase invoice (hammer+premium). Auction/batch default 3%; trade-in/vendor 0. */
+  purchaseCardPct: z.number().min(0).max(100).optional().default(DEAL_DEFAULTS.purchaseCardPct),
   /** Omit to use category default: handgun $45, rifle/shotgun $60. */
   outboundShip: z.number().nonnegative().optional(),
   buyerPaysOutboundShip: z.boolean().optional().default(DEAL_DEFAULTS.buyerPaysOutboundShip),

@@ -24,7 +24,7 @@ import { vendorLabel } from "@/lib/tracked-vendors";
 import type { DealInput, DecisionAnchor, EvaluationResult, PriceStats } from "@/lib/arbitrage/types";
 import type { CompFilterMeta } from "@/lib/comp-filter";
 import type { AskingCompRow, SoldCompRow } from "@/lib/gba/client";
-import type { OaSelection } from "@/lib/gba/scorer";
+import type { OaNearMissSuggestion, OaSelection } from "@/lib/gba/scorer";
 import type { DealInsights } from "@/lib/deal-insights";
 import { buildDealInsights, DEALER_OPTIONS } from "@/lib/deal-insights";
 import { loadDealerDefaults, type DeskDealerDefaults } from "@/lib/desk-defaults";
@@ -47,6 +47,7 @@ interface ApiResponse {
   insights?: DealInsights;
   sourceStatus: Record<string, string>;
   catalogMatch?: OaSelection | null;
+  catalogSuggestions?: OaNearMissSuggestion[];
   soldListings?: SoldCompRow[];
   askingListings?: AskingCompRow[];
   compMeta?: CompFilterMeta | null;
@@ -70,6 +71,7 @@ export default function DeskPage() {
     vendorCost: "",
     inboundShip: "",
     buyerPremiumPct: String(CLIENT_DEAL_DEFAULTS.buyerPremiumPct),
+    purchaseCardPct: String(CLIENT_DEAL_DEFAULTS.purchaseCardPct),
     outboundShip: String(CLIENT_DEAL_DEFAULTS.outboundShip),
     buyerPaysOutboundShip: CLIENT_DEAL_DEFAULTS.buyerPaysOutboundShip,
     buyerPaysCardFee: CLIENT_DEAL_DEFAULTS.buyerPaysCardFee,
@@ -110,6 +112,7 @@ export default function DeskPage() {
         outboundShip: d.outboundShip,
         listingUpgrades: d.listingUpgrades,
         buyerPremiumPct: d.buyerPremiumPct,
+        purchaseCardPct: d.purchaseCardPct ?? String(CLIENT_DEAL_DEFAULTS.purchaseCardPct),
         buyerPaysOutboundShip: d.buyerPaysOutboundShip,
         buyerPaysCardFee: d.buyerPaysCardFee,
         sellChannel: d.sellChannel,
@@ -235,6 +238,7 @@ export default function DeskPage() {
           targetAcquisitionCost: acquisition,
           inboundShip: parseMoneyFieldOrZero(form.inboundShip),
           buyerPremiumPct: isVendor || isTradeIn ? 0 : parseMoneyFieldOrZero(form.buyerPremiumPct),
+          purchaseCardPct: isVendor || isTradeIn ? 0 : parseMoneyFieldOrZero(form.purchaseCardPct),
           outboundShip,
           buyerPaysOutboundShip: form.buyerPaysOutboundShip,
           buyerPaysCardFee: form.buyerPaysCardFee,
@@ -355,6 +359,7 @@ export default function DeskPage() {
   }, [data, form.sourceDealer, isVendor, isTradeIn]);
 
   const buyerPremiumPct = isVendor || isTradeIn ? 0 : parseMoneyFieldOrZero(form.buyerPremiumPct);
+  const purchaseCardPct = isVendor || isTradeIn ? 0 : parseMoneyFieldOrZero(form.purchaseCardPct);
   const inboundShipNum = parseMoneyFieldOrZero(form.inboundShip);
 
   const previewInput = {
@@ -362,6 +367,7 @@ export default function DeskPage() {
       ? parseMoneyFieldOrZero(form.vendorCost)
       : parseMoneyFieldOrZero(liveBid),
     buyerPremiumPct,
+    purchaseCardPct,
     inboundShip: inboundShipNum,
   };
   const previewAllIn = allInCost(previewInput);
@@ -373,6 +379,7 @@ export default function DeskPage() {
       targetAcquisitionCost: previewInput.targetAcquisitionCost,
       inboundShip: inboundShipNum,
       buyerPremiumPct,
+      purchaseCardPct,
       outboundShip: parseMoneyFieldOrZero(form.outboundShip),
       buyerPaysOutboundShip: form.buyerPaysOutboundShip,
       buyerPaysCardFee: form.buyerPaysCardFee,
@@ -563,29 +570,38 @@ export default function DeskPage() {
           </button>
         </div>
         {workflow === "used" && (
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => selectUsedSubtype("auction")}
-              className={`rounded-md border px-2 py-1.5 text-xs ${
-                isUsedAuction
-                  ? "border-desk-accent bg-desk-accent/10 text-desk-text"
-                  : "border-desk-border text-desk-muted"
-              }`}
-            >
-              Auction (max bid)
-            </button>
-            <button
-              type="button"
-              onClick={() => selectUsedSubtype("tradein")}
-              className={`rounded-md border px-2 py-1.5 text-xs ${
-                isTradeIn
-                  ? "border-desk-accent bg-desk-accent/10 text-desk-text"
-                  : "border-desk-border text-desk-muted"
-              }`}
-            >
-              Trade-in (max offer)
-            </button>
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => selectUsedSubtype("auction")}
+                className={`rounded-md border px-2 py-1.5 text-left text-xs ${
+                  isUsedAuction
+                    ? "border-desk-accent bg-desk-accent/10 text-desk-text"
+                    : "border-desk-border text-desk-muted"
+                }`}
+              >
+                <span className="block font-semibold">Auction (max bid)</span>
+                <span className="mt-0.5 block text-[10px] opacity-80">Buyer&apos;s premium applies</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => selectUsedSubtype("tradein")}
+                className={`rounded-md border px-2 py-1.5 text-left text-xs ${
+                  isTradeIn
+                    ? "border-desk-accent bg-desk-accent/10 text-desk-text"
+                    : "border-desk-border text-desk-muted"
+                }`}
+              >
+                <span className="block font-semibold">Trade-in (max offer)</span>
+                <span className="mt-0.5 block text-[10px] opacity-80">No buyer&apos;s premium — cash offer</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-desk-muted">
+              {isUsedAuction
+                ? "Auction mode: set buyer’s premium in section 3 — it lowers Max Bid."
+                : "Trade-in mode: buyer’s premium is forced to 0% (no auction house fee)."}
+            </p>
           </div>
         )}
       </div>
@@ -630,6 +646,7 @@ export default function DeskPage() {
             <FieldHint
               label="Make"
               hint="Manufacturer / brand as on the gun."
+              name="desk-manufacturer"
               v={form.manufacturer}
               on={(e) => {
                 const manufacturer = e.target.value;
@@ -639,6 +656,7 @@ export default function DeskPage() {
             <FieldHint
               label="Model"
               hint="Model line (e.g. P320, Axis 2 XP)."
+              name="desk-model"
               v={form.model}
               on={(e) => {
                 const model = e.target.value;
@@ -648,6 +666,7 @@ export default function DeskPage() {
             <FieldHint
               label="Caliber"
               hint="Optional but tightens OA leaf when resolving."
+              name="desk-caliber"
               v={form.caliber}
               on={(e) => {
                 const caliber = e.target.value;
@@ -696,9 +715,6 @@ export default function DeskPage() {
             <div className="mt-2">
               <OaCatalogPickers
                 condition={isVendor ? "new" : isTradeIn ? "used" : form.condition}
-                manufacturer={form.manufacturer}
-                model={form.model}
-                caliber={form.caliber}
                 onPick={(sel) => {
                   setForm((f) => ({
                     ...f,
@@ -720,11 +736,18 @@ export default function DeskPage() {
                 <FieldHint
                   label="UPC"
                   hint="Strongly recommended — tightens comps to your exact SKU."
+                  name="desk-upc"
                   v={form.upc}
                   on={set("upc")}
                   onBlur={() => void lookupCatalogUpc(form.upc)}
                 />
-                <FieldHint label="MPN / item #" hint="Filters wrong variants." v={form.mpn} on={set("mpn")} />
+                <FieldHint
+                  label="MPN / item #"
+                  hint="Filters wrong variants."
+                  name="desk-mpn"
+                  v={form.mpn}
+                  on={set("mpn")}
+                />
                 <div className="col-span-2">
                   <label className="field-label">Source dealer (optional)</label>
                   <select
@@ -748,6 +771,8 @@ export default function DeskPage() {
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   <input
                     className="field-input"
+                    name="desk-upc"
+                    autoComplete="off"
                     value={form.upc}
                     onChange={set("upc")}
                     onBlur={() => void lookupCatalogUpc(form.upc)}
@@ -755,6 +780,8 @@ export default function DeskPage() {
                   />
                   <input
                     className="field-input"
+                    name="desk-mpn"
+                    autoComplete="off"
                     value={form.mpn}
                     onChange={set("mpn")}
                     placeholder="MPN / item #"
@@ -870,12 +897,20 @@ export default function DeskPage() {
                 </div>
               )}
               {isUsedAuction && (
-                <FieldHint
-                  label="Buyer’s premium %"
-                  hint="Include CC in this number if the auction stacks it (e.g. 15% + 3.5% = 18.5%)."
-                  v={form.buyerPremiumPct}
-                  on={set("buyerPremiumPct")}
-                />
+                <>
+                  <FieldHint
+                    label="Buyer’s premium %"
+                    hint="Auction house BP only (e.g. 15–18%). Purchase card is a separate field below."
+                    v={form.buyerPremiumPct}
+                    on={set("buyerPremiumPct")}
+                  />
+                  <FieldHint
+                    label="Purchase card %"
+                    hint="Card fee on hammer + premium when you pay the house. Default 3%. Set 0 for cash/wire."
+                    v={form.purchaseCardPct}
+                    on={set("purchaseCardPct")}
+                  />
+                </>
               )}
               <FieldHint
                 label="Inbound ship ($)"
@@ -958,6 +993,89 @@ export default function DeskPage() {
 
           {data && (
           <>
+          {match && (
+            <div className="panel space-y-2 border-desk-accent/35 bg-desk-accent/5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-desk-accent">
+                Matched OA leaf
+              </p>
+              <p className="text-sm text-desk-text">
+                {match.manufacturer} · {match.model}
+                {match.caliber ? ` · ${match.caliber}` : ""}
+                <span className="ml-2 text-xs text-desk-muted">
+                  ({match.conditionParam}, score {Math.round(match.score)})
+                </span>
+              </p>
+              {(() => {
+                const typedMfr = form.manufacturer.trim().toLowerCase();
+                const typedModel = form.model.trim().toLowerCase();
+                const typedCal = form.caliber.trim().toLowerCase();
+                const corrected =
+                  (typedMfr && typedMfr !== match.manufacturer.toLowerCase()) ||
+                  (typedModel && typedModel !== match.model.toLowerCase()) ||
+                  (typedCal && match.caliber && typedCal !== match.caliber.toLowerCase());
+                return corrected ? (
+                  <p className="text-xs text-desk-warn">
+                    Corrected spelling for comps — free-text fields left as you typed.
+                  </p>
+                ) : null;
+              })()}
+              <button
+                type="button"
+                className="rounded-md border border-desk-border bg-desk-panel2 px-3 py-1.5 text-xs font-medium text-desk-text"
+                onClick={() => {
+                  setForm((f) => ({
+                    ...f,
+                    manufacturer: match.manufacturer,
+                    model: match.model,
+                    caliber: match.caliber || f.caliber,
+                    gbaModelId: String(match.modelId),
+                    gbaCaliberId: String(match.caliberId),
+                    condition: match.conditionParam === "New" ? "new" : "used",
+                  }));
+                }}
+              >
+                Use OA names in form
+              </button>
+            </div>
+          )}
+
+          {!match && (data.catalogSuggestions?.length ?? 0) > 0 && (
+            <div className="panel space-y-2 border-desk-warn/40 bg-desk-warn/5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-desk-warn">
+                No exact OA match — try a near miss
+              </p>
+              <ul className="space-y-1.5">
+                {data.catalogSuggestions!.map((s) => (
+                  <li key={`${s.modelId}-${s.caliberId}-${s.conditionParam}`}>
+                    <button
+                      type="button"
+                      className="w-full rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-left text-xs text-desk-text hover:border-desk-accent"
+                      onClick={() => {
+                        setForm((f) => ({
+                          ...f,
+                          manufacturer: s.manufacturer,
+                          model: s.model,
+                          caliber: s.caliber || f.caliber,
+                          gbaModelId: String(s.modelId),
+                          gbaCaliberId: String(s.caliberId),
+                          condition: s.conditionParam === "New" ? "new" : "used",
+                        }));
+                      }}
+                    >
+                      <span className="font-semibold">
+                        {s.manufacturer} · {s.model}
+                        {s.caliber ? ` · ${s.caliber}` : ""}
+                      </span>
+                      <span className="ml-2 text-desk-muted">
+                        score {Math.round(s.score)} — click to lock, then Evaluate again
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {r && (isVendor || sold != null) && (
             <AtGlancePanel
               title={title}
@@ -973,6 +1091,7 @@ export default function DeskPage() {
               liveBid={liveBid}
               onLiveBidChange={setLiveBid}
               buyerPremiumPct={buyerPremiumPct}
+              purchaseCardPct={purchaseCardPct}
               inboundShip={inboundShipNum}
             />
           )}

@@ -28,9 +28,6 @@ export type OaPickSelection = {
 type Props = {
   /** Desk condition: used | new | any → maps to USED/NEW browse bucket */
   condition: string;
-  manufacturer: string;
-  model: string;
-  caliber: string;
   onPick: (sel: OaPickSelection) => void;
 };
 
@@ -38,7 +35,12 @@ function bucket(condition: string): "NEW" | "USED" {
   return condition === "new" ? "NEW" : "USED";
 }
 
-export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPick }: Props) {
+/**
+ * Explicit OA Make → Model → Caliber browser.
+ * Only writes into the parent form when the user picks all three from the lists —
+ * never syncs from free-text Make/Model/Caliber (that caused mid-typing overwrites).
+ */
+export function OaCatalogPickers({ condition, onPick }: Props) {
   const cond = bucket(condition);
   const [manufacturers, setManufacturers] = useState<CatalogItem[]>([]);
   const [models, setModels] = useState<CatalogItem[]>([]);
@@ -75,16 +77,6 @@ export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPi
   }, [cond]);
 
   useEffect(() => {
-    if (!manufacturers.length || !manufacturer.trim()) return;
-    const q = manufacturer.trim().toLowerCase();
-    const hit =
-      manufacturers.find((m) => m.name.toLowerCase() === q) ||
-      manufacturers.find((m) => m.name.toLowerCase().includes(q) || q.includes(m.name.toLowerCase()));
-    if (hit && hit.id !== mfrId) setMfrId(hit.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manufacturers, manufacturer]);
-
-  useEffect(() => {
     if (!mfrId) {
       setModels([]);
       setModelId("");
@@ -117,24 +109,6 @@ export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPi
       .catch(() => setCalibers([]));
     setCaliberId("");
   }, [cond, modelId]);
-
-  useEffect(() => {
-    if (!models.length || !model.trim()) return;
-    const q = model.trim().toLowerCase();
-    const hit =
-      models.find((m) => m.name.toLowerCase() === q) ||
-      models.find((m) => m.name.toLowerCase().includes(q) || q.includes(m.name.toLowerCase()));
-    if (hit) setModelId(hit.id);
-  }, [models, model]);
-
-  useEffect(() => {
-    if (!calibers.length || !caliber.trim()) return;
-    const q = caliber.trim().toLowerCase().replace(/\s+/g, "");
-    const hit =
-      calibers.find((c) => c.name.toLowerCase().replace(/\s+/g, "") === q) ||
-      calibers.find((c) => c.name.toLowerCase().includes(caliber.trim().toLowerCase()));
-    if (hit) setCaliberId(hit.id);
-  }, [calibers, caliber]);
 
   useEffect(() => {
     if (typeof mfrId !== "number" || typeof modelId !== "number" || typeof caliberId !== "number") return;
@@ -190,7 +164,9 @@ export function OaCatalogPickers({ condition, manufacturer, model, caliber, onPi
         </h3>
         <span className="text-[10px] text-desk-muted">{cond} comps</span>
       </div>
-      <p className="text-[11px] text-desk-muted">Type to search Make or Model, then pick Caliber.</p>
+      <p className="text-[11px] text-desk-muted">
+        Pick from the lists to lock comps. Free-text Make/Model above stay as you typed until you pick here.
+      </p>
 
       {loading && <p className="text-xs text-desk-muted">Loading manufacturers…</p>}
       {error && <p className="text-xs text-desk-nogo">{error}</p>}

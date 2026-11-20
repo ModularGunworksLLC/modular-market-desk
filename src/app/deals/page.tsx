@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { CLIENT_DEAL_DEFAULTS } from "@/lib/arbitrage/client-defaults";
+import { TRACKED_VENDORS, vendorLabel } from "@/lib/tracked-vendors";
 import type { ScanResultRow, ScanSummary } from "@/lib/wholesale-scan";
 import { usd } from "@/lib/format";
 
@@ -11,6 +12,7 @@ export default function DealsPage() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ScanSummary | null>(null);
+  const [vendor, setVendor] = useState("all");
   const [limit, setLimit] = useState(30);
   const [targetProfit, setTargetProfit] = useState(CLIENT_DEAL_DEFAULTS.targetProfit);
   const [minMarginPct, setMinMarginPct] = useState(CLIENT_DEAL_DEFAULTS.minMarginPct);
@@ -23,7 +25,7 @@ export default function DealsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          vendor: "2ndamendmentwholesale",
+          vendor,
           limit,
           targetProfit,
           minMarginPct,
@@ -46,24 +48,43 @@ export default function DealsPage() {
   }
 
   const goRows = summary?.rows.filter((r) => r.verdict === "GO") ?? [];
+  const scannedVendor = summary?.vendor ?? vendor;
+  const scopeLabel =
+    scannedVendor === "all" ? "all imported distributors" : vendorLabel(scannedVendor);
 
   return (
     <main className="mx-auto max-w-[1800px] px-4 py-6">
       <div className="mb-6">
         <h1 className="text-lg font-semibold tracking-tight">Wholesale deal scanner</h1>
-        <p className="text-xs text-desk-muted">2nd Amendment Wholesale · GB exit math</p>
+        <p className="text-xs text-desk-muted">New-gun catalog · cheapest source · GB exit math</p>
       </div>
 
       <section className="panel mb-4">
         <p className="mb-3 text-sm text-desk-muted">
-          Scans your imported <strong>2AW</strong> in-stock firearms, pulls live GunBroker sold comps,
-          and ranks buys that clear your profit target. Sync the catalog on{" "}
+          Scans in-stock firearms from your imported new-gun catalogs. When the same UPC is at
+          more than one distributor, it keeps the <strong>cheapest</strong> dealer price, then
+          ranks buys that clear your profit target on GunBroker. Sync catalogs on{" "}
           <Link href="/import" className="text-desk-accent hover:underline">
             /import
           </Link>{" "}
           first.
         </p>
         <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="field-label">Catalog</label>
+            <select
+              className="field-input min-w-[14rem]"
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+            >
+              <option value="all">All distributors</option>
+              {TRACKED_VENDORS.map((v) => (
+                <option key={v} value={v}>
+                  {vendorLabel(v)}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="field-label">Max guns to evaluate</label>
             <input
@@ -101,7 +122,7 @@ export default function DealsPage() {
             disabled={pending}
             className="rounded-md bg-desk-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {pending ? "Scanning (GBA calls are slow)..." : "Scan 2AW catalog"}
+            {pending ? "Scanning (GBA calls are slow)..." : "Scan catalog"}
           </button>
         </div>
         {error && <p className="mt-3 text-sm text-desk-nogo">{error}</p>}
@@ -112,8 +133,8 @@ export default function DealsPage() {
         )}
         {summary && !error && (
           <p className="mt-3 text-sm text-desk-go">
-            Evaluated {summary.scanned} firearms · <strong>{summary.goCount} GO</strong> at ≥$
-            {targetProfit} target
+            Evaluated {summary.scanned} firearms from {scopeLabel} · <strong>{summary.goCount} GO</strong>{" "}
+            at ≥${targetProfit} target
           </p>
         )}
       </section>
@@ -125,6 +146,7 @@ export default function DealsPage() {
             <thead className="text-left text-xs uppercase text-desk-muted">
               <tr>
                 <th className="py-1">Product</th>
+                <th>Buy at</th>
                 <th>Dealer $</th>
                 <th>Net</th>
                 <th>Margin</th>
@@ -134,7 +156,7 @@ export default function DealsPage() {
             </thead>
             <tbody className="num">
               {goRows.map((r) => (
-                <DealRow key={`${r.sku ?? r.upc ?? r.productLabel}`} row={r} />
+                <DealRow key={`${r.vendorName}-${r.sku ?? r.upc ?? r.productLabel}`} row={r} />
               ))}
             </tbody>
           </table>
@@ -148,6 +170,7 @@ export default function DealsPage() {
             <thead className="text-left text-xs uppercase text-desk-muted">
               <tr>
                 <th className="py-1">Product</th>
+                <th>Buy at</th>
                 <th>Dealer $</th>
                 <th>Status</th>
               </tr>
@@ -157,8 +180,12 @@ export default function DealsPage() {
                 .filter((r) => r.verdict !== "GO")
                 .slice(0, 40)
                 .map((r) => (
-                  <tr key={`nogo-${r.sku ?? r.upc ?? r.productLabel}`} className="border-t border-desk-border">
+                  <tr
+                    key={`nogo-${r.vendorName}-${r.sku ?? r.upc ?? r.productLabel}`}
+                    className="border-t border-desk-border"
+                  >
                     <td className="py-1.5 font-sans">{r.productLabel}</td>
+                    <td className="font-sans text-xs">{vendorLabel(r.vendorName)}</td>
                     <td>{usd(r.dealerPrice)}</td>
                     <td className="font-sans text-xs text-desk-muted">{r.gbaStatus}</td>
                   </tr>
@@ -180,6 +207,7 @@ function DealRow({ row }: { row: ScanResultRow }) {
           {row.manufacturer} · {row.caliber || row.category}
         </div>
       </td>
+      <td className="font-sans text-xs">{vendorLabel(row.vendorName)}</td>
       <td>{usd(row.dealerPrice)}</td>
       <td className="text-desk-go">+{usd(row.netProfit)}</td>
       <td>{row.marginPct.toFixed(1)}%</td>

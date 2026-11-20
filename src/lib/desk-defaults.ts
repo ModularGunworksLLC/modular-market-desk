@@ -16,6 +16,8 @@ export type DeskDealerDefaults = {
   outboundShip: string;
   listingUpgrades: string;
   buyerPremiumPct: string;
+  /** Auction purchase card % on hammer+premium (default 3). */
+  purchaseCardPct: string;
   buyerPaysOutboundShip: boolean;
   buyerPaysCardFee: boolean;
   sellChannel: "gunbroker" | "local";
@@ -31,6 +33,7 @@ export function defaultDealerDefaults(): DeskDealerDefaults {
     outboundShip: String(CLIENT_DEAL_DEFAULTS.outboundShip),
     listingUpgrades: String(CLIENT_DEAL_DEFAULTS.listingUpgrades),
     buyerPremiumPct: String(CLIENT_DEAL_DEFAULTS.buyerPremiumPct),
+    purchaseCardPct: String(CLIENT_DEAL_DEFAULTS.purchaseCardPct),
     buyerPaysOutboundShip: CLIENT_DEAL_DEFAULTS.buyerPaysOutboundShip,
     buyerPaysCardFee: CLIENT_DEAL_DEFAULTS.buyerPaysCardFee,
     sellChannel: "gunbroker",
