@@ -77,10 +77,19 @@ export interface OaSelection {
   score: number;
   /** Sold comps on the leaf, when known. 0 means unknown or empty. */
   soldCount?: number;
+  /** Set when a dash/slash variant fell back to the base model. */
+  matchNote?: string;
 }
 
 /** Below this blended score the match is shown but Max hammer is suppressed. */
 export const MIN_MATCH_CONFIDENCE = 70;
+
+/**
+ * Dash/slash variants that are not in the catalog may match the base model,
+ * but the blended score stops here so it stays above the confidence gate
+ * without looking like an exact hit.
+ */
+export const DASH_BASE_SCORE_CAP = 72;
 
 /**
  * When two leaves are both at or above {@link MIN_MATCH_CONFIDENCE} and their
@@ -675,6 +684,13 @@ function scoreManufacturer(mfrName: string, query: GbaQuery): number {
  */
 function scoreModelName(modelName: string, tokens: string[], queryModel?: string): number {
   if (tokens.length === 0 && !(queryModel ?? "").trim()) return 0;
+  const dash = parseDashVariant(queryModel);
+  if (dash) {
+    if (isExactDashVariant(modelName, dash.variant)) return 100;
+    if (isSuffixOnlyModel(modelName, dash)) return 0;
+    if (isBaseModel(modelName, dash.base)) return 70;
+    return 0;
+  }
   const name = modelName.toLowerCase();
   const normName = norm(name);
   const qModel = queryModel ?? "";
@@ -726,11 +742,83 @@ function scoreModelName(modelName: string, tokens: string[], queryModel?: string
   return 0;
 }
 
+/** Dash or slash suffix on a model: 29-10, 629-1, 1911-22, WASR-10/63. */
+export interface DashVariant {
+  /** Compact variant as written, e.g. "29-10" or "WASR-10/63". */
+  variant: string;
+  /** Model to use when the variant leaf is missing: 29, 629, 1911, WASR-10. */
+  base: string;
+}
+
+export function parseDashVariant(model: string | undefined | null): DashVariant | null {
+  const compact = (model ?? "").trim().replace(/\s+/g, "");
+  if (!compact) return null;
+  const slash = compact.match(/^(.*\d)\/([A-Za-z0-9]+)$/);
+  if (slash?.[1]) return { variant: compact, base: slash[1] };
+  const dash = compact.match(/^(.*\d)-([A-Za-z0-9]+)$/);
+  if (dash?.[1] && dash[2]) return { variant: compact, base: dash[1] };
+  return null;
+}
+
+function variantKey(value: string): string {
+  return value.toLowerCase().replace(/\bmodel\b/g, "").replace(/[^a-z0-9/-]+/g, "");
+}
+
+/** '29-10' matches 'MODEL 29-10', not 'MODEL 29' or 'MODEL 10'. */
+export function isExactDashVariant(catalogName: string, variant: string): boolean {
+  const want = variantKey(variant);
+  if (!want) return false;
+  if (variantKey(catalogName) === want) return true;
+  return catalogName
+    .toLowerCase()
+    .replace(/\bmodel\b/g, " ")
+    .split(/[\s,]+/)
+    .some((part) => variantKey(part) === want);
+}
+
+export function isBaseModel(catalogName: string, base: string): boolean {
+  const want = variantKey(base);
+  return want.length > 0 && variantKey(catalogName) === want;
+}
+
+function isSuffixOnlyModel(catalogName: string, dash: DashVariant): boolean {
+  const key = variantKey(catalogName);
+  const variant = variantKey(dash.variant);
+  const base = variantKey(dash.base);
+  const suffix = variant.startsWith(base) ? variant.slice(base.length).replace(/^[-/]/, "") : "";
+  return suffix.length > 0 && key === suffix;
+}
+
+export function dashBaseMatchNote(dash: DashVariant): string {
+  return `Matched base model ${dash.base}; exact dash variant ${dash.variant} not in OA`;
+}
+
+function exactVariantInDeps(
+  deps: OaDependencies,
+  query: GbaQuery,
+  dash: DashVariant,
+  mfrThreshold: number,
+): boolean {
+  for (const condKey of oaConditions(query)) {
+    const nodes = deps[condKey];
+    if (!Array.isArray(nodes)) continue;
+    for (const node of nodes) {
+      if (scoreManufacturer(String(node.Manufacturer ?? ""), query) < mfrThreshold) continue;
+      const models = node.Models;
+      if (!Array.isArray(models)) continue;
+      for (const modelNode of models) {
+        if (isExactDashVariant(String(modelNode.Model ?? ""), dash.variant)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** True when the query has a hyphenated variant the catalog name does not contain. */
 function hyphenVariantMissing(queryModel: string, catalogName: string): boolean {
-  const variants = queryModel.toLowerCase().match(/\b[a-z0-9]+-[a-z0-9]+\b/g) ?? [];
-  const name = catalogName.toLowerCase();
-  return variants.some((tok) => !name.includes(tok));
+  const dash = parseDashVariant(queryModel);
+  if (!dash) return false;
+  return !isExactDashVariant(catalogName, dash.variant);
 }
 
 /* ------------------------------------------------------------------ *
@@ -783,6 +871,8 @@ function resolveSelectionWithThresholds(
 ): OaSelection | null {
   const tokens = modelSearchTokens(query);
   const wantCaliber = (query.caliber ?? "").trim().length > 0;
+  const dash = parseDashVariant(query.model);
+  const exactExists = dash ? exactVariantInDeps(deps, query, dash, thresholds.mfr) : false;
   let best: OaSelection | null = null;
 
   for (const condKey of oaConditions(query)) {
@@ -800,6 +890,12 @@ function resolveSelectionWithThresholds(
 
       for (const modelNode of models) {
         const modelName = String(modelNode.Model ?? "");
+        if (dash) {
+          const exact = isExactDashVariant(modelName, dash.variant);
+          const base = isBaseModel(modelName, dash.base);
+          if (exactExists && !exact) continue;
+          if (!exactExists && !base) continue;
+        }
         const modelScore = scoreModelName(modelName, tokens, query.model);
         if (modelScore < thresholds.model) continue;
 
@@ -817,6 +913,8 @@ function resolveSelectionWithThresholds(
           const calId = toInt(cal.CaliberID);
           let total = mfrScore * 0.25 + modelScore * 0.55 + calScore * 0.2;
           if (node.IsCommonManufacturer) total += 2;
+          const baseFallback = Boolean(dash && !exactExists && isBaseModel(modelName, dash.base));
+          if (baseFallback) total = DASH_BASE_SCORE_CAP;
           const countKey = soldCountKey(condKey, modelId, calId);
 
           const candidate: OaSelection = {
@@ -830,6 +928,7 @@ function resolveSelectionWithThresholds(
             caliber: String(calName ?? ""),
             score: total,
             soldCount: leafSoldCount(cal, countKey, soldCounts),
+            matchNote: baseFallback && dash ? dashBaseMatchNote(dash) : undefined,
           };
           if (best === null || preferCatalogLeaf(candidate, best, query)) best = candidate;
         }
@@ -897,13 +996,34 @@ export function resolveBestAttempt(
   attempts: GbaQuery[],
   soldCounts?: ReadonlyMap<string, number>,
 ): OaSelection | null {
-  let best: OaSelection | null = null;
+  const origin = attempts[0];
+  const dash = origin ? parseDashVariant(origin.model) : null;
+  const hits: OaSelection[] = [];
   for (const attempt of attempts) {
     const hit = resolveSelection(deps, attempt, soldCounts);
-    if (!hit) continue;
-    if (best == null || preferCatalogLeaf(hit, best, attempt)) best = hit;
+    if (hit) hits.push(hit);
+  }
+  const pool = dash ? constrainDashHits(hits, dash) : hits;
+  let best: OaSelection | null = null;
+  const rankQuery = origin ?? attempts[0];
+  if (!rankQuery) return null;
+  for (const hit of pool) {
+    if (best == null || preferCatalogLeaf(hit, best, rankQuery)) best = hit;
   }
   return best;
+}
+
+/** Drop suffix-only hits. Keep an exact variant when one was found; otherwise cap the base. */
+function constrainDashHits(hits: OaSelection[], dash: DashVariant): OaSelection[] {
+  const exact = hits.filter((hit) => isExactDashVariant(hit.model, dash.variant));
+  if (exact.length > 0) return exact;
+  return hits
+    .filter((hit) => isBaseModel(hit.model, dash.base))
+    .map((hit) => ({
+      ...hit,
+      score: Math.min(hit.score, DASH_BASE_SCORE_CAP),
+      matchNote: hit.matchNote ?? dashBaseMatchNote(dash),
+    }));
 }
 
 /**

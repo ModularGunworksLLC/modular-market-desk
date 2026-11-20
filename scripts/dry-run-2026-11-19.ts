@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 import { parseBatchSheet, parseTitleBlob } from "../src/lib/batch/parse";
-import { resolveBestAttempt, resolveQueryAttempts, type OaDependencies } from "../src/lib/gba/scorer";
+import { resolveBestAttempt, resolveQueryAttempts, resolveSelection, type OaDependencies } from "../src/lib/gba/scorer";
 
 type Row = {
   id: string;
@@ -252,6 +252,97 @@ const saigaHit = resolveBestAttempt(
 );
 lines.push(
   `Saiga title re-score: maker ${saiga.manufacturer}, model ${saiga.model}, ${saiga.category} → ${saigaHit ? `${saigaHit.manufacturer} ${saigaHit.model} ${saigaHit.caliber} n=${saigaHit.soldCount} score ${saigaHit.score.toFixed(0)}` : "no match"}.`,
+);
+lines.push("");
+lines.push("## Dash and slash variants");
+lines.push("");
+lines.push("Before: a dash model took an 88-point primary-number score, so `29-10` could land on Model 29 at a full score or, if the suffix token was used, on Model 10. After: an exact variant leaf wins when OA has it. If it does not, the base model is used at score 72 with a note, and the suffix model is never used.");
+lines.push("");
+lines.push("| Query | Catalog leaves | After |");
+lines.push("|---|---|---|");
+
+function dashLine(query: { manufacturer: string; model: string; caliber: string }, catalog: OaDependencies): string {
+  const hit = resolveSelection(catalog, { ...query, condition: "used" });
+  const after = hit
+    ? `${hit.model} score ${hit.score.toFixed(0)}${hit.matchNote ? ` — ${hit.matchNote}` : ""}`
+    : "no match";
+  const leaves = (catalog.USED ?? []).flatMap((m) => (m.Models ?? []).map((model) => model.Model)).join(", ");
+  return `| ${query.manufacturer} ${query.model} | ${leaves} | ${after} |`;
+}
+
+const sw44 = (names: string[]): OaDependencies => ({
+  USED: [
+    {
+      Manufacturer: "SMITH & WESSON",
+      ManufacturerID: 1,
+      IsCommonManufacturer: true,
+      Models: names.map((name, i) => ({
+        Model: name,
+        ModelID: i + 1,
+        Calibers: [{ Caliber: ".44 MAG.", CaliberID: i + 1, SoldCount: name === "1911-22" ? 51 : 10 }],
+      })),
+    },
+  ],
+});
+lines.push(dashLine({ manufacturer: "Smith & Wesson", model: "29-10", caliber: ".44 Magnum" }, sw44(["10", "29", "MODEL 29-10"])));
+lines.push(dashLine({ manufacturer: "Smith & Wesson", model: "29-10", caliber: ".44 Magnum" }, sw44(["10", "29"])));
+lines.push(dashLine({ manufacturer: "Smith & Wesson", model: "629-1", caliber: ".44 Magnum" }, sw44(["629", "629-1", "1"])));
+lines.push(dashLine({ manufacturer: "Smith & Wesson", model: "629-1", caliber: ".44 Magnum" }, sw44(["629", "1"])));
+lines.push(
+  dashLine(
+    { manufacturer: "Cugir", model: "WASR-10/63", caliber: "7.62x39" },
+    {
+      USED: [
+        {
+          Manufacturer: "CUGIR",
+          ManufacturerID: 2,
+          IsCommonManufacturer: true,
+          Models: ["WASR-10/63", "WASR-10", "63"].map((name, i) => ({
+            Model: name,
+            ModelID: i + 1,
+            Calibers: [{ Caliber: "7.62x39", CaliberID: i + 1, SoldCount: 10 }],
+          })),
+        },
+      ],
+    },
+  ),
+);
+lines.push(
+  dashLine(
+    { manufacturer: "Cugir", model: "WASR-10/63", caliber: "7.62x39" },
+    {
+      USED: [
+        {
+          Manufacturer: "CUGIR",
+          ManufacturerID: 2,
+          IsCommonManufacturer: true,
+          Models: ["WASR-10", "63"].map((name, i) => ({
+            Model: name,
+            ModelID: i + 1,
+            Calibers: [{ Caliber: "7.62x39", CaliberID: i + 1, SoldCount: 10 }],
+          })),
+        },
+      ],
+    },
+  ),
+);
+lines.push(
+  dashLine(
+    { manufacturer: "Browning", model: "1911-22", caliber: ".22 LR" },
+    {
+      USED: [
+        {
+          Manufacturer: "BROWNING",
+          ManufacturerID: 3,
+          IsCommonManufacturer: true,
+          Models: [
+            { Model: "1911", ModelID: 1, Calibers: [{ Caliber: ".22 LR", CaliberID: 1, SoldCount: 11 }] },
+            { Model: "1911-22", ModelID: 2, Calibers: [{ Caliber: ".22 LR", CaliberID: 2, SoldCount: 51 }] },
+          ],
+        },
+      ],
+    },
+  ),
 );
 lines.push("");
 

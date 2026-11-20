@@ -81,9 +81,9 @@ export class EvaluationError extends Error {
   }
 }
 
-function labelLocal(local: LocalMarketBundle, score: number | null): string {
+function labelLocal(local: LocalMarketBundle, score: number | null, note?: string | null): string {
   const age = oaCompAgeDays(local.syncedAt);
-  return formatOaMatchLabel({
+  const label = formatOaMatchLabel({
     manufacturer: local.selection.manufacturer,
     model: local.selection.model,
     caliber: local.selection.caliber,
@@ -95,6 +95,7 @@ function labelLocal(local: LocalMarketBundle, score: number | null): string {
     lowConfidence: isLowConfidenceMatch(score),
     insufficientUsed: local.insufficientUsed === true,
   });
+  return note ? `${label} · ${note}` : label;
 }
 
 async function safeWholesale(params: {
@@ -357,7 +358,7 @@ export async function runEvaluation(
           });
           if (local?.insufficientUsed) {
             catalogMatch = { ...hit, soldCount: hit.soldCount ?? 0 };
-            sourceStatus.gba = labelLocal(local, hit.score);
+            sourceStatus.gba = labelLocal(local, hit.score, hit.matchNote);
             resolved = true;
           } else if (local && local.sold.count > 0) {
             sold = local.sold;
@@ -367,7 +368,7 @@ export async function runEvaluation(
             askingListings = local.askingRows;
             compMeta = local.compMeta;
             resolved = true;
-            sourceStatus.gba = labelLocal(local, hit.score);
+            sourceStatus.gba = labelLocal(local, hit.score, hit.matchNote);
           }
         }
       } catch {
