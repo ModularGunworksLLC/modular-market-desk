@@ -11,6 +11,7 @@ import { loadDealerDefaults } from "@/lib/desk-defaults";
 import { parseMoneyFieldOrZero, usd } from "@/lib/format";
 import type { WebEnrichPhase } from "@/lib/web-comps/types";
 
+import { OaHealthBanner } from "@/components/desk/OaHealthBanner";
 import { BatchSheetTable } from "./BatchSheetTable";
 import { RankedBuySheet } from "./RankedBuySheet";
 
@@ -60,6 +61,7 @@ export default function BatchPage() {
   );
   const [auctionBusy, setAuctionBusy] = useState(false);
   const [auctionMsg, setAuctionMsg] = useState<string | null>(null);
+  const [bidsFetchedAt, setBidsFetchedAt] = useState<string | null>(null);
   const [webQueueBanner, setWebQueueBanner] = useState<string | null>(null);
   const lastRunRef = useRef<{
     rowsByNumber: Map<
@@ -315,6 +317,7 @@ export default function BatchPage() {
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.error || `Ingest failed (${res.status})`);
       setText(json.batchCsv || "");
+      setBidsFetchedAt(new Date().toLocaleString());
       const platform = json.platformLabel || json.platform || "auction";
       setAuctionMsg(
         `${platform}: loaded ${json.sheetLots?.length ?? json.loadedLots ?? 0} firearm lots` +
@@ -608,6 +611,9 @@ export default function BatchPage() {
           FMV → Next bid → Max bid for your profit floor → GO / NO-GO. Pick GunBroker or Local for the whole
           sheet; Max bid and GO follow that exit.
         </p>
+        <div className="mt-3">
+          <OaHealthBanner />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[400px_minmax(0,1fr)]">
@@ -676,7 +682,18 @@ export default function BatchPage() {
             >
               {auctionBusy ? "Fetching lots…" : "Load firearm lots"}
             </button>
+            <button
+              type="button"
+              disabled={auctionBusy || !auctionUrl.trim()}
+              onClick={() => void ingestAuction()}
+              className="rounded-md border border-desk-border bg-desk-panel2 px-3 py-2 text-xs font-medium text-desk-text disabled:opacity-40"
+            >
+              Refresh bids
+            </button>
             </div>
+            <p className="text-[11px] text-desk-muted">
+              Last fetched: {bidsFetchedAt ?? "not yet"}
+            </p>
             <p className="text-[11px] text-desk-muted">
               HiBid (bids.* and hibid.com/catalog), BidWrangler, Proxibid event/browse catalogs. LiveAuctioneers: use the
               HiBid listing of the same sale or paste CSV. Load → set this auction&apos;s BP → Run.

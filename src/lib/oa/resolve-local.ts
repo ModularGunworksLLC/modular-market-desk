@@ -5,8 +5,9 @@
 import { createClient } from "@libsql/client";
 
 import {
+  resolveBestAttempt,
   resolveQueryAttempts,
-  resolveSelection,
+  soldCountKey,
   suggestNearMissSelections,
   type GbaQuery,
   type OaDependencies,
@@ -83,13 +84,37 @@ async function getCachedDeps(): Promise<OaDependencies> {
   return depsCache.deps;
 }
 
+let soldCountCache: { at: number; counts: Map<string, number> } | null = null;
+
+async function getSoldCounts(): Promise<Map<string, number>> {
+  const now = Date.now();
+  if (soldCountCache && now - soldCountCache.at < DEPS_TTL_MS) return soldCountCache.counts;
+  const counts = new Map<string, number>();
+  const client = createClient({ url: databaseUrl() });
+  try {
+    const result = await client.execute(
+      "SELECT condition, model_id, caliber_id, sold_count FROM oa_market_stats",
+    );
+    for (const row of result.rows) {
+      const condition = String(row.condition ?? "");
+      const modelId = Number(row.model_id) || 0;
+      const caliberId = Number(row.caliber_id) || 0;
+      const soldCount = Number(row.sold_count) || 0;
+      counts.set(soldCountKey(condition, modelId, caliberId), soldCount);
+    }
+  } catch {
+    // A missing stats table must not block matching.
+  } finally {
+    client.close();
+  }
+  soldCountCache = { at: now, counts };
+  return counts;
+}
+
 export async function loadDepsAndResolve(query: GbaQuery): Promise<OaSelection | null> {
   const deps = await getCachedDeps();
-  for (const attempt of resolveQueryAttempts(query)) {
-    const hit = resolveSelection(deps, attempt);
-    if (hit) return hit;
-  }
-  return null;
+  const counts = await getSoldCounts();
+  return resolveBestAttempt(deps, resolveQueryAttempts(query), counts);
 }
 
 /** Near-miss OA leaves when auto-resolve fails — for click-to-apply on Evaluate. */

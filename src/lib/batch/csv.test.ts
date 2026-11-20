@@ -64,9 +64,11 @@ describe("batchResultsToCsv", () => {
   it("writes a header and one data row with money as raw numbers", () => {
     const csv = batchResultsToCsv([stub({})]);
     const lines = csv.trimEnd().split(/\r\n/);
-    expect(lines[0]).toContain("Lot,Item,Category,Local,GB");
+    expect(lines[0]).toContain("Lot,Item,Current bid (ingested),Category,Local,GB");
+    expect(lines[0]).not.toMatch(/Decision P25,Current/);
+    expect(lines[0]).toContain("OA sold P25 (comps, not a bid)");
     expect(lines[0]).toContain("Max hammer Local,You pay @ max Local,Max hammer GB,You pay @ max GB,Walk-away hammer");
-    expect(lines[1]).toContain("101,Glock 19 Gen5 9mm,handgun,GO,NO-GO,OK,450,399,420,430");
+    expect(lines[1]).toContain("101,Glock 19 Gen5 9mm,420,handgun,GO,NO-GO,OK,450,399,430");
     expect(lines[1]).toContain("360,424.8,310,365.8,350,-70,80,20,389,lipseys,42");
   });
 
@@ -91,7 +93,7 @@ describe("batchResultsToCsv", () => {
       }),
     ]);
     const data = csv.trimEnd().split(/\r\n/)[1]!;
-    expect(data.startsWith("101,Glock 19 Gen5 9mm,handgun,,,OK,,,420,430")).toBe(true);
+    expect(data.startsWith("101,Glock 19 Gen5 9mm,420,handgun,,,OK,,,430")).toBe(true);
   });
 });
 

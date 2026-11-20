@@ -57,6 +57,25 @@ function money(n: unknown): number | null {
   return n;
 }
 
+/** 0-bid lots keep the opening ask off Current Bid and label it as an ask. */
+export function bidWranglerLotPrice(state: {
+  accepted_bid_count?: number | null;
+  high?: { amount?: number } | null;
+  ask_amount?: number | null;
+  minimum_bid_amount?: number | null;
+  closing_bid?: { amount?: number } | null;
+}): { currentBid: number | null; openingAsk: number | null; bidKind: "bid" | "ask" | undefined; bidCount: number } {
+  const bidCount = typeof state.accepted_bid_count === "number" ? state.accepted_bid_count : 0;
+  const soldHammer = money(state.closing_bid?.amount) ?? (bidCount > 0 ? money(state.high?.amount) : null);
+  const openingAsk = money(state.ask_amount) ?? money(state.minimum_bid_amount);
+  return {
+    currentBid: soldHammer,
+    openingAsk: soldHammer == null ? openingAsk : null,
+    bidKind: soldHammer != null ? "bid" : openingAsk != null ? "ask" : undefined,
+    bidCount,
+  };
+}
+
 function itemToLot(item: BwItem, origin: string): AuctionLot | null {
   const lotRaw = item.lot_identifier ?? item.sequence;
   if (lotRaw == null || lotRaw === "") return null;
@@ -67,8 +86,9 @@ function itemToLot(item: BwItem, origin: string): AuctionLot | null {
   if (!title) return null;
 
   const state = item.api_bidding_state ?? {};
-  const soldHammer = money(state.closing_bid?.amount) ?? money(state.high?.amount);
-  const currentBid = soldHammer ?? money(state.ask_amount) ?? money(state.minimum_bid_amount);
+  const priced = bidWranglerLotPrice(state);
+  const bidCount = priced.bidCount;
+  const currentBid = priced.currentBid;
   const requiredBid = money(state.minimum_bid_amount) ?? money(state.ask_amount);
   const bidIncrementAmount = money(state.next_increment);
 
@@ -80,10 +100,12 @@ function itemToLot(item: BwItem, origin: string): AuctionLot | null {
     lot,
     title,
     currentBid,
+    openingAsk: priced.openingAsk,
+    bidKind: priced.bidKind,
     requiredBid: requiredBid != null && requiredBid > 0 ? requiredBid : null,
     bidIncrementAmount:
       bidIncrementAmount != null && bidIncrementAmount > 0 ? bidIncrementAmount : null,
-    bidCount: typeof state.accepted_bid_count === "number" ? state.accepted_bid_count : 0,
+    bidCount,
     imageUrls,
     kind: classifyTitle(title),
     detailUrl: item.details_url

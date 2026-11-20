@@ -13,6 +13,8 @@
  * Everything here is pure (no I/O), so it is unit-testable and safe to import anywhere.
  */
 
+import { oaMakersForIdentity, oaModelAliasFor } from "@/lib/batch/brand-lexicon";
+
 /** Desk-side identity used to resolve a catalog selection. */
 export interface GbaQuery {
   manufacturer: string;
@@ -31,6 +33,11 @@ export interface GbaQuery {
 export interface OaCaliberNode {
   Caliber?: string | null;
   CaliberID?: number | string | null;
+  /**
+   * Sold comps on this leaf. The live catalog JSON usually omits it; tests and
+   * `loadDepsAndResolve` attach it so a close score can prefer the larger sample.
+   */
+  SoldCount?: number | null;
 }
 
 /** A model node holding caliber leaves. */
@@ -68,7 +75,27 @@ export interface OaSelection {
   caliber: string;
   /** Blended confidence score in [0, 100+]. Higher is better. */
   score: number;
+  /** Sold comps on the leaf, when known. 0 means unknown or empty. */
+  soldCount?: number;
+  /** Set when a dash/slash variant fell back to the base model. */
+  matchNote?: string;
 }
+
+/** Below this blended score the match is shown but Max hammer is suppressed. */
+export const MIN_MATCH_CONFIDENCE = 70;
+
+/**
+ * Dash/slash variants that are not in the catalog may match the base model,
+ * but the blended score stops here so it stays above the confidence gate
+ * without looking like an exact hit.
+ */
+export const DASH_BASE_SCORE_CAP = 72;
+
+/**
+ * When two leaves are both at or above {@link MIN_MATCH_CONFIDENCE} and their
+ * scores differ by at most this many points, the larger sold sample wins.
+ */
+export const MATCH_SCORE_TIE_MARGIN = 5;
 
 const MIN_MANUFACTURER_SCORE = 40;
 const MIN_MODEL_SCORE = 45;
@@ -304,12 +331,12 @@ const CALIBER_ALIAS_GROUPS: string[][] = [
   ["6.5 grendel", "65 grendel"],
   ["9mm", "9 mm", "9x19", "9 x 19", "9mm luger", "9 luger", "9mm parabellum", "9mm para", "9mmp", "9mm nato"],
   ["380 acp", "380 auto", "380", "9mm short", "9x17", "9mm kurz"],
-  ["40 s&w", "40 sw", "40 cal", "40 smith", "40"],
+  ["40 s&w", "40 sw", "40 cal", "40 smith"],
   ["357 sig", "357sig"],
-  ["357 magnum", "357 mag", "357"],
+  ["357 magnum", "357 mag"],
   ["38 special", "38 spl", "38 spc", "38 special +p"],
   ["10mm", "10 mm", "10mm auto"],
-  ["45 acp", "45 auto", "45acp", "45"],
+  ["45 acp", "45 auto", "45acp"],
   ["45 colt", "45 long colt", "45 lc", "45lc"],
   ["44 magnum", "44 mag", "44 rem mag"],
   ["223 rem", "223 remington", "223", "5.56", "5.56x45", "5.56 nato", "556", "5.56mm"],
@@ -354,7 +381,10 @@ export function buildCaliberTokens(caliber: string | undefined | null): string[]
     }
   }
 
-  return Array.from(forms).filter((f) => f.length >= 2);
+  // Bare 22 / 45 / 40 / 357 match the wrong cartridge (.22 LR vs .22 WMR,
+  // .45 ACP vs .45-70, .357 Mag vs .357 SIG).
+  for (const bare of ["22", "45", "40", "357"]) forms.delete(bare);
+  return Array.from(forms).filter((f) => f.length >= 2 && !["22", "45", "40", "357"].includes(f));
 }
 
 /** Whether any normalized caliber form is present in a (lowercased) title. */
@@ -459,9 +489,11 @@ export function cleanModelForOa(model: string): string {
   m = m.replace(/\b\d+\.\d+\s*[xX]\s*\d+\s*CAL\b/gi, " ");
   m = m.replace(/\b\d{2,3}CAL\b/gi, " ");
   m = m.replace(/\b10\s*-\s*22\b/gi, "10/22");
-  // Trailing caliber glued into model (Desk already has a caliber field)
+  // Trailing caliber glued into model (Desk already has a caliber field).
+  // A hyphenated model such as 1911-22 must stay intact — the 22 is the variant,
+  // not a separate ".22" cartridge stuck on the end.
   m = m.replace(
-    /\b(?:9\s*x\s*19(?:mm)?|9\s*mm(?:\s*luger)?|10\s*mm|\.?(?:22|25|32|38|357|380|40|44|45)\s*(?:lr|acp|auto|special|spl|mag(?:num)?|wmr|s\s*&\s*w|colt)?|12\s*ga(?:uge)?|20\s*ga(?:uge)?)\s*$/i,
+    /(?:^|[\s,])(?:9\s*x\s*19(?:mm)?|9\s*mm(?:\s*luger)?|10\s*mm|\.?(?:22|25|32|38|357|380|40|44|45)\s*(?:lr|acp|auto|special|spl|mag(?:num)?|wmr|s\s*&\s*w|colt)?|12\s*ga(?:uge)?|20\s*ga(?:uge)?)\s*$/i,
     " ",
   );
   m = m.replace(/[*#|]+/g, " ").replace(/\s{2,}/g, " ").trim();
@@ -652,6 +684,13 @@ function scoreManufacturer(mfrName: string, query: GbaQuery): number {
  */
 function scoreModelName(modelName: string, tokens: string[], queryModel?: string): number {
   if (tokens.length === 0 && !(queryModel ?? "").trim()) return 0;
+  const dash = parseDashVariant(queryModel);
+  if (dash) {
+    if (isExactDashVariant(modelName, dash.variant)) return 100;
+    if (isSuffixOnlyModel(modelName, dash)) return 0;
+    if (isBaseModel(modelName, dash.base)) return 70;
+    return 0;
+  }
   const name = modelName.toLowerCase();
   const normName = norm(name);
   const qModel = queryModel ?? "";
@@ -667,6 +706,9 @@ function scoreModelName(modelName: string, tokens: string[], queryModel?: string
     if (mpNum && (normName.includes(`mp${mpNum}`) || normName === `mp${mpNum}`)) return 92;
   }
 
+  // 88 for the primary model number only (29-10 → 29, not 10).
+  // When both "1911" and "1911-22" clear this, preferCatalogLeaf keeps the
+  // hyphenated leaf and, on a close score, the larger sold sample.
   if (tokens.includes("1911") && /\b1911\b/i.test(name)) return 88;
 
   for (const tok of tokens) {
@@ -700,6 +742,85 @@ function scoreModelName(modelName: string, tokens: string[], queryModel?: string
   return 0;
 }
 
+/** Dash or slash suffix on a model: 29-10, 629-1, 1911-22, WASR-10/63. */
+export interface DashVariant {
+  /** Compact variant as written, e.g. "29-10" or "WASR-10/63". */
+  variant: string;
+  /** Model to use when the variant leaf is missing: 29, 629, 1911, WASR-10. */
+  base: string;
+}
+
+export function parseDashVariant(model: string | undefined | null): DashVariant | null {
+  const compact = (model ?? "").trim().replace(/\s+/g, "");
+  if (!compact) return null;
+  const slash = compact.match(/^(.*\d)\/([A-Za-z0-9]+)$/);
+  if (slash?.[1]) return { variant: compact, base: slash[1] };
+  const dash = compact.match(/^(.*\d)-([A-Za-z0-9]+)$/);
+  if (dash?.[1] && dash[2]) return { variant: compact, base: dash[1] };
+  return null;
+}
+
+function variantKey(value: string): string {
+  return value.toLowerCase().replace(/\bmodel\b/g, "").replace(/[^a-z0-9/-]+/g, "");
+}
+
+/** '29-10' matches 'MODEL 29-10', not 'MODEL 29' or 'MODEL 10'. */
+export function isExactDashVariant(catalogName: string, variant: string): boolean {
+  const want = variantKey(variant);
+  if (!want) return false;
+  if (variantKey(catalogName) === want) return true;
+  return catalogName
+    .toLowerCase()
+    .replace(/\bmodel\b/g, " ")
+    .split(/[\s,]+/)
+    .some((part) => variantKey(part) === want);
+}
+
+export function isBaseModel(catalogName: string, base: string): boolean {
+  const want = variantKey(base);
+  return want.length > 0 && variantKey(catalogName) === want;
+}
+
+function isSuffixOnlyModel(catalogName: string, dash: DashVariant): boolean {
+  const key = variantKey(catalogName);
+  const variant = variantKey(dash.variant);
+  const base = variantKey(dash.base);
+  const suffix = variant.startsWith(base) ? variant.slice(base.length).replace(/^[-/]/, "") : "";
+  return suffix.length > 0 && key === suffix;
+}
+
+export function dashBaseMatchNote(dash: DashVariant): string {
+  return `Matched base model ${dash.base}; exact dash variant ${dash.variant} not in OA`;
+}
+
+function exactVariantInDeps(
+  deps: OaDependencies,
+  query: GbaQuery,
+  dash: DashVariant,
+  mfrThreshold: number,
+): boolean {
+  for (const condKey of oaConditions(query)) {
+    const nodes = deps[condKey];
+    if (!Array.isArray(nodes)) continue;
+    for (const node of nodes) {
+      if (scoreManufacturer(String(node.Manufacturer ?? ""), query) < mfrThreshold) continue;
+      const models = node.Models;
+      if (!Array.isArray(models)) continue;
+      for (const modelNode of models) {
+        if (isExactDashVariant(String(modelNode.Model ?? ""), dash.variant)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** True when the query has a hyphenated variant the catalog name does not contain. */
+function hyphenVariantMissing(queryModel: string, catalogName: string): boolean {
+  const dash = parseDashVariant(queryModel);
+  if (!dash) return false;
+  return !isExactDashVariant(catalogName, dash.variant);
+}
+
 /* ------------------------------------------------------------------ *
  * Condition mapping
  * ------------------------------------------------------------------ */
@@ -727,13 +848,31 @@ function conditionParam(key: string): "New" | "Used" {
  * Blended weights: manufacturer 25%, model 55%, caliber 20%, with a small bonus
  * for catalog-flagged common manufacturers to break ties.
  */
+function leafSoldCount(
+  cal: OaCaliberNode,
+  key: string,
+  soldCounts?: ReadonlyMap<string, number>,
+): number {
+  const fromMap = soldCounts?.get(key);
+  if (fromMap != null && Number.isFinite(fromMap)) return fromMap;
+  const raw = cal.SoldCount;
+  return raw != null && Number.isFinite(Number(raw)) ? Number(raw) : 0;
+}
+
+export function soldCountKey(conditionKey: string, modelId: number, caliberId: number): string {
+  return `${conditionKey}|${modelId}|${caliberId}`;
+}
+
 function resolveSelectionWithThresholds(
   deps: OaDependencies,
   query: GbaQuery,
   thresholds: { mfr: number; model: number; cal: number },
+  soldCounts?: ReadonlyMap<string, number>,
 ): OaSelection | null {
   const tokens = modelSearchTokens(query);
   const wantCaliber = (query.caliber ?? "").trim().length > 0;
+  const dash = parseDashVariant(query.model);
+  const exactExists = dash ? exactVariantInDeps(deps, query, dash, thresholds.mfr) : false;
   let best: OaSelection | null = null;
 
   for (const condKey of oaConditions(query)) {
@@ -751,6 +890,12 @@ function resolveSelectionWithThresholds(
 
       for (const modelNode of models) {
         const modelName = String(modelNode.Model ?? "");
+        if (dash) {
+          const exact = isExactDashVariant(modelName, dash.variant);
+          const base = isBaseModel(modelName, dash.base);
+          if (exactExists && !exact) continue;
+          if (!exactExists && !base) continue;
+        }
         const modelScore = scoreModelName(modelName, tokens, query.model);
         if (modelScore < thresholds.model) continue;
 
@@ -768,6 +913,9 @@ function resolveSelectionWithThresholds(
           const calId = toInt(cal.CaliberID);
           let total = mfrScore * 0.25 + modelScore * 0.55 + calScore * 0.2;
           if (node.IsCommonManufacturer) total += 2;
+          const baseFallback = Boolean(dash && !exactExists && isBaseModel(modelName, dash.base));
+          if (baseFallback) total = DASH_BASE_SCORE_CAP;
+          const countKey = soldCountKey(condKey, modelId, calId);
 
           const candidate: OaSelection = {
             conditionKey: condKey,
@@ -779,8 +927,10 @@ function resolveSelectionWithThresholds(
             caliberId: calId,
             caliber: String(calName ?? ""),
             score: total,
+            soldCount: leafSoldCount(cal, countKey, soldCounts),
+            matchNote: baseFallback && dash ? dashBaseMatchNote(dash) : undefined,
           };
-          if (best === null || isBetterSelection(candidate, best, query)) best = candidate;
+          if (best === null || preferCatalogLeaf(candidate, best, query)) best = candidate;
         }
       }
     }
@@ -789,26 +939,91 @@ function resolveSelectionWithThresholds(
   return best;
 }
 
-/** Prefer a higher score; on a near-tie pick the shorter catalog name (base P320 over P320 Compact). */
-function isBetterSelection(candidate: OaSelection, best: OaSelection, query: GbaQuery): boolean {
+/**
+ * Prefer `candidate` over `best`.
+ * When both scores clear the confidence gate and sit within MATCH_SCORE_TIE_MARGIN,
+ * the leaf with more sold comps wins — even if its score is a few points lower.
+ * Otherwise a clearly higher score wins, then an exact model, then the shorter name.
+ */
+export function preferCatalogLeaf(candidate: OaSelection, best: OaSelection, query: GbaQuery): boolean {
+  const cN = candidate.soldCount ?? 0;
+  const bN = best.soldCount ?? 0;
+  const queryModel = query.model ?? "";
+  const candHasVariant = !hyphenVariantMissing(queryModel, candidate.model);
+  const bestHasVariant = !hyphenVariantMissing(queryModel, best.model);
+  if (candHasVariant !== bestHasVariant) return candHasVariant;
+  const bothConfident =
+    candidate.score >= MIN_MATCH_CONFIDENCE && best.score >= MIN_MATCH_CONFIDENCE;
+  if (
+    bothConfident &&
+    Math.abs(candidate.score - best.score) <= MATCH_SCORE_TIE_MARGIN &&
+    cN !== bN
+  ) {
+    return cN > bN;
+  }
   if (candidate.score > best.score + 0.5) return true;
   if (best.score > candidate.score + 0.5) return false;
   const qn = norm(cleanModelForOa(query.model) || query.model);
   const candExact = norm(candidate.model) === qn;
   const bestExact = norm(best.model) === qn;
   if (candExact !== bestExact) return candExact;
+  if (cN !== bN) return cN > bN;
   if (candidate.model.length !== best.model.length) return candidate.model.length < best.model.length;
   return candidate.score > best.score;
 }
 
+export function isLowConfidenceMatch(score: number | null | undefined): boolean {
+  return score != null && Number.isFinite(score) && score < MIN_MATCH_CONFIDENCE;
+}
+
 /** Map desk form fields onto OA catalog IDs (strict pass, then relaxed pass). */
-export function resolveSelection(deps: OaDependencies, query: GbaQuery): OaSelection | null {
+export function resolveSelection(
+  deps: OaDependencies,
+  query: GbaQuery,
+  soldCounts?: ReadonlyMap<string, number>,
+): OaSelection | null {
   const strict = { mfr: MIN_MANUFACTURER_SCORE, model: MIN_MODEL_SCORE, cal: MIN_CALIBER_SCORE };
-  const hit = resolveSelectionWithThresholds(deps, query, strict);
+  const hit = resolveSelectionWithThresholds(deps, query, strict, soldCounts);
   if (hit && !isAmbiguousManufacturerTypo(deps, query, hit)) return hit;
-  const relaxed = resolveSelectionWithThresholds(deps, query, { mfr: 25, model: 35, cal: 30 });
+  const relaxed = resolveSelectionWithThresholds(deps, query, { mfr: 25, model: 35, cal: 30 }, soldCounts);
   if (relaxed && !isAmbiguousManufacturerTypo(deps, query, relaxed)) return relaxed;
   return null;
+}
+
+/** Score every attempt and keep the leaf preferCatalogLeaf ranks first. */
+export function resolveBestAttempt(
+  deps: OaDependencies,
+  attempts: GbaQuery[],
+  soldCounts?: ReadonlyMap<string, number>,
+): OaSelection | null {
+  const origin = attempts[0];
+  const dash = origin ? parseDashVariant(origin.model) : null;
+  const hits: OaSelection[] = [];
+  for (const attempt of attempts) {
+    const hit = resolveSelection(deps, attempt, soldCounts);
+    if (hit) hits.push(hit);
+  }
+  const pool = dash ? constrainDashHits(hits, dash) : hits;
+  let best: OaSelection | null = null;
+  const rankQuery = origin ?? attempts[0];
+  if (!rankQuery) return null;
+  for (const hit of pool) {
+    if (best == null || preferCatalogLeaf(hit, best, rankQuery)) best = hit;
+  }
+  return best;
+}
+
+/** Drop suffix-only hits. Keep an exact variant when one was found; otherwise cap the base. */
+function constrainDashHits(hits: OaSelection[], dash: DashVariant): OaSelection[] {
+  const exact = hits.filter((hit) => isExactDashVariant(hit.model, dash.variant));
+  if (exact.length > 0) return exact;
+  return hits
+    .filter((hit) => isBaseModel(hit.model, dash.base))
+    .map((hit) => ({
+      ...hit,
+      score: Math.min(hit.score, DASH_BASE_SCORE_CAP),
+      matchNote: hit.matchNote ?? dashBaseMatchNote(dash),
+    }));
 }
 
 /**
@@ -949,14 +1164,22 @@ const MANUFACTURER_CANONICAL: Record<string, string> = {
 
 /** Alternate desk queries when the first pass does not match the OA catalog (e.g. Savage → Savage Arms). */
 export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
-  const attempts: GbaQuery[] = [query];
+  const attempts: GbaQuery[] = [];
   const seen = new Set<string>();
+  const originalCaliber = (query.caliber ?? "").trim();
+  const originalCondition = (query.condition ?? "any").toLowerCase();
   const push = (q: GbaQuery) => {
+    // Never silently drop a caliber the desk already has.
+    if (originalCaliber && !(q.caliber ?? "").trim()) return;
+    // Never fall back from Used solds onto New / any.
+    const nextCond = (q.condition ?? "any").toLowerCase();
+    if (originalCondition === "used" && nextCond !== "used" && nextCond !== "lnib") return;
     const key = JSON.stringify(q);
     if (seen.has(key)) return;
     seen.add(key);
     attempts.push(q);
   };
+  push(query);
 
   if (query.condition !== "any") push({ ...query, condition: "any" });
 
@@ -1088,6 +1311,22 @@ export function resolveQueryAttempts(query: GbaQuery): GbaQuery[] {
 
   const combo = `${mfr} ${cleanModelForOa(query.model)}`.trim();
   if (combo.length > query.model.length) push({ ...query, model: combo });
+
+  for (const maker of oaMakersForIdentity(mfr, model)) {
+    if (maker.toLowerCase() === mfr.toLowerCase()) continue;
+    push({ ...query, manufacturer: maker });
+  }
+  const alias = oaModelAliasFor(mfr, model);
+  if (alias && alias.model.toLowerCase() !== model.toLowerCase()) {
+    const caliber = (query.caliber ?? "").trim() || alias.caliber || undefined;
+    const rewritten: GbaQuery = {
+      ...query,
+      manufacturer: alias.manufacturer,
+      model: alias.model,
+      caliber,
+    };
+    push(rewritten);
+  }
 
   return attempts;
 }

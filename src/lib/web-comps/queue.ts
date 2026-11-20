@@ -5,8 +5,25 @@
 
 import "server-only";
 
+import { db } from "@/lib/db";
+
 import { webCanonicalKey } from "./aggregate";
 import { enrichIdentity, loadWebPriceStats, statsAreFreshHigh } from "./ingest";
+import {
+  isFinalWebCompsNote,
+  QUEUE_MAX_AGE_SEC,
+  terminalStatusForEnrich,
+} from "./queue-lifecycle";
+import { webCompsBudgetLabel } from "./queue-policy";
+import {
+  cleanupResumableItems,
+  loadProcessedToday,
+  loadResumableItems,
+  saveProcessedToday,
+  saveQueueItem,
+  settleResumeCap,
+  type StoredQueueItem,
+} from "./queue-store";
 import type { WebEnrichKeyStatus, WebEnrichPhase, WebIdentity } from "./types";
 
 type QueueItem = { identity: WebIdentity; key: string };
@@ -60,6 +77,34 @@ function rememberFinished(key: string, confidence: string, count: number, ok: bo
   }
 }
 
+async function persistProcessed(): Promise<void> {
+  try {
+    await saveProcessedToday(db.$client, dayStamp, processedToday);
+  } catch {
+    // The in-memory counter still enforces the cap for this process.
+  }
+}
+
+async function persistTerminal(
+  item: QueueItem,
+  status: string,
+  error: string | null,
+): Promise<void> {
+  const finished = status !== "queued" && status !== "running";
+  try {
+    await saveQueueItem(db.$client, {
+      key: item.key,
+      identity: item.identity,
+      status,
+      detail: error,
+      error,
+      finishedAtSec: finished ? Math.floor(Date.now() / 1000) : null,
+    });
+  } catch {
+    // A missing table must not crash the drip. The next boot cleanup covers leftovers.
+  }
+}
+
 async function worker() {
   if (running) return;
   running = true;
@@ -67,11 +112,12 @@ async function worker() {
     while (queue.length > 0) {
       rollDay();
       if (processedToday >= maxPerDay()) {
-        lastError = `Daily web-comps budget exhausted (${maxPerDay()}/day).`;
+        lastError = webCompsBudgetLabel(maxPerDay());
         while (queue.length) {
           const item = queue.shift()!;
           queuedKeys.delete(item.key);
-          rememberFinished(item.key, "low", 0, false);
+          rememberFinished(item.key, "budget", 0, false);
+          await persistTerminal(item, "budget", lastError);
         }
         break;
       }
@@ -79,6 +125,7 @@ async function worker() {
       const item = queue.shift()!;
       queuedKeys.delete(item.key);
       activeKey = item.key;
+      await persistTerminal(item, "running", null).catch(() => undefined);
 
       try {
         if (!(await statsAreFreshHigh(item.key))) {
@@ -86,19 +133,24 @@ async function worker() {
           if (!result.ok) lastError = result.error ?? "enrich failed";
           else lastError = null;
           processedToday += 1;
-          rememberFinished(
-            item.key,
-            result.stats?.confidence ?? "low",
-            result.stats?.count ?? 0,
-            result.ok,
-          );
+          await persistProcessed();
+          const terminal = terminalStatusForEnrich({
+            ok: result.ok,
+            error: result.error,
+            confidence: result.stats?.confidence,
+            count: result.stats?.count,
+          });
+          rememberFinished(item.key, terminal.status, result.stats?.count ?? 0, result.ok);
+          await persistTerminal(item, terminal.status, terminal.error);
         } else {
           const stats = await loadWebPriceStats(item.key);
           rememberFinished(item.key, stats?.confidence ?? "high", stats?.count ?? 0, true);
+          await persistTerminal(item, "done", null);
         }
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
-        rememberFinished(item.key, "low", 0, false);
+        rememberFinished(item.key, "failed", 0, false);
+        await persistTerminal(item, "failed", lastError.slice(0, 300));
       } finally {
         activeKey = null;
       }
@@ -120,6 +172,8 @@ export async function enqueueWebEnrich(identity: WebIdentity): Promise<{
   rollDay();
 
   if (processedToday >= maxPerDay()) {
+    rememberFinished(key, "budget", 0, false);
+    lastError = webCompsBudgetLabel(maxPerDay());
     return { queued: false, canonicalKey: key, reason: "daily_budget" };
   }
   if (await statsAreFreshHigh(key)) {
@@ -131,8 +185,81 @@ export async function enqueueWebEnrich(identity: WebIdentity): Promise<{
 
   queuedKeys.add(key);
   queue.push({ identity, key });
+  void saveQueueItem(db.$client, { key, identity, status: "queued", detail: null, finishedAtSec: null }).catch(
+    () => undefined,
+  );
   void worker();
   return { queued: true, canonicalKey: key, reason: "enqueued" };
+}
+
+async function valuationAlreadyFinished(item: StoredQueueItem): Promise<boolean> {
+  try {
+    const stats = await db.$client.execute({
+      sql: "SELECT canonical_key FROM web_price_stats WHERE canonical_key = ? LIMIT 1",
+      args: [item.key],
+    });
+    if (stats.rows.length > 0) return true;
+  } catch {
+    // Stats table is created on first enrich. A missing table is not a finished lookup.
+  }
+  try {
+    const vals = await db.$client.execute({
+      sql: `SELECT source_status FROM valuations
+            WHERE lower(manufacturer) = lower(?) AND lower(model) = lower(?)
+            ORDER BY created_at DESC LIMIT 8`,
+      args: [item.identity.manufacturer, item.identity.model],
+    });
+    for (const row of vals.rows) {
+      const raw = row.source_status;
+      let web = "";
+      try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        web = String((parsed as { web?: unknown } | null)?.web ?? "");
+      } catch {
+        web = String(raw ?? "");
+      }
+      if (isFinalWebCompsNote(web)) return true;
+    }
+  } catch {
+    // No valuations yet.
+  }
+  return false;
+}
+
+let resumeTask: Promise<void> | null = null;
+
+/** Load unfinished rows once per process. Called from instrumentation on boot. */
+export function resumeWebCompsQueue(): Promise<void> {
+  if (resumeTask) return resumeTask;
+  resumeTask = resumeFromStore().catch((err) => {
+    resumeTask = null;
+    throw err;
+  });
+  return resumeTask;
+}
+
+async function resumeFromStore(): Promise<void> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  await cleanupResumableItems(db.$client, {
+    nowSec,
+    maxAgeSec: QUEUE_MAX_AGE_SEC,
+    hasFinalWebResult: valuationAlreadyFinished,
+  });
+  rollDay();
+  processedToday = await loadProcessedToday(db.$client, dayStamp);
+  const pending = await loadResumableItems(db.$client);
+  const fresh = pending.filter((row) => !queuedKeys.has(row.key) && row.key !== activeKey);
+  const label = webCompsBudgetLabel(maxPerDay());
+  const resume = await settleResumeCap(db.$client, fresh, processedToday, maxPerDay(), label, nowSec);
+  if (fresh.length > resume.length) lastError = label;
+  for (const row of fresh) {
+    if (!resume.some((kept) => kept.key === row.key)) rememberFinished(row.key, "budget", 0, false);
+  }
+  for (const row of resume) {
+    queuedKeys.add(row.key);
+    queue.push({ identity: row.identity, key: row.key });
+  }
+  if (queue.length > 0 && !running) void worker();
 }
 
 export function webCompsQueueStatus() {

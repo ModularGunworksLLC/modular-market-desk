@@ -23,15 +23,79 @@ type LotBidMeta = {
   highBid: number | null;
 };
 
-/** Pull per-lot required_bid / bid_increment_amount from embedded HiBid Apollo JSON. */
+/** Object that contains `index`, bounded by braces and not a 3500-char window. */
+export function jsonObjectAround(html: string, index: number): string {
+  let start = -1;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = index; i >= 0; i--) {
+    const ch = html[i]!;
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (ch === "\\") {
+        esc = true;
+        continue;
+      }
+      if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === "}") depth += 1;
+    else if (ch === "{") {
+      if (depth === 0) {
+        start = i;
+        break;
+      }
+      depth -= 1;
+    }
+  }
+  if (start < 0) return html.slice(index, Math.min(html.length, index + 500));
+  depth = 0;
+  inStr = false;
+  esc = false;
+  for (let i = start; i < html.length; i++) {
+    const ch = html[i]!;
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (ch === "\\") {
+        esc = true;
+        continue;
+      }
+      if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return html.slice(start, i + 1);
+    }
+  }
+  return html.slice(start);
+}
+
+/** Pull per-lot required_bid / high_bid from that lot's own JSON object. */
 export function extractLotBidMetaFromHtml(html: string): Map<string, LotBidMeta> {
   const map = new Map<string, LotBidMeta>();
-  const re = /"lot_number"\s*:\s*"?(\d+)"?/g;
+  const re = /"(?:lot_number|lotNumber)"\s*:\s*"([^"]+)"|"(?:lot_number|lotNumber)"\s*:\s*([A-Za-z0-9]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
-    const lot = m[1];
+    const lot = (m[1] || m[2] || "").trim();
     if (!lot) continue;
-    const slice = html.slice(m.index, m.index + 3500);
+    const slice = jsonObjectAround(html, m.index);
     const reqM = slice.match(/"required_bid"\s*:\s*([\d.]+)/);
     const incM = slice.match(/"bid_increment_amount"\s*:\s*([\d.]+)/);
     const highM =
@@ -90,7 +154,7 @@ function extractHibidCardBid(chunk: string): number | null {
 export function extractHibidWhiteLabelLots(html: string, baseUrl: string): AuctionLot[] {
   const bidMeta = extractLotBidMetaFromHtml(html);
   const lots: AuctionLot[] = [];
-  const re = /data-lotnumber="(\d+)"/gi;
+  const re = /data-lotnumber="([^"]+)"/gi;
   let block: RegExpExecArray | null;
   while ((block = re.exec(html)) !== null) {
     const lot = block[1];
@@ -150,7 +214,7 @@ export function extractHibidWhiteLabelLots(html: string, baseUrl: string): Aucti
  */
 export function extractHibidMarkdownLots(markdown: string, baseUrl: string): AuctionLot[] {
   const lots: AuctionLot[] = [];
-  const re = /^Lot\s+(\d+):\s*(.+)$/gm;
+  const re = /^Lot\s+([A-Za-z0-9]+):\s*(.+)$/gm;
   const matches = [...markdown.matchAll(re)];
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i]!;

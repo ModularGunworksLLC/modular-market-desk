@@ -4,6 +4,10 @@ export interface AuctionLot {
   lot: string;
   title: string;
   currentBid: number | null;
+  /** Opening ask when nobody has bid. Not a live hammer. */
+  openingAsk?: number | null;
+  /** "ask" means currentBid is empty and openingAsk is the labeled ask. */
+  bidKind?: "bid" | "ask";
   /** Next legal hammer when the listing exposes it. */
   requiredBid: number | null;
   /** Bid increment at the current price level when known. */

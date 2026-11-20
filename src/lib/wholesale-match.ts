@@ -216,22 +216,34 @@ export interface WholesalePriceMatch {
 export function filterTextMatchesByPrice<T extends WholesalePriceMatch>(
   matches: T[],
   yourCost: number,
-): { matches: T[]; warning: string | null } {
-  if (yourCost <= 0 || matches.length === 0) return { matches, warning: null };
+  opts?: { auctionMode?: boolean },
+): { matches: T[]; warning: string | null; aboveDealerCost: boolean } {
+  if (yourCost <= 0 || matches.length === 0) {
+    return { matches, warning: null, aboveDealerCost: false };
+  }
   const lo = yourCost * 0.85;
   const hi = yourCost * 1.15;
-  const inBand = matches.filter((m) => m.dealerPrice >= lo && m.dealerPrice <= hi);
-  if (inBand.length > 0) return { matches: inBand, warning: null };
-
   const cheapest = Math.min(...matches.map((m) => m.dealerPrice));
-  if (cheapest < lo) {
+  const farBelow = cheapest < lo;
+
+  // Auction lots: a distributor that is much cheaper than the bid is still
+  // useful. Keep it and let the sheet badge "Above Dealer Cost".
+  if (opts?.auctionMode) {
+    return { matches, warning: null, aboveDealerCost: farBelow };
+  }
+
+  const inBand = matches.filter((m) => m.dealerPrice >= lo && m.dealerPrice <= hi);
+  if (inBand.length > 0) return { matches: inBand, warning: null, aboveDealerCost: false };
+
+  if (farBelow) {
     return {
       matches: [],
       warning:
         "Catalog matches are much cheaper than your price — likely a different model. Paste the UPC for an exact match.",
+      aboveDealerCost: false,
     };
   }
-  return { matches, warning: null };
+  return { matches, warning: null, aboveDealerCost: false };
 }
 
 export function displayProductLabel(row: WholesaleCatalogRow): string {

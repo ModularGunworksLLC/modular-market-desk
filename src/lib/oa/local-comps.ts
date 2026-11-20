@@ -22,6 +22,9 @@ export type LocalMarketBundle = {
   compMeta: CompFilterMeta;
   selection: OaSelection;
   source: string;
+  /** Set when a Used query found only New comps. Those prices are not returned. */
+  insufficientUsed?: boolean;
+  syncedAt?: Date | null;
 };
 
 function bucketToParam(condition: "NEW" | "USED"): "New" | "Used" {
@@ -55,14 +58,49 @@ export async function loadLocalMarket(args: {
     .limit(1);
 
   let stat = statsRows[0];
-  if (!stat) {
-    // Fall back to any condition for this model/caliber
-    const any = await db
+  if (!stat && args.condition === "Used") {
+    const other = await db
       .select()
       .from(oaMarketStats)
       .where(and(eq(oaMarketStats.modelId, args.modelId), eq(oaMarketStats.caliberId, args.caliberId)))
       .limit(1);
-    stat = any[0];
+    if (other[0] && other[0].condition !== "USED") {
+      return {
+        sold: emptyStats(),
+        asking: emptyStats(),
+        soldRows: [],
+        askingRows: [],
+        compMeta: {
+          soldRawCount: 0,
+          soldDecisionCount: 0,
+          soldOutliersRemoved: 0,
+          soldNonFirearmRemoved: 0,
+          askingRawCount: 0,
+          askingDecisionCount: 0,
+          askingIncompleteRemoved: 0,
+          identityRemovedSold: 0,
+          identityRemovedAsking: 0,
+          matchTier: "thin",
+          enrichNotes: ["Insufficient Used data — New sold comps were not used"],
+          decisionNote: "Insufficient Used data",
+        },
+        selection: {
+          conditionKey: "USED",
+          conditionParam: "Used",
+          manufacturerId: other[0].manufacturerId,
+          manufacturer: args.manufacturer || other[0].manufacturer,
+          modelId: args.modelId,
+          model: args.model || other[0].model,
+          caliberId: args.caliberId,
+          caliber: args.caliber || other[0].caliber,
+          score: 0,
+          soldCount: 0,
+        },
+        source: "Insufficient Used data — New sold comps were not used",
+        insufficientUsed: true,
+        syncedAt: other[0].syncedAt ?? null,
+      };
+    }
   }
   if (!stat) return null;
 
@@ -192,6 +230,8 @@ export async function loadLocalMarket(args: {
     },
     selection,
     source: `local cache: ${manufacturer} ${model} ${caliber} (${stat.condition}) — ${sold.count} sold, ${asking.count} asking`,
+    syncedAt: stat.syncedAt ?? null,
+    insufficientUsed: false,
   };
 }
 

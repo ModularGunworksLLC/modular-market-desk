@@ -26,12 +26,13 @@ import { db } from "@/lib/db";
 import { valuations } from "@/lib/db/schema";
 import { buildDealInsights, type DealInsights } from "@/lib/deal-insights";
 import { GbaApiClient, GbaApiError, type AskingCompRow, type SoldCompRow } from "@/lib/gba/client";
-import { inferCaliberFromText, type OaNearMissSuggestion, type OaSelection } from "@/lib/gba/scorer";
-import { loadLocalMarket } from "@/lib/oa/local-comps";
+import { inferCaliberFromText, isLowConfidenceMatch, type OaNearMissSuggestion, type OaSelection } from "@/lib/gba/scorer";
+import { loadLocalMarket, type LocalMarketBundle } from "@/lib/oa/local-comps";
+import { formatOaMatchLabel, isOaCompStale, oaCompAgeDays, oaStaleDaysThreshold } from "@/lib/oa/health";
 import { loadDepsAndResolve, loadDepsAndSuggest } from "@/lib/oa/resolve-local";
 import { loadSoldWindowStats, pickFreshSoldStats } from "@/lib/oa/sold-windows";
 import type { EvaluateRequest } from "@/lib/validation";
-import { crossReferenceWholesale, type WholesaleGrid } from "@/lib/wholesale";
+import { crossReferenceWholesale, emptyWholesaleGrid, type WholesaleGrid } from "@/lib/wholesale";
 import {
   assessAskSoldDivergence,
   compareOaToWeb,
@@ -39,6 +40,7 @@ import {
 } from "@/lib/web-comps/aggregate";
 import { loadWebPriceStats } from "@/lib/web-comps/ingest";
 import { enqueueWebEnrich } from "@/lib/web-comps/queue";
+import { NO_OA_COMPS_LABEL, webEnrichOutcome } from "@/lib/web-comps/queue-policy";
 import type { WebCompsSummary } from "@/lib/web-comps/types";
 import { assessMatchSuspicion, IDENTITY_RATIO_NOGO } from "@/lib/match-suspicion";
 import { classifyLotTitle, lotKindLabel } from "@/lib/auctions/lot-kind";
@@ -76,6 +78,40 @@ export class EvaluationError extends Error {
   ) {
     super(message);
     this.name = "EvaluationError";
+  }
+}
+
+function labelLocal(local: LocalMarketBundle, score: number | null, note?: string | null): string {
+  const age = oaCompAgeDays(local.syncedAt);
+  const label = formatOaMatchLabel({
+    manufacturer: local.selection.manufacturer,
+    model: local.selection.model,
+    caliber: local.selection.caliber,
+    condition: local.selection.conditionParam,
+    soldCount: local.insufficientUsed ? 0 : local.sold.count,
+    score,
+    ageDays: age,
+    stale: isOaCompStale(age, oaStaleDaysThreshold()),
+    lowConfidence: isLowConfidenceMatch(score),
+    insufficientUsed: local.insufficientUsed === true,
+  });
+  return note ? `${label} · ${note}` : label;
+}
+
+async function safeWholesale(params: {
+  upc?: string;
+  manufacturer: string;
+  model: string;
+  caliber?: string;
+  category?: string;
+  targetAcquisitionCost: number;
+  auctionMode: boolean;
+}): Promise<WholesaleGrid> {
+  try {
+    return await crossReferenceWholesale(params);
+  } catch {
+    // A missing or broken wholesale lookup must not fail the lot or force NO-GO.
+    return emptyWholesaleGrid();
   }
 }
 
@@ -183,13 +219,14 @@ export async function runEvaluation(
       divergence: null,
       enrichPhase: "skipped",
     };
-    const wholesale = await crossReferenceWholesale({
+    const wholesale = await safeWholesale({
       upc: enriched.upc,
       manufacturer: enriched.manufacturer,
       model: enriched.model,
       caliber: enriched.caliber,
       category: body.category,
       targetAcquisitionCost: body.targetAcquisitionCost,
+      auctionMode: deskMode.workflow !== "vendor",
     });
     sourceStatus.wholesale = `${wholesale.firearmMatches.length} firearms (${wholesale.matchMode})`;
     const result = evaluateDeal(input, summarize([]), {
@@ -240,14 +277,17 @@ export async function runEvaluation(
       model: enriched.model,
       caliber: enriched.caliber,
     });
-    if (local && local.sold.count > 0) {
+    if (local?.insufficientUsed) {
+      catalogMatch = local.selection;
+      sourceStatus.gba = labelLocal(local, null);
+    } else if (local && local.sold.count > 0) {
       sold = local.sold;
       asking = local.asking;
       soldListings = local.soldRows;
       askingListings = local.askingRows;
       compMeta = local.compMeta;
       catalogMatch = local.selection;
-      sourceStatus.gba = local.source;
+      sourceStatus.gba = labelLocal(local, local.selection.score);
     } else if (token) {
       try {
         const market = await new GbaApiClient(token).market({
@@ -271,7 +311,7 @@ export async function runEvaluation(
           askingListings = local.askingRows;
           compMeta = local.compMeta;
           catalogMatch = local.selection;
-          sourceStatus.gba = `${local.source} (live OA failed)`;
+          sourceStatus.gba = `${labelLocal(local, local.selection.score)} (live OA failed)`;
         } else {
           const status = err instanceof GbaApiError ? (err.status ?? 502) : 502;
           throw new EvaluationError((err as Error).message, status);
@@ -284,7 +324,7 @@ export async function runEvaluation(
       askingListings = local.askingRows;
       compMeta = local.compMeta;
       catalogMatch = local.selection;
-      sourceStatus.gba = local.source;
+      sourceStatus.gba = labelLocal(local, local.selection.score);
     } else {
       throw new EvaluationError(
         "No local comps for that Make/Model/Caliber and no Outdoor Analytics token. Sync OA on Import, or paste a token.",
@@ -316,15 +356,19 @@ export async function runEvaluation(
             model: hit.model,
             caliber: hit.caliber,
           });
-          if (local && local.sold.count > 0) {
+          if (local?.insufficientUsed) {
+            catalogMatch = { ...hit, soldCount: hit.soldCount ?? 0 };
+            sourceStatus.gba = labelLocal(local, hit.score, hit.matchNote);
+            resolved = true;
+          } else if (local && local.sold.count > 0) {
             sold = local.sold;
             asking = local.asking;
-            catalogMatch = hit;
+            catalogMatch = { ...hit, soldCount: hit.soldCount ?? local.sold.count };
             soldListings = local.soldRows;
             askingListings = local.askingRows;
             compMeta = local.compMeta;
             resolved = true;
-            sourceStatus.gba = local.source;
+            sourceStatus.gba = labelLocal(local, hit.score, hit.matchNote);
           }
         }
       } catch {
@@ -502,22 +546,21 @@ export async function runEvaluation(
   } else {
     // Asks never become solds — queue enrich / show street-only advisory.
     const enq = await enqueueWebEnrich(webIdentity);
-    let enrichPhase: WebCompsSummary["enrichPhase"] = "skipped";
-    if (enq.queued || enq.reason === "already_queued") enrichPhase = "queued";
-    else if (enq.reason === "already_fresh_high") enrichPhase = "ready";
-    else if (webComps.count >= 3) enrichPhase = "weak";
-    else enrichPhase = "skipped";
-
+    const outcome = webEnrichOutcome({
+      soldCount: 0,
+      reason: enq.reason,
+      confidence: webComps.confidence,
+      askCount: webComps.count,
+      maxPerDay: Number(process.env.WEB_COMPS_MAX_PER_DAY ?? 50),
+    });
     webComps.source = "insufficient";
-    webComps.enrichPhase = enrichPhase;
+    webComps.enrichPhase = outcome.phase;
     webComps.divergence = "thin";
-    webComps.note =
-      webComps.count > 0
-        ? `Street asks only (n=${webComps.count}) — not solds; no OA Max Bid`
-        : enq.queued
-          ? "No OA solds — queued street-ask enrich"
-          : `No OA solds — ${enq.reason.replace(/_/g, " ")}`;
-    sourceStatus.web = webComps.note;
+    webComps.note = outcome.note;
+    sourceStatus.web = outcome.note;
+    if (!sourceStatus.gba || sourceStatus.gba === "no comps") {
+      sourceStatus.gba = NO_OA_COMPS_LABEL;
+    }
   }
 
   // Suspicious OA identity: lot bid/cost vs OA median, and OA↔web disagreement.
@@ -547,18 +590,20 @@ export async function runEvaluation(
   }
 
   // --- Avenue 2: wholesale cross-reference ---
-  const wholesale = await crossReferenceWholesale({
+  const wholesale = await safeWholesale({
     upc: enriched.upc,
     manufacturer: enriched.manufacturer,
     model: enriched.model,
     caliber: enriched.caliber,
     category: body.category,
     targetAcquisitionCost: body.targetAcquisitionCost,
+    auctionMode: deskMode.workflow !== "vendor",
   });
   const floor = wholesale.cheapestInStockFirearm;
   sourceStatus.wholesale = `${wholesale.firearmMatches.length} firearms (${wholesale.matchMode})${
     floor != null ? ` · new floor $${floor.toFixed(2)}` : ""
-  }`;
+  }${wholesale.aboveDealerCost ? " · Above Dealer Cost" : ""}`;
+  if (wholesale.aboveDealerCost) matchWarnings.push("Above Dealer Cost");
   if (wholesale.warning) sourceStatus.wholesaleWarning = wholesale.warning;
 
   const cheapestInStock = wholesale.firearmMatches

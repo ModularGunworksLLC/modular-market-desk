@@ -19,6 +19,7 @@ import { round2 } from "@/lib/arbitrage/fees";
 import { db } from "@/lib/db";
 import { catalogItems, type CsvColumnMap, type NewCatalogItem } from "@/lib/db/schema";
 
+import { resolveDealerCost } from "./dealer-cost";
 import { detectDelimiter } from "./delimiter";
 
 const BATCH_SIZE = 500;
@@ -102,12 +103,14 @@ function rowToItem(
   // Prefer explicit manufacturer; never invent from the first word of a description.
   const manufacturer = (cell("manufacturer") || "").trim() || "Unknown";
   const model = (cell("model") || "").trim() || description;
-  const dealerPrice =
-    parseMoney(cell("dealerPrice")) ??
-    parseMoney(cell("salePrice")) ??
-    parseMoney(cell("mapPrice")) ??
-    parseMoney(cell("msrp"));
-  if (dealerPrice == null) return null; // no usable price -> skip
+  // Dealer cost is the dealer column only. A blank dealer price must not
+  // be filled from MAP or MSRP (those are retail ceilings, not cost).
+  const dealerPrice = resolveDealerCost({
+    dealerPrice: cell("dealerPrice"),
+    mapPrice: cell("mapPrice"),
+    msrp: cell("msrp"),
+  });
+  if (dealerPrice == null) return null;
   if (!model && !description) return null;
 
   let upc = cell("upc") || null;
